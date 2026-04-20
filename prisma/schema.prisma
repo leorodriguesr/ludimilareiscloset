@@ -1,0 +1,151 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum StockType {
+  UNLIMITED
+  LIMITED
+}
+
+enum UserRole {
+  ADMIN
+  CLIENT
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  phone        String
+  /** Null quando a conta é só OAuth (ex.: Google). */
+  passwordHash String?
+  /** ID estável da conta Google (sub / id do userinfo). */
+  googleId     String?  @unique
+  role         UserRole @default(CLIENT)
+  createdAt    DateTime @default(now())
+  orders       Order[]
+}
+
+/** Pedido: pode ser guest (`userId` nulo) ou vinculado a usuário logado. */
+model Order {
+  id        String      @id @default(cuid())
+  userId    String?
+  user      User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  email     String
+  status    String      @default("pending_payment")
+  total     Float
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  items     OrderItem[]
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quantity  Int
+  price     Float
+
+  @@index([orderId])
+}
+
+model Category {
+  id        String            @id @default(cuid())
+  name      String
+  slug      String            @unique
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  products  ProductCategory[]
+}
+
+model ProductCategory {
+  productId  String
+  categoryId String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([productId, categoryId])
+}
+
+model Product {
+  id            String            @id @default(cuid())
+  name          String
+  price         Float
+  costPrice     Float?
+  description   String?
+  tag           String?
+  videoUrl      String?
+  stockType     StockType         @default(UNLIMITED)
+  stockQuantity Int?
+  weightGrams   Int?
+  lengthCm      Float?
+  widthCm       Float?
+  heightCm      Float?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  images        ProductImage[]
+  pieces        ProductPiece[]
+  categories    ProductCategory[]
+  orderItems    OrderItem[]
+}
+
+model ProductImage {
+  id        String  @id @default(cuid())
+  url       String
+  order     Int     @default(0)
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model ProductPiece {
+  id        String         @id @default(cuid())
+  name      String
+  productId String
+  product   Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  colors    PieceColor[]
+  sizes     PieceSize[]
+  variants  PieceVariant[]
+}
+
+model PieceColor {
+  id       String         @id @default(cuid())
+  name     String
+  hex      String?
+  pieceId  String
+  piece    ProductPiece   @relation(fields: [pieceId], references: [id], onDelete: Cascade)
+  variants PieceVariant[]
+}
+
+model PieceSize {
+  id       String         @id @default(cuid())
+  name     String
+  pieceId  String
+  piece    ProductPiece   @relation(fields: [pieceId], references: [id], onDelete: Cascade)
+  variants PieceVariant[]
+}
+
+/** Estoque por combinação cor × tamanho dentro de uma peça (ex.: Calça P Branca = 2). */
+model PieceVariant {
+  id        String       @id @default(cuid())
+  quantity  Int          @default(0)
+  pieceId   String
+  colorId   String
+  sizeId    String
+  piece     ProductPiece @relation(fields: [pieceId], references: [id], onDelete: Cascade)
+  color     PieceColor   @relation(fields: [colorId], references: [id], onDelete: Cascade)
+  size      PieceSize    @relation(fields: [sizeId], references: [id], onDelete: Cascade)
+
+  @@unique([pieceId, colorId, sizeId])
+}
+
+model StoreSettings {
+  id             String @id @default("default")
+  bannerImageUrl String @default("")
+}

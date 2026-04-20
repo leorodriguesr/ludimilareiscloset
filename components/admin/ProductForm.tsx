@@ -1,0 +1,810 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import type { Category } from "@/lib/types";
+import { ImageUpload } from "./ImageUpload";
+
+const STOCK = { UNLIMITED: "UNLIMITED", LIMITED: "LIMITED" } as const;
+type StockTypeValue = (typeof STOCK)[keyof typeof STOCK];
+
+/** Estoque do produto = soma das quantidades da matriz cor×tamanho (quando existir). */
+function computeProductStockFromPieces(
+  namedPieces: PieceForm[]
+): { stockType: StockTypeValue; stockQuantity: number | null } {
+  let sum = 0;
+  let hasVariantMatrix = false;
+  for (const p of namedPieces) {
+    if (
+      p.colors.length > 0 &&
+      p.sizes.length > 0 &&
+      (p.variants?.length ?? 0) > 0
+    ) {
+      hasVariantMatrix = true;
+      for (const v of p.variants) {
+        sum += Math.max(
+          0,
+          Math.floor(Number.parseInt(String(v.quantity).trim(), 10) || 0)
+        );
+      }
+    }
+  }
+  if (hasVariantMatrix) {
+    return { stockType: STOCK.LIMITED, stockQuantity: sum };
+  }
+  return { stockType: STOCK.UNLIMITED, stockQuantity: null };
+}
+
+interface PieceVariantForm {
+  colorName: string;
+  sizeName: string;
+  quantity: string;
+}
+
+interface PieceForm {
+  name: string;
+  colors: { name: string; hex: string }[];
+  sizes: { name: string }[];
+  variants: PieceVariantForm[];
+}
+
+interface ProductData {
+  id?: string;
+  name: string;
+  price: number;
+  costPrice: number | null;
+  description: string;
+  tag: string;
+  videoUrl: string | null;
+  stockType: "UNLIMITED" | "LIMITED";
+  stockQuantity: number | null;
+  weightGrams: number | null;
+  lengthCm: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
+  images: { url: string }[];
+  pieces: PieceForm[];
+  categoryIds: string[];
+}
+
+function reconcileVariants(piece: PieceForm): PieceForm {
+  const prev = piece.variants;
+  if (piece.colors.length === 0 || piece.sizes.length === 0) {
+    return { ...piece, variants: [] };
+  }
+  const next: PieceVariantForm[] = [];
+  for (const c of piece.colors) {
+    for (const s of piece.sizes) {
+      const found = prev.find(
+        (v) => v.colorName === c.name && v.sizeName === s.name
+      );
+      next.push({
+        colorName: c.name,
+        sizeName: s.name,
+        quantity: found?.quantity ?? "0",
+      });
+    }
+  }
+  return { ...piece, variants: next };
+}
+
+function mapInitialPieces(
+  raw: ProductData["pieces"] | undefined
+): PieceForm[] {
+  if (!raw?.length) return [];
+  return raw.map((p) =>
+    reconcileVariants({
+      name: p.name,
+      colors: p.colors.map((c) => ({ ...c })),
+      sizes: p.sizes.map((s) => ({ ...s })),
+      variants:
+        p.variants?.map((v) => ({
+          colorName: v.colorName,
+          sizeName: v.sizeName,
+          quantity: String(v.quantity),
+        })) ?? [],
+    })
+  );
+}
+
+interface ProductFormProps {
+  initialData?: ProductData;
+  onSuccess: () => void;
+}
+
+const COMMON_SIZES = ["PP", "P", "M", "G", "GG", "XG"];
+
+const COMMON_COLORS = [
+  { name: "Preto", hex: "#000000" },
+  { name: "Branco", hex: "#FFFFFF" },
+  { name: "Vermelho", hex: "#DC2626" },
+  { name: "Azul", hex: "#2563EB" },
+  { name: "Rosa", hex: "#EC4899" },
+  { name: "Bege", hex: "#D4A574" },
+  { name: "Marrom", hex: "#78350F" },
+  { name: "Verde", hex: "#16A34A" },
+  { name: "Cinza", hex: "#6B7280" },
+  { name: "Nude", hex: "#E8C4A0" },
+];
+
+export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState({
+    name: initialData?.name ?? "",
+    price: initialData?.price?.toString() ?? "",
+    costPrice:
+      initialData?.costPrice != null ? String(initialData.costPrice) : "",
+    description: initialData?.description ?? "",
+    tag: initialData?.tag ?? "",
+    videoUrl: initialData?.videoUrl ?? "",
+    weightGrams:
+      initialData?.weightGrams != null ? String(initialData.weightGrams) : "",
+    lengthCm: initialData?.lengthCm != null ? String(initialData.lengthCm) : "",
+    widthCm: initialData?.widthCm != null ? String(initialData.widthCm) : "",
+    heightCm: initialData?.heightCm != null ? String(initialData.heightCm) : "",
+  });
+  const [categoryIds, setCategoryIds] = useState<string[]>(
+    initialData?.categoryIds ?? []
+  );
+  const [images, setImages] = useState<{ url: string }[]>(
+    initialData?.images ?? []
+  );
+  const [pieces, setPieces] = useState<PieceForm[]>(() =>
+    mapInitialPieces(initialData?.pieces)
+  );
+
+  const isEditing = !!initialData?.id;
+
+  const loadCategories = useCallback(async () => {
+    const res = await fetch("/api/categories");
+    const data = await res.json();
+    setCategories(data);
+  }, []);
+
+  useEffect(() => {
+    loadCategories();
+  }, [loadCategories]);
+
+  function toggleCategory(id: string) {
+    setCategoryIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
+
+  function addPiece() {
+    setPieces([
+      ...pieces,
+      { name: "", colors: [], sizes: [], variants: [] },
+    ]);
+  }
+
+  function removePiece(index: number) {
+    setPieces(pieces.filter((_, i) => i !== index));
+  }
+
+  function updatePiece(index: number, updates: Partial<PieceForm>) {
+    setPieces(pieces.map((p, i) => (i === index ? { ...p, ...updates } : p)));
+  }
+
+  function toggleSize(pieceIndex: number, sizeName: string) {
+    setPieces((prev) =>
+      prev.map((p, i) => {
+        if (i !== pieceIndex) return p;
+        const exists = p.sizes.some((s) => s.name === sizeName);
+        const nextSizes = exists
+          ? p.sizes.filter((s) => s.name !== sizeName)
+          : [...p.sizes, { name: sizeName }];
+        return reconcileVariants({ ...p, sizes: nextSizes });
+      })
+    );
+  }
+
+  function toggleColor(
+    pieceIndex: number,
+    colorName: string,
+    hex: string
+  ) {
+    setPieces((prev) =>
+      prev.map((p, i) => {
+        if (i !== pieceIndex) return p;
+        const exists = p.colors.some((c) => c.name === colorName);
+        const nextColors = exists
+          ? p.colors.filter((c) => c.name !== colorName)
+          : [...p.colors, { name: colorName, hex }];
+        return reconcileVariants({ ...p, colors: nextColors });
+      })
+    );
+  }
+
+  function updateVariantQty(
+    pieceIndex: number,
+    colorName: string,
+    sizeName: string,
+    quantity: string
+  ) {
+    setPieces((prev) =>
+      prev.map((p, i) => {
+        if (i !== pieceIndex) return p;
+        const variants = (p.variants ?? []).map((v) =>
+          v.colorName === colorName && v.sizeName === sizeName
+            ? { ...v, quantity }
+            : v
+        );
+        return { ...p, variants };
+      })
+    );
+  }
+
+  function addImage(url: string) {
+    setImages((prev) => [...prev, { url }]);
+  }
+
+  function removeImage(index: number) {
+    setImages((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  const [draggedImageIndex, setDraggedImageIndex] = useState<number | null>(
+    null
+  );
+  const [dragOverImageIndex, setDragOverImageIndex] = useState<number | null>(
+    null
+  );
+
+  function moveImage(fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex) return;
+    setImages((prev) => {
+      const next = [...prev];
+      const [item] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, item);
+      return next;
+    });
+  }
+
+  function emptyFormState() {
+    setForm({
+      name: "",
+      price: "",
+      costPrice: "",
+      description: "",
+      tag: "",
+      videoUrl: "",
+      weightGrams: "",
+      lengthCm: "",
+      widthCm: "",
+      heightCm: "",
+    });
+    setCategoryIds([]);
+    setImages([]);
+    setPieces([]);
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (images.length === 0) return;
+    setLoading(true);
+
+    try {
+      const url = isEditing
+        ? `/api/products/${initialData!.id}`
+        : "/api/products";
+
+      const costPriceVal = form.costPrice.trim();
+      const costParsed =
+        costPriceVal === ""
+          ? null
+          : (() => {
+              const x = parseFloat(costPriceVal.replace(",", "."));
+              return Number.isFinite(x) && x >= 0 ? x : null;
+            })();
+
+      const namedPieces = pieces.filter((p) => p.name.trim());
+      const { stockType, stockQuantity } =
+        computeProductStockFromPieces(namedPieces);
+
+      const payload = {
+        name: form.name,
+        price: parseFloat(form.price),
+        costPrice: costParsed,
+        description: form.description || null,
+        tag: form.tag || null,
+        videoUrl: form.videoUrl.trim() || null,
+        stockType,
+        stockQuantity,
+        weightGrams: form.weightGrams.trim() === "" ? null : form.weightGrams,
+        lengthCm: form.lengthCm.trim() === "" ? null : form.lengthCm,
+        widthCm: form.widthCm.trim() === "" ? null : form.widthCm,
+        heightCm: form.heightCm.trim() === "" ? null : form.heightCm,
+        images,
+        pieces: namedPieces.map((p) => ({
+            name: p.name.trim(),
+            colors: p.colors,
+            sizes: p.sizes,
+            variants: (p.variants ?? []).map((v) => ({
+              colorName: v.colorName,
+              sizeName: v.sizeName,
+              quantity: Math.max(
+                0,
+                Math.floor(
+                  Number.parseInt(String(v.quantity).trim(), 10) || 0
+                )
+              ),
+            })),
+          })),
+        categoryIds,
+      };
+
+      const res = await fetch(url, {
+        method: isEditing ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        if (!isEditing) emptyFormState();
+        onSuccess();
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label className="block text-sm font-medium text-stone-700 mb-1">
+            Nome *
+          </label>
+          <input
+            type="text"
+            required
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            className="w-full rounded-lg border border-stone-300 px-4 py-2.5 text-sm focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors"
+            placeholder="Nome do produto"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-stone-700 mb-1">
+            Preço de venda (R$) *
+          </label>
+          <input
+            type="number"
+            required
+            step="0.01"
+            min="0"
+            value={form.price}
+            onChange={(e) => setForm({ ...form, price: e.target.value })}
+            className="w-full rounded-lg border border-stone-300 px-4 py-2.5 text-sm focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors"
+            placeholder="99.90"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-stone-700 mb-1">
+          Preço de custo (R$)
+        </label>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          value={form.costPrice}
+          onChange={(e) => setForm({ ...form, costPrice: e.target.value })}
+          className="w-full max-w-xs rounded-lg border border-stone-300 px-4 py-2.5 text-sm focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors"
+          placeholder="Opcional — uso interno"
+        />
+      </div>
+
+      <div className="rounded-lg border border-stone-200 bg-stone-50 p-4 space-y-4">
+        <h3 className="text-sm font-semibold text-stone-900">
+          Peso e dimensões (envio)
+        </h3>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div>
+            <label className="block text-xs font-medium text-stone-600 mb-1">
+              Peso (g)
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={form.weightGrams}
+              onChange={(e) =>
+                setForm({ ...form, weightGrams: e.target.value })
+              }
+              className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
+              placeholder="Ex: 320"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-stone-600 mb-1">
+              Comprimento (cm)
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.1"
+              value={form.lengthCm}
+              onChange={(e) => setForm({ ...form, lengthCm: e.target.value })}
+              className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-stone-600 mb-1">
+              Largura (cm)
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.1"
+              value={form.widthCm}
+              onChange={(e) => setForm({ ...form, widthCm: e.target.value })}
+              className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-stone-600 mb-1">
+              Altura (cm)
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.1"
+              value={form.heightCm}
+              onChange={(e) => setForm({ ...form, heightCm: e.target.value })}
+              className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-stone-700 mb-1">
+          Link do vídeo (YouTube, Vimeo ou outro)
+        </label>
+        <input
+          type="url"
+          value={form.videoUrl}
+          onChange={(e) => setForm({ ...form, videoUrl: e.target.value })}
+          className="w-full rounded-lg border border-stone-300 px-4 py-2.5 text-sm focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors"
+          placeholder="https://..."
+        />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-stone-700 mb-2">
+          Categorias
+        </label>
+        {categories.length === 0 ? (
+          <p className="text-xs text-stone-500">
+            Crie categorias na aba &quot;Categorias&quot; do admin.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {categories.map((c) => (
+              <label
+                key={c.id}
+                className={`cursor-pointer rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  categoryIds.includes(c.id)
+                    ? "border-stone-900 bg-stone-900 text-white"
+                    : "border-stone-300 bg-white text-stone-600 hover:border-stone-400"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="sr-only"
+                  checked={categoryIds.includes(c.id)}
+                  onChange={() => toggleCategory(c.id)}
+                />
+                {c.name}
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-stone-700 mb-1">
+          Descrição
+        </label>
+        <textarea
+          rows={3}
+          value={form.description}
+          onChange={(e) => setForm({ ...form, description: e.target.value })}
+          className="w-full rounded-lg border border-stone-300 px-4 py-2.5 text-sm focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors resize-none"
+          placeholder="Descrição do produto (opcional)"
+        />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-stone-700 mb-1">
+          Tag
+        </label>
+        <input
+          type="text"
+          value={form.tag}
+          onChange={(e) => setForm({ ...form, tag: e.target.value })}
+          className="w-full rounded-lg border border-stone-300 px-4 py-2.5 text-sm focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors"
+          placeholder="Ex: Novo, Promoção, Destaque"
+        />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-stone-700 mb-1">
+          Imagens * ({images.length}{" "}
+          {images.length === 1 ? "foto" : "fotos"})
+        </label>
+        <p className="mb-2 text-xs text-stone-500">
+          Arraste uma foto sobre outra para mudar a ordem. A primeira continua
+          sendo a capa.
+        </p>
+        <div className="flex flex-wrap gap-3 mb-3">
+          {images.map((img, i) => (
+            <div key={img.url} className="relative">
+              <div
+                aria-label={`Foto ${i + 1}, arraste para reordenar`}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", String(i));
+                  setDraggedImageIndex(i);
+                }}
+                onDragEnd={() => {
+                  setDraggedImageIndex(null);
+                  setDragOverImageIndex(null);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  setDragOverImageIndex(i);
+                }}
+                onDragLeave={() => {
+                  setDragOverImageIndex((prev) => (prev === i ? null : prev));
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const raw = e.dataTransfer.getData("text/plain");
+                  const from = parseInt(raw, 10);
+                  if (!Number.isFinite(from)) return;
+                  moveImage(from, i);
+                  setDraggedImageIndex(null);
+                  setDragOverImageIndex(null);
+                }}
+                className={`h-24 w-24 cursor-grab overflow-hidden rounded-lg bg-stone-100 outline-none ring-stone-900/20 transition-[opacity,box-shadow] active:cursor-grabbing ${
+                  draggedImageIndex === i ? "opacity-50" : ""
+                } ${
+                  dragOverImageIndex === i && draggedImageIndex !== i
+                    ? "ring-2 ring-stone-900 ring-offset-2"
+                    : ""
+                }`}
+              >
+                <img
+                  src={img.url}
+                  alt=""
+                  draggable={false}
+                  className="pointer-events-none h-full w-full select-none object-cover"
+                />
+              </div>
+              <button
+                type="button"
+                draggable={false}
+                onClick={() => removeImage(i)}
+                className="absolute -top-2 -right-2 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] text-white hover:bg-red-600 transition-colors"
+              >
+                X
+              </button>
+              {i === 0 && (
+                <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-stone-900/80 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-white">
+                  Capa
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+        <ImageUpload
+          value=""
+          onChange={addImage}
+          folder="ludimila-reis-closet/products"
+          maxFilesPerBatch={15}
+        />
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label className="block text-sm font-medium text-stone-700">
+            Peças e Variações
+          </label>
+          <button
+            type="button"
+            onClick={addPiece}
+            className="text-xs font-medium text-stone-600 hover:text-stone-900 border border-stone-300 rounded-lg px-3 py-1.5 hover:border-stone-400 transition-colors"
+          >
+            + Adicionar peça
+          </button>
+        </div>
+        <p className="mb-3 text-xs text-stone-500">
+          Para cada peça, marque os tamanhos e as cores. Em seguida use a
+          tabela para informar quantas unidades existem de cada combinação
+          (ex.: P + Branco = 2).
+        </p>
+
+        {pieces.length === 0 && (
+          <p className="text-xs text-stone-400 py-4 text-center border border-dashed border-stone-200 rounded-lg">
+            Nenhuma peça adicionada. Clique em &quot;Adicionar peça&quot; para
+            definir tamanhos, cores e quantidades por combinação.
+          </p>
+        )}
+
+        <div className="space-y-4">
+          {pieces.map((piece, pi) => (
+            <div
+              key={pi}
+              className="rounded-lg border border-stone-200 bg-stone-50 p-4 space-y-4"
+            >
+              <div className="flex items-center gap-3">
+                <input
+                  type="text"
+                  value={piece.name}
+                  onChange={(e) => updatePiece(pi, { name: e.target.value })}
+                  className="flex-1 rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors"
+                  placeholder="Nome da peça (ex: Blusa, Calça)"
+                />
+                <button
+                  type="button"
+                  onClick={() => removePiece(pi)}
+                  className="text-xs text-red-500 hover:text-red-700 font-medium transition-colors"
+                >
+                  Remover
+                </button>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium text-stone-600 mb-2">
+                  Tamanhos
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {COMMON_SIZES.map((size) => {
+                    const active = piece.sizes.some((s) => s.name === size);
+                    return (
+                      <button
+                        key={size}
+                        type="button"
+                        onClick={() => toggleSize(pi, size)}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                          active
+                            ? "bg-stone-200 text-stone-900 border-stone-400 shadow-sm"
+                            : "bg-white text-stone-600 border-stone-300 hover:border-stone-400"
+                        }`}
+                      >
+                        {size}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium text-stone-600 mb-2">Cores</p>
+                <div className="flex flex-wrap gap-2">
+                  {COMMON_COLORS.map((color) => {
+                    const active = piece.colors.some(
+                      (c) => c.name === color.name
+                    );
+                    return (
+                      <button
+                        key={color.name}
+                        type="button"
+                        onClick={() => toggleColor(pi, color.name, color.hex)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                          active
+                            ? "bg-stone-200 text-stone-900 border-stone-400 shadow-sm"
+                            : "bg-white text-stone-600 border-stone-300 hover:border-stone-400"
+                        }`}
+                      >
+                        <span
+                          className="inline-block h-3 w-3 rounded-full border border-stone-300"
+                          style={{ backgroundColor: color.hex }}
+                        />
+                        {color.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {piece.colors.length > 0 && piece.sizes.length > 0 && (
+                <div className="overflow-x-auto rounded-lg border border-stone-200 bg-white">
+                  <p className="border-b border-stone-100 bg-stone-50 px-3 py-2 text-xs font-medium text-stone-700">
+                    Quantidade em estoque (cor × tamanho)
+                  </p>
+                  <table className="w-full min-w-[240px] border-collapse text-center text-xs">
+                    <thead>
+                      <tr>
+                        <th
+                          scope="col"
+                          className="border-b border-r border-stone-100 bg-stone-50/90 p-2 text-left font-medium text-stone-500"
+                        >
+                          Tamanho / Cor
+                        </th>
+                        {piece.colors.map((c) => (
+                          <th
+                            key={c.name}
+                            scope="col"
+                            className="border-b border-stone-100 p-2 font-medium text-stone-800"
+                          >
+                            <span className="inline-flex flex-col items-center gap-1">
+                              <span
+                                className="h-3 w-3 rounded-full border border-stone-200"
+                                style={{ backgroundColor: c.hex }}
+                              />
+                              {c.name}
+                            </span>
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {piece.sizes.map((s) => (
+                        <tr key={s.name}>
+                          <th
+                            scope="row"
+                            className="border-b border-r border-stone-100 bg-stone-50/80 p-2 text-left font-medium text-stone-800"
+                          >
+                            {s.name}
+                          </th>
+                          {piece.colors.map((c) => {
+                            const cell = piece.variants.find(
+                              (v) =>
+                                v.colorName === c.name && v.sizeName === s.name
+                            );
+                            return (
+                              <td
+                                key={`${c.name}-${s.name}`}
+                                className="border-b border-stone-50 p-1.5"
+                              >
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={1}
+                                  inputMode="numeric"
+                                  aria-label={`Quantidade ${piece.name || "peça"} ${c.name} ${s.name}`}
+                                  className="w-full max-w-[4.5rem] rounded-md border border-stone-200 px-1 py-1.5 text-center text-sm tabular-nums focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900"
+                                  value={cell?.quantity ?? "0"}
+                                  onChange={(e) =>
+                                    updateVariantQty(
+                                      pi,
+                                      c.name,
+                                      s.name,
+                                      e.target.value
+                                    )
+                                  }
+                                />
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <button
+        type="submit"
+        disabled={loading || images.length === 0}
+        className="w-full sm:w-auto rounded-lg bg-stone-900 px-8 py-2.5 text-sm font-medium text-white hover:bg-stone-800 focus:outline-none focus:ring-2 focus:ring-stone-900 focus:ring-offset-2 disabled:opacity-50 transition-colors"
+      >
+        {loading
+          ? "Salvando..."
+          : isEditing
+            ? "Atualizar Produto"
+            : "Cadastrar Produto"}
+      </button>
+    </form>
+  );
+}
