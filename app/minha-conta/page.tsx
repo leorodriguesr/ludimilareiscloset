@@ -20,7 +20,12 @@ export default async function MinhaContaPage() {
   }
 
   const orders = await prisma.order.findMany({
-    where: { userId: user.id },
+    where: {
+      OR: [
+        { userId: user.id },
+        { email: user.email, userId: null },
+      ],
+    },
     orderBy: { createdAt: "desc" },
     include: {
       items: {

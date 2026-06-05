@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { UserRole } from "@/app/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { claimGuestOrders } from "@/lib/orders/claim-guest-orders";
 
 const SALT_ROUNDS = 12;
 
@@ -38,6 +39,7 @@ export async function registerClient(input: RegisterInput) {
       role: UserRole.CLIENT,
     },
   });
+  await claimGuestOrders(user.id, user.email);
   return { ok: true as const, user };
 }
 
@@ -73,8 +75,10 @@ export async function signInOrLinkGoogleUser(input: GoogleProfileInput) {
         where: { id: existingGoogle.id },
         data: { name },
       });
+      await claimGuestOrders(user.id, user.email);
       return { ok: true as const, user };
     }
+    await claimGuestOrders(existingGoogle.id, existingGoogle.email);
     return { ok: true as const, user: existingGoogle };
   }
 
@@ -90,6 +94,7 @@ export async function signInOrLinkGoogleUser(input: GoogleProfileInput) {
         name: name || byEmail.name,
       },
     });
+    await claimGuestOrders(user.id, user.email);
     return { ok: true as const, user };
   }
 
@@ -103,6 +108,7 @@ export async function signInOrLinkGoogleUser(input: GoogleProfileInput) {
       role: UserRole.CLIENT,
     },
   });
+  await claimGuestOrders(user.id, user.email);
   return { ok: true as const, user };
 }
 
@@ -138,6 +144,7 @@ export async function authenticateUser(
       error: "Use o painel administrativo para entrar com esta conta.",
     };
   }
+  await claimGuestOrders(user.id, user.email);
   return {
     ok: true as const,
     user: {
