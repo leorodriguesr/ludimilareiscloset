@@ -67,6 +67,8 @@ export function ProductList({ products, onRefresh }: ProductListProps) {
                     id: product.id,
                     name: product.name,
                     price: product.price,
+                    installmentCount: product.installmentCount,
+                    pixPrice: product.pixPrice,
                     costPrice: product.costPrice,
                     description: product.description ?? "",
                     tag: product.tag ?? "",

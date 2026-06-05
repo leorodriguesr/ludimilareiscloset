@@ -4,24 +4,41 @@ import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import { flushSync } from "react-dom";
 import { useCart } from "@/components/cart/CartProvider";
+import {
+  buildCartPieceSelections,
+  type PieceSelectionMap,
+} from "@/lib/product-piece-selection";
+import type { ProductPiece } from "@/lib/types";
+
 type Props = {
   productId: string;
   name: string;
   price: number;
+  pixPrice?: number | null;
+  installmentCount?: number | null;
   imageUrl: string;
   quantity: number;
   maxQty: number;
   onQuantityChange: (next: number) => void;
+  pieces?: ProductPiece[];
+  selections?: PieceSelectionMap;
+  /** false quando há opções obrigatórias não preenchidas. */
+  canPurchase?: boolean;
 };
 
 export function ProductPurchaseActions({
   productId,
   name,
   price,
+  pixPrice,
+  installmentCount,
   imageUrl,
   quantity,
   maxQty,
   onQuantityChange,
+  pieces,
+  selections,
+  canPurchase = true,
 }: Props) {
   const router = useRouter();
   const { addItem } = useCart();
@@ -36,47 +53,66 @@ export function ProductPurchaseActions({
     window.setTimeout(() => setToast(null), 2800);
   }, []);
 
+  const pieceSelections =
+    pieces?.length && selections
+      ? buildCartPieceSelections(pieces, selections)
+      : undefined;
+
   const addToCart = useCallback(() => {
-    if (!available) return;
+    if (!available || !canPurchase) return;
     addItem({
       productId,
       name,
       price,
+      pixPrice: pixPrice ?? null,
+      installmentCount: installmentCount ?? null,
       image: imageUrl,
       quantity: safeQty,
+      ...(pieceSelections?.length ? { pieceSelections } : {}),
     });
     showToast("Adicionado ao carrinho");
   }, [
     available,
+    canPurchase,
     addItem,
     productId,
     name,
     price,
     imageUrl,
     safeQty,
+    pieceSelections,
+    pixPrice,
+    installmentCount,
     showToast,
   ]);
 
   const buyNow = useCallback(() => {
-    if (!available) return;
+    if (!available || !canPurchase) return;
     flushSync(() => {
       addItem({
         productId,
         name,
         price,
+        pixPrice: pixPrice ?? null,
+        installmentCount: installmentCount ?? null,
         image: imageUrl,
         quantity: safeQty,
+        ...(pieceSelections?.length ? { pieceSelections } : {}),
       });
     });
     router.push("/checkout");
   }, [
     available,
+    canPurchase,
     addItem,
     productId,
     name,
     price,
     imageUrl,
     safeQty,
+    pieceSelections,
+    pixPrice,
+    installmentCount,
     router,
   ]);
 
@@ -119,7 +155,7 @@ export function ProductPurchaseActions({
         <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap">
           <button
             type="button"
-            disabled={!available}
+            disabled={!available || !canPurchase}
             onClick={addToCart}
             className="min-w-0 flex-1 rounded-full border-2 border-stone-900 bg-white px-4 py-3 text-sm font-semibold text-stone-900 hover:bg-stone-50 disabled:pointer-events-none disabled:opacity-40 sm:min-w-[10rem] sm:px-5"
           >
@@ -127,7 +163,7 @@ export function ProductPurchaseActions({
           </button>
           <button
             type="button"
-            disabled={!available}
+            disabled={!available || !canPurchase}
             onClick={buyNow}
             className="min-w-0 flex-1 rounded-full bg-stone-900 px-4 py-3 text-sm font-semibold text-white hover:bg-stone-800 disabled:pointer-events-none disabled:opacity-40 sm:min-w-[10rem] sm:px-5"
           >
@@ -140,6 +176,11 @@ export function ProductPurchaseActions({
             Produto indisponível no momento.
           </p>
         )}
+        {/* {available && !canPurchase && pieces && pieces.length > 0 && (
+          <p className="text-sm text-amber-900 bg-amber-50/90 border border-amber-100 rounded-md px-3 py-2">
+            Escolha o tamanho e a cor de cada peça antes de adicionar à sacola.
+          </p>
+        )} */}
       </div>
 
       {toast && (

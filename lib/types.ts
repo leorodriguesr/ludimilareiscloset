@@ -50,6 +50,8 @@ export interface Product {
   id: string;
   name: string;
   price: number;
+  installmentCount: number | null;
+  pixPrice: number | null;
   costPrice: number | null;
   description: string | null;
   tag: string | null;

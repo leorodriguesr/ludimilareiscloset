@@ -51,6 +51,8 @@ interface ProductData {
   id?: string;
   name: string;
   price: number;
+  installmentCount: number | null;
+  pixPrice: number | null;
   costPrice: number | null;
   description: string;
   tag: string;
@@ -132,6 +134,12 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
   const [form, setForm] = useState({
     name: initialData?.name ?? "",
     price: initialData?.price?.toString() ?? "",
+    pixPrice:
+      initialData?.pixPrice != null ? String(initialData.pixPrice) : "",
+    installmentCount:
+      initialData?.installmentCount != null
+        ? String(initialData.installmentCount)
+        : "",
     costPrice:
       initialData?.costPrice != null ? String(initialData.costPrice) : "",
     description: initialData?.description ?? "",
@@ -264,6 +272,8 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
     setForm({
       name: "",
       price: "",
+      pixPrice: "",
+      installmentCount: "",
       costPrice: "",
       description: "",
       tag: "",
@@ -297,13 +307,38 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
               return Number.isFinite(x) && x >= 0 ? x : null;
             })();
 
+      const pixPriceVal = form.pixPrice.trim();
+      const pixParsed =
+        pixPriceVal === ""
+          ? null
+          : (() => {
+              const x = parseFloat(pixPriceVal.replace(",", "."));
+              return Number.isFinite(x) && x >= 0 ? x : null;
+            })();
+
       const namedPieces = pieces.filter((p) => p.name.trim());
       const { stockType, stockQuantity } =
         computeProductStockFromPieces(namedPieces);
 
+      const icTrim = form.installmentCount.trim();
+      let installmentPayload: number | null = null;
+      if (icTrim !== "") {
+        const n = Math.floor(Number(icTrim.replace(",", ".")));
+        if (!Number.isFinite(n) || n < 1 || n > 24) {
+          setLoading(false);
+          window.alert(
+            "Parcelas: informe um número entre 1 e 24 ou deixe em branco."
+          );
+          return;
+        }
+        installmentPayload = n;
+      }
+
       const payload = {
         name: form.name,
         price: parseFloat(form.price),
+        installmentCount: installmentPayload,
+        pixPrice: pixParsed,
         costPrice: costParsed,
         description: form.description || null,
         tag: form.tag || null,
@@ -378,6 +413,45 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
             className="w-full rounded-lg border border-stone-300 px-4 py-2.5 text-sm focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors"
             placeholder="99.90"
           />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-stone-700 mb-1">
+            Pagamento por Pix (R$)
+          </label>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            value={form.pixPrice}
+            onChange={(e) => setForm({ ...form, pixPrice: e.target.value })}
+            className="w-full rounded-lg border border-stone-300 px-4 py-2.5 text-sm focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors"
+            placeholder="Ex.: 89,90"
+          />
+          <p className="mt-1 text-xs text-stone-500">
+            Opcional. Só aparece o card “Pix” na página do produto quando este
+            valor estiver preenchido.
+          </p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-stone-700 mb-1">
+            Parcelas no cartão (sem juros)
+          </label>
+          <input
+            type="number"
+            min={1}
+            max={24}
+            step={1}
+            value={form.installmentCount}
+            onChange={(e) =>
+              setForm({ ...form, installmentCount: e.target.value })
+            }
+            className="w-full rounded-lg border border-stone-300 px-4 py-2.5 text-sm focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors"
+            placeholder="Ex.: 3 — vazio = só preço no cartão"
+          />
+          <p className="mt-1 text-xs text-stone-500">
+            Opcional. Com número, a vitrine mostra “Parcelamento” (Nx sem
+            juros). Vazio, só “Cartão” com o preço.
+          </p>
         </div>
       </div>
 

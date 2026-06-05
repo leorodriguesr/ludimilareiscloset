@@ -3,6 +3,15 @@
 import "dotenv/config";
 import { defineConfig } from "prisma/config";
 
+/**
+ * Migrations e introspecção do Prisma só funcionam contra um arquivo SQLite
+ * local — o schema engine não migra direto no Turso (libsql://). Por isso os
+ * comandos de CLI (`prisma migrate dev`, etc.) sempre usam o banco local.
+ *
+ * Para aplicar as migrations no staging/produção, use os scripts:
+ *   npm run db:deploy:staging
+ *   npm run db:deploy:production
+ */
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
@@ -10,6 +19,9 @@ export default defineConfig({
     seed: "npx tsx prisma/seed.ts",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    url:
+      process.env["LOCAL_DATABASE_URL"] ??
+      process.env["DATABASE_URL"] ??
+      "file:./dev.db",
   },
 });

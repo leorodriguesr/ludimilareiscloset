@@ -39,6 +39,14 @@ model Order {
   email     String
   status    String      @default("pending_payment")
   total     Float
+  /** Valor do frete (R$), validado no servidor na criação. */
+  shippingAmount     Float    @default(0)
+  shippingServiceName String?
+  destinationCep     String?
+  paidAt                    DateTime?
+  infinitePayTransactionNsu String?
+  infinitePayInvoiceSlug    String?
+  paymentCaptureMethod      String?
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
   items     OrderItem[]
@@ -52,6 +60,8 @@ model OrderItem {
   product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
   quantity  Int
   price     Float
+  /** JSON: [{ pieceName, size, color }] — opções escolhidas por peça. */
+  pieceSelectionsJson String?
 
   @@index([orderId])
 }
@@ -78,6 +88,8 @@ model Product {
   id            String            @id @default(cuid())
   name          String
   price         Float
+  installmentCount Int?
+  pixPrice      Float?
   costPrice     Float?
   description   String?
   tag           String?

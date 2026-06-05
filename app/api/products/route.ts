@@ -65,6 +65,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Preço inválido." }, { status: 400 });
   }
 
+  let installmentCount: number | null = null;
+  const icRaw = b.installmentCount;
+  if (icRaw !== undefined && icRaw !== null && icRaw !== "") {
+    const n = Math.floor(Number(icRaw));
+    if (!Number.isFinite(n) || n < 1 || n > 24) {
+      return NextResponse.json(
+        { error: "Parcelas deve ser um número entre 1 e 24, ou vazio." },
+        { status: 400 }
+      );
+    }
+    installmentCount = n;
+  }
+
   const costPriceRaw = b.costPrice;
   let costPrice: number | null = null;
   if (costPriceRaw != null && costPriceRaw !== "") {
@@ -73,6 +86,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Preço de custo inválido." }, { status: 400 });
     }
     costPrice = c;
+  }
+
+  const pixPriceRaw = b.pixPrice;
+  let pixPrice: number | null = null;
+  if (pixPriceRaw != null && pixPriceRaw !== "") {
+    const px = Number(pixPriceRaw);
+    if (Number.isNaN(px) || px < 0) {
+      return NextResponse.json(
+        { error: "Valor no Pix inválido." },
+        { status: 400 }
+      );
+    }
+    pixPrice = px;
   }
 
   const videoUrl =
@@ -215,6 +241,8 @@ export async function POST(request: NextRequest) {
         data: {
           name: name.trim(),
           price: priceNum,
+          installmentCount,
+          pixPrice,
           costPrice,
           description:
             typeof b.description === "string" && b.description.trim()

@@ -42,6 +42,8 @@ export async function PUT(
   const {
     name,
     price,
+    pixPrice: pixPriceRaw,
+    installmentCount: installmentCountRaw,
     costPrice,
     description,
     tag,
@@ -71,6 +73,31 @@ export async function PUT(
           const c = Number(costPrice);
           updateData.costPrice =
             Number.isFinite(c) && c >= 0 ? c : null;
+        }
+      }
+
+      if (pixPriceRaw !== undefined) {
+        if (pixPriceRaw == null || pixPriceRaw === "") {
+          updateData.pixPrice = null;
+        } else {
+          const px = Number(pixPriceRaw);
+          updateData.pixPrice =
+            Number.isFinite(px) && px >= 0 ? px : null;
+        }
+      }
+
+      if (installmentCountRaw !== undefined) {
+        if (
+          installmentCountRaw == null ||
+          installmentCountRaw === ""
+        ) {
+          updateData.installmentCount = null;
+        } else {
+          const n = Math.floor(Number(installmentCountRaw));
+          if (!Number.isFinite(n) || n < 1 || n > 24) {
+            throw new Error("INVALID_INSTALLMENTS");
+          }
+          updateData.installmentCount = n;
         }
       }
 
@@ -257,6 +284,12 @@ export async function PUT(
 
     return NextResponse.json(product);
   } catch (e) {
+    if (e instanceof Error && e.message === "INVALID_INSTALLMENTS") {
+      return NextResponse.json(
+        { error: "Parcelas deve ser entre 1 e 24, ou vazio." },
+        { status: 400 }
+      );
+    }
     if (e instanceof Error && e.message === "INVALID_CATEGORY") {
       return NextResponse.json(
         { error: "Uma ou mais categorias são inválidas." },

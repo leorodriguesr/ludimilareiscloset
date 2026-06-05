@@ -1,4 +1,9 @@
-export type { AddToCartInput, CartItem, CartState } from "@/lib/cart/types";
+export type {
+  AddToCartInput,
+  CartItem,
+  CartPieceSelection,
+  CartState,
+} from "@/lib/cart/types";
 export { CART_STORAGE_KEY } from "@/lib/cart/constants";
 export {
   emptyCart,

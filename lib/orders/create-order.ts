@@ -1,48 +1,116 @@
 import { StockType } from "@/app/generated/prisma/client";
+import { cartLineKey } from "@/lib/cart/pure";
+import type { CartPieceSelection } from "@/lib/cart/types";
 import { prisma } from "@/lib/prisma";
+import { quoteShippingForCartLines } from "@/lib/shipping/quote-cart";
+import { normalizePostalCode } from "@/lib/shipping/superfrete";
+import { CHECKOUT_SHIPPING_AMOUNT_BRL } from "@/lib/config/checkout-shipping-charge";
 
 export type CheckoutLineInput = {
   productId: string;
   quantity: number;
+  pieceSelections?: CartPieceSelection[];
 };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export type CreateOrderResult = { id: string; total: number };
+export type CreateOrderResult = {
+  id: string;
+  total: number;
+  shippingAmount: number;
+};
+
+export type OrderShippingInput = {
+  destinationCep: string;
+  optionId: string;
+};
 
 export async function createOrderFromCheckout(input: {
   email: string;
   userId: string | null;
   lines: CheckoutLineInput[];
+  shipping: OrderShippingInput;
 }): Promise<CreateOrderResult> {
   const normalizedEmail = input.email.trim().toLowerCase();
   if (!EMAIL_RE.test(normalizedEmail)) {
     throw new OrderCreateError("INVALID_EMAIL", "E-mail inválido.");
   }
 
-  const merged = new Map<string, number>();
+  const merged = new Map<
+    string,
+    {
+      productId: string;
+      quantity: number;
+      pieceSelections?: CartPieceSelection[];
+    }
+  >();
   for (const l of input.lines) {
     const id = l.productId.trim();
     const q = Math.floor(Number(l.quantity));
     if (!id || q < 1) {
       throw new OrderCreateError("INVALID_LINE", "Quantidade inválida.");
     }
-    merged.set(id, (merged.get(id) ?? 0) + q);
+    const key = cartLineKey(id, l.pieceSelections);
+    const prev = merged.get(key);
+    if (prev) {
+      merged.set(key, { ...prev, quantity: prev.quantity + q });
+    } else {
+      merged.set(key, {
+        productId: id,
+        quantity: q,
+        ...(l.pieceSelections?.length
+          ? { pieceSelections: l.pieceSelections }
+          : {}),
+      });
+    }
   }
 
-  const lines = [...merged.entries()].map(([productId, quantity]) => ({
-    productId,
-    quantity,
-  }));
+  const lines = [...merged.values()];
 
   if (lines.length === 0) {
     throw new OrderCreateError("EMPTY", "Nenhum item no pedido.");
   }
 
+  const destCep = normalizePostalCode(input.shipping.destinationCep);
+  if (!destCep) {
+    throw new OrderCreateError("INVALID_CEP", "CEP de entrega inválido.");
+  }
+
+  const cartLinesForQuote = lines.map((l) => ({
+    productId: l.productId,
+    quantity: l.quantity,
+  }));
+
+  let shippingOptions;
+  try {
+    shippingOptions = await quoteShippingForCartLines(cartLinesForQuote, destCep);
+  } catch (e) {
+    console.error("[createOrderFromCheckout] frete", e);
+    throw new OrderCreateError(
+      "SHIPPING_QUOTE",
+      "Não foi possível calcular o frete. Verifique o CEP."
+    );
+  }
+
+  const chosen = shippingOptions.find((o) => o.id === input.shipping.optionId);
+  if (!chosen) {
+    throw new OrderCreateError(
+      "SHIPPING_OPTION",
+      "Opção de frete inválida ou expirada. Calcule o frete novamente."
+    );
+  }
+
+  const shippingAmount = CHECKOUT_SHIPPING_AMOUNT_BRL;
+  const shippingLabel = `${chosen.carrierName} — ${chosen.serviceName}`;
+
   return prisma.$transaction(async (tx) => {
-    const resolved: { productId: string; quantity: number; price: number }[] =
-      [];
-    let total = 0;
+    const resolved: {
+      productId: string;
+      quantity: number;
+      price: number;
+      pieceSelections?: CartPieceSelection[];
+    }[] = [];
+    let subtotal = 0;
 
     for (const line of lines) {
       const product = await tx.product.findUnique({
@@ -76,28 +144,65 @@ export async function createOrderFromCheckout(input: {
         productId: product.id,
         quantity: line.quantity,
         price: product.price,
+        ...(line.pieceSelections?.length
+          ? { pieceSelections: line.pieceSelections }
+          : {}),
       });
-      total += product.price * line.quantity;
+      subtotal += product.price * line.quantity;
     }
 
-    const order = await tx.order.create({
+    subtotal = Math.round(subtotal * 100) / 100;
+    const total = Math.round((subtotal + shippingAmount) * 100) / 100;
+
+    const created = await tx.order.create({
       data: {
         email: normalizedEmail,
-        userId: input.userId,
+        ...(input.userId
+          ? { user: { connect: { id: input.userId } } }
+          : {}),
         status: "pending_payment",
         total,
         items: {
           create: resolved.map((r) => ({
-            productId: r.productId,
             quantity: r.quantity,
             price: r.price,
+            pieceSelectionsJson: r.pieceSelections?.length
+              ? JSON.stringify(r.pieceSelections)
+              : null,
+            product: { connect: { id: r.productId } },
           })),
         },
       },
-      select: { id: true, total: true },
+      select: { id: true },
     });
 
-    return { id: order.id, total: order.total };
+    await tx.$executeRawUnsafe(
+      `UPDATE "Order" SET "shippingAmount" = ?, "shippingServiceName" = ?, "destinationCep" = ?, "updatedAt" = datetime('now') WHERE "id" = ?`,
+      shippingAmount,
+      shippingLabel,
+      destCep,
+      created.id
+    );
+
+    const orderRows = await tx.$queryRawUnsafe<
+      { id: string; total: number; shippingAmount: number }[]
+    >(
+      `SELECT "id", "total", "shippingAmount" FROM "Order" WHERE "id" = ? LIMIT 1`,
+      created.id
+    );
+    const order = orderRows[0];
+    if (!order) {
+      throw new OrderCreateError(
+        "ORDER_PERSIST",
+        "Não foi possível confirmar o pedido após gravar o frete."
+      );
+    }
+
+    return {
+      id: order.id,
+      total: order.total,
+      shippingAmount: order.shippingAmount,
+    };
   });
 }
 

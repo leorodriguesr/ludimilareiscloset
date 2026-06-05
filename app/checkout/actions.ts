@@ -7,18 +7,39 @@ import {
   OrderCreateError,
   type CheckoutLineInput,
 } from "@/lib/orders/create-order";
+import {
+  createInfinitePayCheckoutLink,
+  infinitePayOrderRedirectUrl,
+  infinitePayWebhookUrl,
+} from "@/lib/payments/infinitepay";
+import { orderToInfinitePayItems } from "@/lib/payments/order-to-infinitepay-items";
+import { isLocalPaymentCallbackBaseUrl } from "@/lib/site-url";
 
 export type PlaceOrderState =
-  | { ok: true; orderId: string }
+  | { ok: true; orderId: string; checkoutUrl: string }
   | { ok: false; error: string };
+
+function guestDisplayName(email: string): string {
+  const local = email.split("@")[0]?.trim();
+  if (local && local.length > 0) return local.slice(0, 80);
+  return "Cliente";
+}
+
+function normalizePhone(phone: string): string | undefined {
+  const d = phone.replace(/\D/g, "");
+  if (d.length < 10) return undefined;
+  if (d.startsWith("55")) return `+${d}`;
+  return `+55${d}`;
+}
 
 export async function placeOrderAction(input: {
   /** Obrigatório para guest; logado pode omitir (usa e-mail da conta). */
   email?: string;
   lines: CheckoutLineInput[];
+  shipping: { destinationCep: string; optionId: string };
 }): Promise<PlaceOrderState> {
   const session = await getAppSession();
-  let userId: string | null = session.user?.userId ?? null;
+  const userId: string | null = session.user?.userId ?? null;
   let email = (input.email ?? "").trim().toLowerCase();
 
   if (session.user) {
@@ -40,8 +61,97 @@ export async function placeOrderAction(input: {
       email,
       userId,
       lines: input.lines,
+      shipping: input.shipping,
     });
-    return { ok: true, orderId: order.id };
+
+    const full = await prisma.order.findUnique({
+      where: { id: order.id },
+      include: {
+        items: { include: { product: { select: { name: true } } } },
+      },
+    });
+
+    if (!full) {
+      return { ok: false, error: "Pedido criado mas não encontrado." };
+    }
+
+    let items;
+    try {
+      items = orderToInfinitePayItems(full);
+    } catch (e) {
+      console.error("[placeOrderAction] itens InfinitePay", e);
+      return {
+        ok: false,
+        error: "Erro ao montar o pagamento. Entre em contato com o suporte.",
+      };
+    }
+
+    let customer: {
+      name: string;
+      email: string;
+      phone_number?: string;
+    };
+
+    if (session.user) {
+      const u = await prisma.user.findUnique({
+        where: { id: session.user.userId },
+        select: { name: true, phone: true },
+      });
+      if (u) {
+        const phone = normalizePhone(u.phone);
+        customer = {
+          name: u.name.slice(0, 120),
+          email,
+          ...(phone ? { phone_number: phone } : {}),
+        };
+      } else {
+        customer = { name: guestDisplayName(email), email };
+      }
+    } else {
+      customer = { name: guestDisplayName(email), email };
+    }
+
+    const destDigits = (full.destinationCep ?? "").replace(/\D/g, "");
+
+    if (isLocalPaymentCallbackBaseUrl()) {
+      console.warn(
+        "[placeOrderAction] retorno e webhook usam base URL local. A InfinitePay não alcança webhooks em localhost. Defina PAYMENT_CALLBACK_BASE_URL ou NEXT_PUBLIC_SITE_URL com origem pública (https), ex. domínio em produção ou túnel ngrok em dev."
+      );
+    }
+
+    try {
+      const { checkoutUrl, slug: invoiceSlug } = await createInfinitePayCheckoutLink({
+        items,
+        orderNsu: full.id,
+        redirectUrl: infinitePayOrderRedirectUrl(full.id),
+        webhookUrl: infinitePayWebhookUrl(),
+        customer,
+        ...(destDigits.length === 8
+          ? { address: { cep: destDigits } }
+          : {}),
+      });
+      if (invoiceSlug) {
+        await prisma.order.update({
+          where: { id: full.id },
+          data: { infinitePayInvoiceSlug: invoiceSlug },
+        });
+      }
+      return { ok: true, orderId: full.id, checkoutUrl };
+    } catch (e) {
+      console.error("[placeOrderAction] InfinitePay", e);
+      const msg =
+        e instanceof Error
+          ? e.message
+          : "Não foi possível iniciar o pagamento.";
+      if (msg.includes("INFINITEPAY_HANDLE")) {
+        return {
+          ok: false,
+          error:
+            "Pagamento não configurado no servidor (INFINITEPAY_HANDLE).",
+        };
+      }
+      return { ok: false, error: msg };
+    }
   } catch (e) {
     if (e instanceof OrderCreateError) {
       return { ok: false, error: e.message };

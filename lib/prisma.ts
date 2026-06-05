@@ -1,38 +1,20 @@
-import path from "node:path";
 import { PrismaClient } from "@/app/generated/prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { PrismaLibSql } from "@prisma/adapter-libsql";
+import { resolveDbConnection } from "./db/target";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
+const connection = resolveDbConnection();
+
 /**
- * SQLite com caminho relativo (file:./dev.db) depende do cwd do processo.
- * No Next.js o cwd costuma ser a raiz do projeto, mas normalizar para caminho
- * absoluto evita apontar para outro arquivo ou criar DB vazio sem tabelas.
+ * O mesmo adapter atende os três alvos: arquivo local (`file:`) e Turso
+ * (`libsql://`). O alvo é definido por `DB_TARGET` (veja lib/db/target.ts).
  */
-function resolveSqliteUrl(url: string): string {
-  if (!url.startsWith("file:")) return url;
-  const rest = url.slice("file:".length);
-  if (rest === ":memory:" || rest.includes("mode=memory")) return url;
-  const withoutLeadingDot = rest.replace(/^\.\//, "");
-  const absolute =
-    path.isAbsolute(rest) || /^[A-Za-z]:[\\/]/.test(rest)
-      ? rest
-      : path.resolve(
-          /* turbopackIgnore: true */ process.cwd(),
-          withoutLeadingDot
-        );
-  return `file:${absolute}`;
-}
-
-const databaseUrl =
-  process.env.DATABASE_URL != null
-    ? resolveSqliteUrl(process.env.DATABASE_URL)
-    : resolveSqliteUrl("file:./prisma/dev.db");
-
-const adapter = new PrismaBetterSqlite3({
-  url: databaseUrl,
+const adapter = new PrismaLibSql({
+  url: connection.url,
+  authToken: connection.authToken,
 });
 
 function createPrismaClient() {
@@ -55,4 +37,10 @@ export const prisma = globalForPrisma.prisma ?? createPrismaClient();
 
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;
+  if (connection.target !== "local") {
+    console.warn(
+      `[prisma] ATENÇÃO: ambiente local conectado ao banco "${connection.target}" (Turso). ` +
+        `Escritas afetam dados reais. Use DB_TARGET=local para voltar ao banco local.`
+    );
+  }
 }

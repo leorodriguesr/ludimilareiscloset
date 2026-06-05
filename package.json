@@ -8,10 +8,17 @@
     "start": "next start",
     "lint": "eslint",
     "postinstall": "prisma generate",
-    "db:seed": "prisma db seed"
+    "db:migrate": "prisma migrate dev",
+    "db:reset": "prisma migrate reset",
+    "db:deploy:staging": "tsx scripts/turso-migrate.ts staging",
+    "db:deploy:production": "tsx scripts/turso-migrate.ts production",
+    "db:seed": "prisma db seed",
+    "db:seed:staging": "DB_TARGET=staging prisma db seed",
+    "db:seed:production": "DB_TARGET=production prisma db seed"
   },
   "dependencies": {
-    "@prisma/adapter-better-sqlite3": "^7.7.0",
+    "@libsql/client": "^0.17.3",
+    "@prisma/adapter-libsql": "7.7.0",
     "@prisma/client": "^7.7.0",
     "bcryptjs": "^3.0.3",
     "iron-session": "^8.0.4",

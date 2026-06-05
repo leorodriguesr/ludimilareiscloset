@@ -1,14 +1,4 @@
-/** Percentual de desconto exibido para pagamento via Pix (somente vitrine). */
-export const PIX_DISCOUNT_PERCENT = 9;
-
-/** Número de parcelas exibidas na vitrine (sem juros). */
-export const SHOWCASE_INSTALLMENTS = 3;
-
-export function priceWithPixDiscount(listPrice: number): number {
-  const factor = 1 - PIX_DISCOUNT_PERCENT / 100;
-  return Math.round(listPrice * factor * 100) / 100;
-}
-
+/** Valor de cada parcela em N vezes sem juros (arredondado em centavos). */
 export function installmentValueEqualParts(
   listPrice: number,
   parts: number

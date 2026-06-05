@@ -16,6 +16,7 @@ import {
   addOrMergeItem,
   cartItemCount,
   cartSubtotal,
+  cartSubtotalPix,
   emptyCart,
   removeLine,
   setLineQuantity,
@@ -32,14 +33,17 @@ export type CartContextValue = {
   /** `false` até hidratar a partir do localStorage. */
   hydrated: boolean;
   itemCount: number;
+  /** Soma dos preços de cartão (parcelado) × quantidade. */
   subtotal: number;
+  /** Soma dos valores à vista no Pix por linha (sem Pix na linha = preço de cartão). */
+  subtotalPix: number;
   drawerOpen: boolean;
   openCart: () => void;
   closeCart: () => void;
   toggleCart: () => void;
   addItem: (input: AddToCartInput) => void;
-  setQuantity: (productId: string, quantity: number) => void;
-  removeItem: (productId: string) => void;
+  setQuantity: (lineId: string, quantity: number) => void;
+  removeItem: (lineId: string) => void;
   clear: () => void;
 };
 
@@ -92,9 +96,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
   );
 
   const setQuantity = useCallback(
-    (productId: string, quantity: number) => {
+    (lineId: string, quantity: number) => {
       setState((s) => {
-        const next = setLineQuantity(s, productId, quantity);
+        const next = setLineQuantity(s, lineId, quantity);
         persistNow(next);
         return next;
       });
@@ -103,9 +107,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
   );
 
   const removeItem = useCallback(
-    (productId: string) => {
+    (lineId: string) => {
       setState((s) => {
-        const next = removeLine(s, productId);
+        const next = removeLine(s, lineId);
         persistNow(next);
         return next;
       });
@@ -131,6 +135,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       hydrated,
       itemCount: cartItemCount(state),
       subtotal: cartSubtotal(state),
+      subtotalPix: cartSubtotalPix(state),
       drawerOpen,
       openCart,
       closeCart,
