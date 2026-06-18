@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type { Category } from "@/lib/types";
+import type { Category, Section } from "@/lib/types";
 import { ImageUpload } from "./ImageUpload";
 
 const STOCK = { UNLIMITED: "UNLIMITED", LIMITED: "LIMITED" } as const;
@@ -63,9 +63,10 @@ interface ProductData {
   lengthCm: number | null;
   widthCm: number | null;
   heightCm: number | null;
-  images: { url: string }[];
+  images: { url: string; colorName?: string | null }[];
   pieces: PieceForm[];
   categoryIds: string[];
+  sectionIds: string[];
 }
 
 function reconcileVariants(piece: PieceForm): PieceForm {
@@ -130,6 +131,7 @@ const COMMON_COLORS = [
 
 export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
   const [categories, setCategories] = useState<Category[]>([]);
+  const [sections, setSections] = useState<Section[]>([]);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
     name: initialData?.name ?? "",
@@ -154,7 +156,10 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
   const [categoryIds, setCategoryIds] = useState<string[]>(
     initialData?.categoryIds ?? []
   );
-  const [images, setImages] = useState<{ url: string }[]>(
+  const [sectionIds, setSectionIds] = useState<string[]>(
+    initialData?.sectionIds ?? []
+  );
+  const [images, setImages] = useState<{ url: string; colorName?: string | null }[]>(
     initialData?.images ?? []
   );
   const [pieces, setPieces] = useState<PieceForm[]>(() =>
@@ -169,12 +174,25 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
     setCategories(data);
   }, []);
 
+  const loadSections = useCallback(async () => {
+    const res = await fetch("/api/sections");
+    const data = await res.json();
+    setSections(data);
+  }, []);
+
   useEffect(() => {
     loadCategories();
-  }, [loadCategories]);
+    loadSections();
+  }, [loadCategories, loadSections]);
 
   function toggleCategory(id: string) {
     setCategoryIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
+
+  function toggleSection(id: string) {
+    setSectionIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
   }
@@ -244,11 +262,17 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
   }
 
   function addImage(url: string) {
-    setImages((prev) => [...prev, { url }]);
+    setImages((prev) => [...prev, { url, colorName: null }]);
   }
 
   function removeImage(index: number) {
     setImages((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function setImageColor(index: number, colorName: string | null) {
+    setImages((prev) =>
+      prev.map((img, i) => (i === index ? { ...img, colorName } : img))
+    );
   }
 
   const [draggedImageIndex, setDraggedImageIndex] = useState<number | null>(
@@ -284,6 +308,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
       heightCm: "",
     });
     setCategoryIds([]);
+    setSectionIds([]);
     setImages([]);
     setPieces([]);
   }
@@ -366,6 +391,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
             })),
           })),
         categoryIds,
+        sectionIds,
       };
 
       const res = await fetch(url, {
@@ -548,6 +574,42 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
 
       <div>
         <label className="block text-sm font-medium text-stone-700 mb-2">
+          Seções
+        </label>
+        <p className="text-xs text-stone-500 mb-2">
+          Escolha em qual seção da página inicial este produto aparecerá (ex:
+          Promoção, Lançamentos).
+        </p>
+        {sections.length === 0 ? (
+          <p className="text-xs text-stone-500">
+            Crie seções na aba &quot;Seções&quot; do admin.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {sections.map((s) => (
+              <label
+                key={s.id}
+                className={`cursor-pointer rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  sectionIds.includes(s.id)
+                    ? "border-stone-900 bg-stone-900 text-white"
+                    : "border-stone-300 bg-white text-stone-600 hover:border-stone-400"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="sr-only"
+                  checked={sectionIds.includes(s.id)}
+                  onChange={() => toggleSection(s.id)}
+                />
+                {s.name}
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-stone-700 mb-2">
           Categorias
         </label>
         {categories.length === 0 ? (
@@ -614,67 +676,91 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
           sendo a capa.
         </p>
         <div className="flex flex-wrap gap-3 mb-3">
-          {images.map((img, i) => (
-            <div key={img.url} className="relative">
-              <div
-                aria-label={`Foto ${i + 1}, arraste para reordenar`}
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.effectAllowed = "move";
-                  e.dataTransfer.setData("text/plain", String(i));
-                  setDraggedImageIndex(i);
-                }}
-                onDragEnd={() => {
-                  setDraggedImageIndex(null);
-                  setDragOverImageIndex(null);
-                }}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = "move";
-                  setDragOverImageIndex(i);
-                }}
-                onDragLeave={() => {
-                  setDragOverImageIndex((prev) => (prev === i ? null : prev));
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  const raw = e.dataTransfer.getData("text/plain");
-                  const from = parseInt(raw, 10);
-                  if (!Number.isFinite(from)) return;
-                  moveImage(from, i);
-                  setDraggedImageIndex(null);
-                  setDragOverImageIndex(null);
-                }}
-                className={`h-24 w-24 cursor-grab overflow-hidden rounded-lg bg-stone-100 outline-none ring-stone-900/20 transition-[opacity,box-shadow] active:cursor-grabbing ${
-                  draggedImageIndex === i ? "opacity-50" : ""
-                } ${
-                  dragOverImageIndex === i && draggedImageIndex !== i
-                    ? "ring-2 ring-stone-900 ring-offset-2"
-                    : ""
-                }`}
-              >
-                <img
-                  src={img.url}
-                  alt=""
-                  draggable={false}
-                  className="pointer-events-none h-full w-full select-none object-cover"
-                />
+          {images.map((img, i) => {
+            const allColors = pieces.flatMap((p) => p.colors);
+            const uniqueColors = allColors.filter(
+              (c, idx) => allColors.findIndex((x) => x.name === c.name) === idx
+            );
+            return (
+              <div key={img.url} className="flex flex-col gap-1">
+                <div className="relative">
+                  <div
+                    aria-label={`Foto ${i + 1}, arraste para reordenar`}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData("text/plain", String(i));
+                      setDraggedImageIndex(i);
+                    }}
+                    onDragEnd={() => {
+                      setDraggedImageIndex(null);
+                      setDragOverImageIndex(null);
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      setDragOverImageIndex(i);
+                    }}
+                    onDragLeave={() => {
+                      setDragOverImageIndex((prev) => (prev === i ? null : prev));
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const raw = e.dataTransfer.getData("text/plain");
+                      const from = parseInt(raw, 10);
+                      if (!Number.isFinite(from)) return;
+                      moveImage(from, i);
+                      setDraggedImageIndex(null);
+                      setDragOverImageIndex(null);
+                    }}
+                    className={`h-24 w-24 cursor-grab overflow-hidden rounded-lg bg-stone-100 outline-none ring-stone-900/20 transition-[opacity,box-shadow] active:cursor-grabbing ${
+                      draggedImageIndex === i ? "opacity-50" : ""
+                    } ${
+                      dragOverImageIndex === i && draggedImageIndex !== i
+                        ? "ring-2 ring-stone-900 ring-offset-2"
+                        : ""
+                    }`}
+                  >
+                    <img
+                      src={img.url}
+                      alt=""
+                      draggable={false}
+                      className="pointer-events-none h-full w-full select-none object-cover"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    draggable={false}
+                    onClick={() => removeImage(i)}
+                    className="absolute -top-2 -right-2 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] text-white hover:bg-red-600 transition-colors"
+                  >
+                    X
+                  </button>
+                  {i === 0 && (
+                    <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-stone-900/80 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-white">
+                      Capa
+                    </span>
+                  )}
+                </div>
+                {/* Seletor de cor */}
+                {uniqueColors.length > 0 && (
+                  <select
+                    value={img.colorName ?? ""}
+                    onChange={(e) => setImageColor(i, e.target.value || null)}
+                    className="w-24 rounded border border-stone-200 bg-white px-1 py-0.5 text-[10px] text-stone-700 focus:border-stone-900 focus:outline-none"
+                    title="Vincular esta imagem a uma cor"
+                  >
+                    <option value="">— cor —</option>
+                    {uniqueColors.map((c) => (
+                      <option key={c.name} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
-              <button
-                type="button"
-                draggable={false}
-                onClick={() => removeImage(i)}
-                className="absolute -top-2 -right-2 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] text-white hover:bg-red-600 transition-colors"
-              >
-                X
-              </button>
-              {i === 0 && (
-                <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-stone-900/80 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wider text-white">
-                  Capa
-                </span>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
         <ImageUpload
           value=""

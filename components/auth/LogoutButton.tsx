@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 type Props = {
@@ -9,15 +8,17 @@ type Props = {
 };
 
 export function LogoutButton({ className, children }: Props) {
-  const router = useRouter();
   const [loading, setLoading] = useState(false);
 
   async function logout() {
     setLoading(true);
     try {
       await fetch("/api/auth/logout", { method: "POST" });
-      router.push("/");
-      router.refresh();
+      // Sinaliza para o GoogleOneTap que o usuário saiu intencionalmente.
+      // O script GSI não está carregado em páginas autenticadas, então
+      // disableAutoSelect() não pode ser chamado diretamente aqui.
+      sessionStorage.setItem("one_tap_suppress", "1");
+      window.location.href = "/";
     } finally {
       setLoading(false);
     }

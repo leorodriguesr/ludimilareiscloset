@@ -4,6 +4,22 @@ export interface Category {
   slug: string;
 }
 
+export interface Section {
+  id: string;
+  name: string;
+  slug: string;
+  order: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProductSectionLink {
+  productId: string;
+  sectionId: string;
+  section: Section;
+}
+
 export interface ProductCategoryLink {
   productId: string;
   categoryId: string;
@@ -65,5 +81,6 @@ export interface Product {
   images: ProductImage[];
   pieces: ProductPiece[];
   categories: ProductCategoryLink[];
+  sections: ProductSectionLink[];
   createdAt: string;
 }

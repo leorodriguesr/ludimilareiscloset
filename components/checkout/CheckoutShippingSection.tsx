@@ -63,7 +63,9 @@ export function CheckoutShippingSection({
   lines,
   onFulfillmentChange,
 }: Props) {
-  const [cepDigits, setCepDigits] = useState("");
+  const [cepDigits, setCepDigits] = useState(() => {
+    try { return sessionStorage.getItem("shipping_cep") ?? ""; } catch { return ""; }
+  });
   const [options, setOptions] = useState<NormalizedShippingOption[] | null>(
     null
   );
@@ -182,52 +184,55 @@ export function CheckoutShippingSection({
   }, [cepDigits, selectedId, options, onFulfillmentChange]);
 
   return (
-    <div className="rounded-lg border border-stone-200 bg-white px-4 py-4 space-y-3">
+    <div className="space-y-3">
+      {/* Label + input */}
       <div>
         <label
           htmlFor="checkout-shipping-cep"
-          className="block text-[10px] font-semibold uppercase tracking-widest text-stone-500 mb-2"
+          className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-stone-500 mb-2"
         >
-          Frete
+          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 18.75a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 0 1-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 0 0-3.213-9.193 2.056 2.056 0 0 0-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 0 0-10.026 0 1.106 1.106 0 0 0-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12" />
+          </svg>
+          Frete e entrega
         </label>
-        <input
-          id="checkout-shipping-cep"
-          type="text"
-          inputMode="numeric"
-          autoComplete="postal-code"
-          placeholder="00000-000"
-          value={formatCepMask(cepDigits)}
-          onChange={(e) => setCepDigits(onlyDigits(e.target.value))}
-          className="w-full rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-900 focus:border-transparent"
-        />
-        <p className="mt-1.5 text-xs text-stone-500">
-          CEP de entrega. O valor do frete entra no pagamento junto com os
-          produtos.
-        </p>
+        <div className="flex items-center gap-2">
+          <input
+            id="checkout-shipping-cep"
+            type="text"
+            inputMode="numeric"
+            autoComplete="postal-code"
+            placeholder="00000-000"
+            value={formatCepMask(cepDigits)}
+            onChange={(e) => {
+              const digits = onlyDigits(e.target.value);
+              setCepDigits(digits);
+              if (digits.length === 8) {
+                try { sessionStorage.setItem("shipping_cep", digits); } catch {}
+              }
+            }}
+            className="w-36 rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors"
+          />
+          {loading && (
+            <span className="inline-flex items-center gap-1.5 text-xs text-stone-400">
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-stone-200 border-t-stone-600" />
+              Calculando…
+            </span>
+          )}
+        </div>
+        {cepDigits.length > 0 && cepDigits.length < 8 && (
+          <p className="mt-1 text-xs text-stone-400">CEP incompleto</p>
+        )}
       </div>
 
-      {cepDigits.length > 0 && cepDigits.length < 8 && (
-        <p className="text-xs text-stone-500">CEP incompleto.</p>
-      )}
-
-      {loading && (
-        <div className="flex items-center gap-2 text-sm text-stone-600">
-          <span
-            className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-stone-200 border-t-stone-800"
-            aria-hidden
-          />
-          Calculando frete…
-        </div>
-      )}
-
+      {/* Erro */}
       {error && !loading && cepDigits.length === 8 && (
-        <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-md px-3 py-2">
-          {error}
-        </p>
+        <p className="text-xs text-red-600">{error}</p>
       )}
 
+      {/* Opções seleccionáveis */}
       {!loading && options && options.length > 0 && (
-        <ul className="space-y-2 pt-1">
+        <ul className="overflow-hidden rounded-lg border border-stone-200 divide-y divide-stone-100">
           {options.map((o, index) => {
             const isCheap = cheapestIds.has(o.id);
             const isFast = fastestIds.has(o.id);
@@ -236,43 +241,44 @@ export function CheckoutShippingSection({
               <li key={`${o.id}-${index}`}>
                 <label
                   htmlFor={id}
-                  className={`flex cursor-pointer rounded-md border px-3 py-2.5 text-sm ${
-                    selectedId === o.id
-                      ? "border-stone-900 bg-stone-50 ring-1 ring-stone-900"
-                      : isCheap || isFast
-                        ? "border-stone-300 bg-stone-50/50"
-                        : "border-stone-200 bg-white"
+                  className={`flex cursor-pointer items-start gap-3 px-3 py-2.5 text-sm transition-colors ${
+                    selectedId === o.id ? "bg-stone-50" : "bg-white hover:bg-stone-50/60"
                   }`}
                 >
                   <input
                     id={id}
                     type="radio"
                     name="checkout-shipping-option"
-                    className="mt-1 mr-3 border-stone-300 text-stone-900 focus:ring-stone-900"
+                    className="mt-0.5 shrink-0 border-stone-300 text-stone-900 focus:ring-stone-900"
                     checked={selectedId === o.id}
                     onChange={() => setSelectedId(o.id)}
                   />
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2 gap-y-1">
-                      <span className="font-medium text-stone-900">
+                    {/* Linha 1: transportadora + badges */}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={`font-medium ${selectedId === o.id ? "text-stone-900" : "text-stone-700"}`}>
                         {o.carrierName}
                       </span>
-                      {isCheap && (
-                        <span className="text-[10px] font-semibold uppercase tracking-wide bg-emerald-700 text-white px-2 py-0.5 rounded">
-                          Menor preço
-                        </span>
-                      )}
-                      {isFast && (
-                        <span className="text-[10px] font-semibold uppercase tracking-wide bg-amber-700 text-white px-2 py-0.5 rounded">
-                          Mais rápido
-                        </span>
-                      )}
+                      <div className="flex shrink-0 items-center gap-1">
+                        {isCheap && (
+                          <span className="rounded bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
+                            Menor preço
+                          </span>
+                        )}
+                        {isFast && (
+                          <span className="rounded bg-amber-500 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
+                            Mais rápido
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <p className="text-stone-600 mt-0.5">{o.serviceName}</p>
-                    <div className="mt-1 flex flex-wrap justify-between gap-2 text-stone-800">
-                      <span>{deliveryLabel(o)}</span>
-                      <span className="font-semibold tabular-nums">
-                        {formatPrice(o.price)}
+                    {/* Linha 2: serviço + prazo · preço */}
+                    <div className="mt-0.5 flex items-center justify-between gap-2">
+                      <span className="text-xs text-stone-500">
+                        {o.serviceName} · {deliveryLabel(o)}
+                      </span>
+                      <span className={`shrink-0 text-xs font-semibold tabular-nums ${o.price === 0 ? "text-emerald-600" : "text-stone-900"}`}>
+                        {o.price === 0 ? "Grátis" : formatPrice(o.price)}
                       </span>
                     </div>
                   </div>

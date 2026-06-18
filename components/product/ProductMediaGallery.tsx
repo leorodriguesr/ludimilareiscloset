@@ -1,37 +1,63 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getVideoEmbedInfo } from "@/lib/video-embed";
 
-export type ProductMediaImage = { url: string };
+export type ProductMediaImage = { url: string; colorName?: string | null };
 
 type MediaItem =
   | { kind: "image"; url: string }
-  | {
-      kind: "video";
-      embedUrl: string | null;
-      originalUrl: string;
-    };
+  | { kind: "video"; embedUrl: string | null; originalUrl: string };
 
 function buildMediaItems(
   images: ProductMediaImage[],
   videoUrl: string | null | undefined
 ): MediaItem[] {
-  const items: MediaItem[] = images.map((img) => ({
-    kind: "image",
-    url: img.url,
-  }));
+  const items: MediaItem[] = images.map((img) => ({ kind: "image", url: img.url }));
   if (videoUrl?.trim()) {
     const info = getVideoEmbedInfo(videoUrl);
-    if (info) {
-      items.push({
-        kind: "video",
-        embedUrl: info.embedUrl,
-        originalUrl: info.originalUrl,
-      });
-    }
+    if (info) items.push({ kind: "video", embedUrl: info.embedUrl, originalUrl: info.originalUrl });
   }
   return items;
+}
+
+function MediaSlide({ item, label }: { item: MediaItem; label: string }) {
+  if (item.kind === "image") {
+    return (
+      <img
+        src={item.url}
+        alt={label}
+        className="h-full w-full object-cover"
+        draggable={false}
+      />
+    );
+  }
+  if (item.embedUrl) {
+    return (
+      <div className="relative h-full w-full bg-black">
+        <iframe
+          title={label}
+          src={item.embedUrl}
+          className="h-full w-full border-0"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+        />
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-4 bg-stone-100 p-6 text-center">
+      <p className="text-sm text-stone-600">Vídeo externo</p>
+      <a
+        href={item.originalUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="rounded-lg border border-stone-300 bg-white px-4 py-3 text-sm font-medium text-stone-800 hover:border-stone-900"
+      >
+        Abrir vídeo
+      </a>
+    </div>
+  );
 }
 
 type ProductMediaGalleryProps = {
@@ -40,218 +66,231 @@ type ProductMediaGalleryProps = {
   videoUrl?: string | null;
 };
 
-export function ProductMediaGallery({
-  images,
-  productName,
-  videoUrl,
-}: ProductMediaGalleryProps) {
-  const mediaItems = useMemo(
-    () => buildMediaItems(images, videoUrl),
-    [images, videoUrl]
-  );
+export function ProductMediaGallery({ images, productName, videoUrl }: ProductMediaGalleryProps) {
+  const mediaItems = useMemo(() => buildMediaItems(images, videoUrl), [images, videoUrl]);
+  const total = mediaItems.length;
 
-  const [selectedIndex, setSelectedIndex] = useState(0);
-
+  const [isDesktop, setIsDesktop] = useState(false);
   useEffect(() => {
-    if (mediaItems.length === 0) return;
-    setSelectedIndex((i) => Math.min(i, mediaItems.length - 1));
-  }, [mediaItems.length]);
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const update = () => setIsDesktop(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
 
-  const safeIndex =
-    mediaItems.length === 0
-      ? 0
-      : Math.min(selectedIndex, mediaItems.length - 1);
-  const selected = mediaItems[safeIndex];
+  // Mede o container desktop para calcular o stride em pixels (item + gap)
+  const DESKTOP_GAP = 16; // px — gap-2
+  const desktopContainerRef = useRef<HTMLDivElement>(null);
+  const [desktopStride, setDesktopStride] = useState(0);
+  useEffect(() => {
+    const el = desktopContainerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const w = entry.contentRect.width;
+      setDesktopStride(w / 2 + DESKTOP_GAP / 2);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
-  const goPrev = useCallback(() => {
-    if (mediaItems.length <= 1) return;
-    setSelectedIndex((i) => (i === 0 ? mediaItems.length - 1 : i - 1));
-  }, [mediaItems.length]);
+  // No desktop: janela deslizante de 2 (máx index = total - 2)
+  // No mobile: 1 por vez (máx index = total - 1)
+  const maxIndex = isDesktop && total > 1 ? total - 2 : total - 1;
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const goTo = useCallback((i: number) => {
+    setCurrentIndex(Math.max(0, Math.min(i, maxIndex)));
+  }, [maxIndex]);
 
-  const goNext = useCallback(() => {
-    if (mediaItems.length <= 1) return;
-    setSelectedIndex((i) =>
-      i === mediaItems.length - 1 ? 0 : i + 1
-    );
-  }, [mediaItems.length]);
+  // Corrige currentIndex ao trocar entre mobile/desktop
+  useEffect(() => {
+    setCurrentIndex((i) => Math.min(i, maxIndex));
+  }, [maxIndex]);
 
-  if (mediaItems.length === 0) {
+  const goPrev = useCallback(() => goTo(currentIndex - 1), [currentIndex, goTo]);
+  const goNext = useCallback(() => goTo(currentIndex + 1), [currentIndex, goTo]);
+
+  // Navega para a imagem da cor selecionada no PieceSelector
+  useEffect(() => {
+    function handleColorSelected(e: Event) {
+      const colorName = (e as CustomEvent<string>).detail;
+      const idx = images.findIndex((img) => img.colorName === colorName);
+      if (idx !== -1) goTo(idx);
+    }
+    window.addEventListener("color:selected", handleColorSelected);
+    return () => window.removeEventListener("color:selected", handleColorSelected);
+  }, [images, goTo]);
+
+  // Swipe no mobile
+  const touchStartX = useRef<number | null>(null);
+  const onTouchStart = (e: React.TouchEvent) => { touchStartX.current = e.touches[0].clientX; };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current === null) return;
+    const diff = touchStartX.current - e.changedTouches[0].clientX;
+    if (Math.abs(diff) > 40) diff > 0 ? goNext() : goPrev();
+    touchStartX.current = null;
+  };
+
+  if (total === 0) {
     return (
-      <div className="flex aspect-[3/4] w-full items-center justify-center rounded-none bg-stone-100 lg:rounded-xl">
+      <div className="flex aspect-[3/4] w-full items-center justify-center bg-stone-100 lg:rounded-xl">
         <p className="text-stone-400">Sem mídia</p>
       </div>
     );
   }
 
-  const showArrows = mediaItems.length > 1;
+  const showNav = total > 1;
+  const totalSteps = maxIndex + 1; // total de posições navegáveis
 
   return (
-    <div className="flex w-full min-w-0 max-w-full flex-col gap-0 lg:flex-row-reverse lg:items-start lg:gap-0">
-      {/* Área principal: imagem ou vídeo */}
-      <div className="relative min-w-0 w-full max-w-full flex-1">
-        <div className="relative aspect-[3/4] w-full overflow-hidden rounded-none bg-stone-100 lg:rounded-xl">
-          {selected.kind === "image" ? (
-            <img
-              src={selected.url}
-              alt={`${productName} - Foto ${safeIndex + 1}`}
-              className="h-full w-full object-cover"
-            />
-          ) : selected.embedUrl ? (
-            <div className="absolute inset-0 flex items-center justify-center bg-black">
-              <div className="aspect-video h-full max-h-full w-full max-w-full">
-                <iframe
-                  title={`Vídeo: ${productName}`}
-                  src={selected.embedUrl}
-                  className="h-full w-full border-0"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                  allowFullScreen
-                />
+    <div className="w-full select-none">
+      {/* Área principal */}
+      <div
+        className="relative overflow-hidden rounded-none lg:max-h-[82vh]"
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+      >
+        {/* Desktop: track com slide lateral — gap fixo, stride em px */}
+        <div ref={desktopContainerRef} className="hidden lg:block lg:overflow-hidden">
+          <div
+            className="flex"
+            style={{
+              gap: `${DESKTOP_GAP}px`,
+              transform: `translateX(-${currentIndex * desktopStride}px)`,
+              transition: "transform 480ms cubic-bezier(0.4, 0, 0.2, 1)",
+              willChange: "transform",
+            }}
+          >
+            {mediaItems.map((item, i) => (
+              <div
+                key={i}
+                style={{ width: `calc(50% - ${DESKTOP_GAP / 2}px)`, flexShrink: 0 }}
+              >
+                <div className="aspect-[2/3] overflow-hidden bg-stone-100">
+                  <div
+                    className="h-full w-full"
+                    style={{
+                      transform: `scale(${i === currentIndex || i === currentIndex + 1 ? 1 : 1.04})`,
+                      transition: "transform 480ms cubic-bezier(0.4, 0, 0.2, 1)",
+                    }}
+                  >
+                    <MediaSlide item={item} label={`${productName} — foto ${i + 1}`} />
+                  </div>
+                </div>
               </div>
-            </div>
-          ) : (
-            <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-              <p className="text-sm text-stone-600">Vídeo em link externo</p>
-              <a
-                href={selected.originalUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-lg border border-stone-300 bg-white px-4 py-3 text-sm font-medium text-stone-800 hover:border-stone-900 transition-colors"
-              >
-                Abrir vídeo
-                <svg
-                  className="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-                  />
-                </svg>
-              </a>
-            </div>
-          )}
-
-          {showArrows && (
-            <>
-              <button
-                type="button"
-                onClick={goPrev}
-                className="absolute left-3 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/80 text-stone-700 shadow-sm backdrop-blur-sm transition-colors hover:bg-white"
-                aria-label="Mídia anterior"
-              >
-                <svg
-                  className="h-5 w-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15 19l-7-7 7-7"
-                  />
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={goNext}
-                className="absolute right-3 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/80 text-stone-700 shadow-sm backdrop-blur-sm transition-colors hover:bg-white"
-                aria-label="Próxima mídia"
-              >
-                <svg
-                  className="h-5 w-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 5l7 7-7 7"
-                  />
-                </svg>
-              </button>
-
-              <div className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 gap-1.5">
-                {mediaItems.map((_, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => setSelectedIndex(i)}
-                    className={`h-1.5 rounded-full transition-all ${
-                      i === safeIndex ? "w-6 bg-white" : "w-1.5 bg-white/50"
-                    }`}
-                    aria-label={
-                      mediaItems[i]?.kind === "video"
-                        ? "Vídeo"
-                        : `Foto ${i + 1}`
-                    }
-                  />
-                ))}
-              </div>
-            </>
-          )}
+            ))}
+          </div>
         </div>
+
+        {/* Mobile: 1 imagem por vez com slide */}
+        <div className="lg:hidden">
+          <div
+            className="flex"
+            style={{
+              transform: `translateX(-${currentIndex * 100}%)`,
+              transition: "transform 420ms cubic-bezier(0.4, 0, 0.2, 1)",
+              willChange: "transform",
+            }}
+          >
+            {mediaItems.map((item, i) => (
+              <div key={i} className="aspect-[3/4] w-full flex-none overflow-hidden bg-stone-100">
+                <MediaSlide item={item} label={`${productName} — foto ${i + 1}`} />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Setas — canto superior direito no desktop, laterais no mobile */}
+        {showNav && (
+          <>
+            {/* Mobile: setas laterais centralizadas */}
+            <button
+              type="button"
+              onClick={goPrev}
+              disabled={currentIndex === 0}
+              className="absolute left-3 top-1/2 z-10 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded bg-white/80 text-stone-700 shadow backdrop-blur-sm transition hover:bg-white disabled:opacity-30 lg:hidden"
+              aria-label="Anterior"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={goNext}
+              disabled={currentIndex === maxIndex}
+              className="absolute right-3 top-1/2 z-10 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded bg-white/80 text-stone-700 shadow backdrop-blur-sm transition hover:bg-white disabled:opacity-30 lg:hidden"
+              aria-label="Próxima"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+
+            {/* Desktop: setas no canto superior direito — container único */}
+            <div className="absolute right-3 top-3 z-10 hidden lg:flex">
+              <div className="flex items-center overflow-hidden border border-stone-200 bg-white  backdrop-blur-sm p-1">
+                <button
+                  type="button"
+                  onClick={goPrev}
+                  disabled={currentIndex === 0}
+                  className="flex h-10 w-11 items-center justify-center text-stone-600 transition hover:bg-stone-50 disabled:opacity-30 disabled:cursor-default cursor-pointer"
+                  aria-label="Anterior"
+                >
+                  <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={goNext}
+                  disabled={currentIndex === maxIndex}
+                  className="flex h-10 w-11 items-center justify-center text-stone-600 transition hover:bg-stone-50 disabled:opacity-30 disabled:cursor-default cursor-pointer"
+                  aria-label="Próxima"
+                >
+                  <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Dots — dentro da imagem (mobile) */}
+        {showNav && (
+          <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 gap-1.5 lg:hidden">
+            {Array.from({ length: totalSteps }).map((_, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => goTo(i)}
+                aria-label={`Foto ${i + 1}`}
+                className={`h-1.5 rounded-full transition-all duration-300 ${
+                  i === currentIndex ? "w-6 bg-white" : "w-1.5 bg-white/50"
+                }`}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Miniaturas: coluna à esquerda no desktop (via flex-row-reverse); abaixo no mobile */}
-      {mediaItems.length > 1 && (
-        <div className="flex max-h-none w-full min-w-0 max-w-full shrink-0 items-center gap-2.5 overflow-x-auto overscroll-x-contain px-2 pb-2 pt-4 [-webkit-overflow-scrolling:touch] min-[401px]:px-3 sm:px-4 md:px-6 lg:max-h-[min(70vh,40rem)] lg:w-[7.75rem] lg:max-w-none lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden lg:px-2 lg:py-2 lg:pt-2 lg:overscroll-auto">
-          {mediaItems.map((item, i) => (
-            <button
-              key={item.kind === "image" ? `img-${item.url}-${i}` : `vid-${i}`}
-              type="button"
-              onClick={() => setSelectedIndex(i)}
-              className={`relative m-0 shrink-0 rounded-lg border-0 bg-transparent p-0 shadow-none transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-900 ${
-                i === safeIndex
-                  ? "ring-2 ring-stone-900 ring-offset-2 ring-offset-white"
-                  : "opacity-70 hover:opacity-100"
-              }`}
-              aria-label={
-                item.kind === "video" ? "Ver vídeo do produto" : `Foto ${i + 1}`
-              }
-            >
-              <div className="relative h-24 w-24 overflow-hidden rounded-lg">
-                {item.kind === "image" ? (
-                  <img
-                    src={item.url}
-                    alt=""
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <>
-                    {images[0]?.url ? (
-                      <img
-                        src={images[0].url}
-                        alt=""
-                        className="h-full w-full object-cover opacity-40"
-                      />
-                    ) : (
-                      <div className="h-full w-full bg-stone-300" />
-                    )}
-                    <span className="absolute inset-0 flex items-center justify-center bg-black/35">
-                      <span className="flex h-11 w-11 items-center justify-center rounded-full bg-white/90 text-stone-900 shadow">
-                        <svg
-                          className="ml-0.5 h-6 w-6"
-                          fill="currentColor"
-                          viewBox="0 0 24 24"
-                          aria-hidden
-                        >
-                          <path d="M8 5v14l11-7z" />
-                        </svg>
-                      </span>
-                    </span>
-                  </>
-                )}
-              </div>
-            </button>
-          ))}
+      {/* Indicador (desktop) */}
+      {showNav && (
+        <div className="mt-3 hidden items-center justify-center gap-3 lg:flex">
+          <div className="flex gap-1.5">
+            {Array.from({ length: totalSteps }).map((_, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => goTo(i)}
+                aria-label={`Foto ${i + 1}`}
+                className={`h-1.5 rounded-full transition-all duration-300 ${
+                  i === currentIndex ? "w-6 bg-stone-800" : "w-1.5 bg-stone-300"
+                }`}
+              />
+            ))}
+          </div>
         </div>
       )}
     </div>

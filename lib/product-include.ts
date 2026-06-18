@@ -18,13 +18,28 @@ export const productFullInclude = {
       category: true,
     },
   },
+  sections: {
+    include: {
+      section: true,
+    },
+  },
 } as const;
 
 export const productListInclude = {
   images: { orderBy: { order: "asc" as const } },
+  pieces: {
+    include: {
+      colors: true,
+    },
+  },
   categories: {
     include: {
       category: true,
+    },
+  },
+  sections: {
+    include: {
+      section: true,
     },
   },
 } as const;

@@ -18,35 +18,68 @@ enum UserRole {
 }
 
 model User {
-  id           String   @id @default(cuid())
+  id           String     @id @default(cuid())
   name         String
-  email        String   @unique
+  email        String     @unique
   phone        String
   /** Null quando a conta é só OAuth (ex.: Google). */
   passwordHash String?
   /** ID estável da conta Google (sub / id do userinfo). */
-  googleId     String?  @unique
-  role         UserRole @default(CLIENT)
-  createdAt    DateTime @default(now())
+  googleId     String?    @unique
+  /** URL da foto de perfil (fornecida pelo Google OAuth). */
+  picture      String?
+  role         UserRole   @default(CLIENT)
+  createdAt    DateTime   @default(now())
   orders       Order[]
+  favorites    Favorite[]
+}
+
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  productId String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@index([userId])
 }
 
 /** Pedido: pode ser guest (`userId` nulo) ou vinculado a usuário logado. */
 model Order {
-  id        String      @id @default(cuid())
+  id          String      @id @default(cuid())
+  /** Número sequencial legível, ex.: #1, #2… */
+  orderNumber Int?
   userId    String?
   user      User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
   email     String
   status    String      @default("pending_payment")
   total     Float
   /** Valor do frete (R$), validado no servidor na criação. */
-  shippingAmount     Float    @default(0)
+  shippingAmount      Float   @default(0)
   shippingServiceName String?
-  destinationCep     String?
+  destinationCep      String?
+  /** Dados de contato e entrega coletados no checkout da loja. */
+  recipientName       String?
+  phone               String?
+  cpf                 String?
+  addressStreet       String?
+  addressNumber       String?
+  addressComplement   String?
+  addressNeighborhood String?
+  addressCity         String?
+  addressState        String?
   paidAt                    DateTime?
   infinitePayTransactionNsu String?
   infinitePayInvoiceSlug    String?
   paymentCaptureMethod      String?
+  /** Status de envio: to_pack | packed | shipped */
+  shippingStatus            String    @default("to_pack")
+  /** ID do pedido criado na SuperFrete para esta etiqueta. */
+  superfreteShipmentId      String?
+  /** URL da etiqueta de envio (gerada pela SuperFrete). */
+  labelUrl                  String?
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
   items     OrderItem[]
@@ -84,6 +117,26 @@ model ProductCategory {
   @@id([productId, categoryId])
 }
 
+model Section {
+  id        String           @id @default(cuid())
+  name      String
+  slug      String           @unique
+  order     Int              @default(0)
+  isActive  Boolean          @default(true)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  products  ProductSection[]
+}
+
+model ProductSection {
+  productId String
+  sectionId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  section   Section @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  @@id([productId, sectionId])
+}
+
 model Product {
   id            String            @id @default(cuid())
   name          String
@@ -105,13 +158,16 @@ model Product {
   images        ProductImage[]
   pieces        ProductPiece[]
   categories    ProductCategory[]
+  sections      ProductSection[]
   orderItems    OrderItem[]
+  favorites     Favorite[]
 }
 
 model ProductImage {
   id        String  @id @default(cuid())
   url       String
   order     Int     @default(0)
+  colorName String?
   productId String
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 }

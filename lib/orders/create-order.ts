@@ -25,11 +25,28 @@ export type OrderShippingInput = {
   optionId: string;
 };
 
+export type OrderContactInput = {
+  name?: string;
+  phone?: string;
+  cpf?: string;
+};
+
+export type OrderAddressInput = {
+  street?: string;
+  number?: string;
+  complement?: string;
+  neighborhood?: string;
+  city?: string;
+  state?: string;
+};
+
 export async function createOrderFromCheckout(input: {
   email: string;
   userId: string | null;
   lines: CheckoutLineInput[];
   shipping: OrderShippingInput;
+  contact?: OrderContactInput;
+  address?: OrderAddressInput;
 }): Promise<CreateOrderResult> {
   const normalizedEmail = input.email.trim().toLowerCase();
   if (!EMAIL_RE.test(normalizedEmail)) {
@@ -154,9 +171,16 @@ export async function createOrderFromCheckout(input: {
     subtotal = Math.round(subtotal * 100) / 100;
     const total = Math.round((subtotal + shippingAmount) * 100) / 100;
 
+    // Número sequencial legível: MAX atual + 1 (seguro dentro da transação)
+    const maxRows = await tx.$queryRawUnsafe<{ max: number | null }[]>(
+      `SELECT MAX("orderNumber") as max FROM "Order"`
+    );
+    const nextOrderNumber = (maxRows[0]?.max ?? 0) + 1;
+
     const created = await tx.order.create({
       data: {
         email: normalizedEmail,
+        orderNumber: nextOrderNumber,
         ...(input.userId
           ? { user: { connect: { id: input.userId } } }
           : {}),
@@ -177,10 +201,33 @@ export async function createOrderFromCheckout(input: {
     });
 
     await tx.$executeRawUnsafe(
-      `UPDATE "Order" SET "shippingAmount" = ?, "shippingServiceName" = ?, "destinationCep" = ?, "updatedAt" = datetime('now') WHERE "id" = ?`,
+      `UPDATE "Order" SET
+        "shippingAmount" = ?,
+        "shippingServiceName" = ?,
+        "destinationCep" = ?,
+        "recipientName" = ?,
+        "phone" = ?,
+        "cpf" = ?,
+        "addressStreet" = ?,
+        "addressNumber" = ?,
+        "addressComplement" = ?,
+        "addressNeighborhood" = ?,
+        "addressCity" = ?,
+        "addressState" = ?,
+        "updatedAt" = datetime('now')
+      WHERE "id" = ?`,
       shippingAmount,
       shippingLabel,
       destCep,
+      input.contact?.name ?? null,
+      input.contact?.phone ?? null,
+      input.contact?.cpf ?? null,
+      input.address?.street ?? null,
+      input.address?.number ?? null,
+      input.address?.complement ?? null,
+      input.address?.neighborhood ?? null,
+      input.address?.city ?? null,
+      input.address?.state ?? null,
       created.id
     );
 

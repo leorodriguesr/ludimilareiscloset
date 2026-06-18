@@ -49,6 +49,7 @@ export type GoogleProfileInput = {
   googleId: string;
   email: string;
   name: string;
+  picture?: string;
 };
 
 /**
@@ -62,6 +63,7 @@ export async function signInOrLinkGoogleUser(input: GoogleProfileInput) {
     input.name.trim() ||
     email.split("@")[0] ||
     "Cliente";
+  const picture = input.picture?.trim() || undefined;
 
   const existingGoogle = await prisma.user.findUnique({
     where: { googleId },
@@ -70,10 +72,15 @@ export async function signInOrLinkGoogleUser(input: GoogleProfileInput) {
     if (existingGoogle.role !== UserRole.CLIENT) {
       return { ok: false as const, code: "admin_google" as const };
     }
-    if (name && name !== existingGoogle.name) {
+    const nameChanged = name && name !== existingGoogle.name;
+    const pictureChanged = picture && picture !== existingGoogle.picture;
+    if (nameChanged || pictureChanged) {
       const user = await prisma.user.update({
         where: { id: existingGoogle.id },
-        data: { name },
+        data: {
+          ...(nameChanged ? { name } : {}),
+          ...(pictureChanged ? { picture } : {}),
+        },
       });
       await claimGuestOrders(user.id, user.email);
       return { ok: true as const, user };
@@ -92,6 +99,7 @@ export async function signInOrLinkGoogleUser(input: GoogleProfileInput) {
       data: {
         googleId,
         name: name || byEmail.name,
+        picture: picture ?? byEmail.picture,
       },
     });
     await claimGuestOrders(user.id, user.email);
@@ -104,6 +112,7 @@ export async function signInOrLinkGoogleUser(input: GoogleProfileInput) {
       name,
       phone: "—",
       googleId,
+      picture,
       passwordHash: null,
       role: UserRole.CLIENT,
     },

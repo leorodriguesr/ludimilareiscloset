@@ -138,8 +138,11 @@ export async function POST(request: NextRequest) {
     };
 
     const fromBody = body.insuranceValue;
+    // Por padrão, seguro = valor do produto × quantidade (pode ser sobrescrito por body.insuranceValue)
     const declaredRaw =
-      fromBody != null ? Number(fromBody) : product.price * quantity;
+      fromBody != null && Number.isFinite(Number(fromBody))
+        ? Number(fromBody)
+        : product.price * quantity;
     const declared = Number.isFinite(declaredRaw)
       ? Math.max(0, Math.round(declaredRaw * 100) / 100)
       : 0;

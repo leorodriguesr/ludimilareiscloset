@@ -16,7 +16,7 @@ import {
 const CALCULATOR_PATH = "/api/v0/calculator";
 
 const DEFAULT_API_ORIGIN = "https://api.superfrete.com";
-const DEFAULT_SERVICES = "1,2,17";
+const DEFAULT_SERVICES = "1,2,3,17,31";
 
 /** Mapeamento auxiliar quando a API não envia nome legível. */
 const SERVICE_ID_LABELS: Record<number, { carrier: string; service: string }> =
@@ -295,6 +295,16 @@ function coerceRows(raw: unknown): Record<string, unknown>[] {
 function normalizeRows(rows: Record<string, unknown>[]): NormalizedShippingOption[] {
   const out: NormalizedShippingOption[] = [];
   rows.forEach((row, index) => {
+    // Pula itens que a API retornou com erro (ex.: CEP não atendido, peso excedido)
+    if (row.error) {
+      const { carrier, service, serviceId } = extractCarrierAndService(row);
+      console.warn(
+        `[SuperFrete] serviço filtrado por erro — ${carrier} ${service} (id=${serviceId}):`,
+        row.error
+      );
+      return;
+    }
+
     const price = extractPrice(row);
     if (price == null || price < 0) return;
 
@@ -367,6 +377,8 @@ export async function calculateShippingSuperFrete(
     destinationPostalCode: dest,
   });
 
+  console.debug("[SuperFrete] POST", url, JSON.stringify(body));
+
   let res: Response;
   try {
     res = await fetch(url, {
@@ -390,7 +402,6 @@ export async function calculateShippingSuperFrete(
     );
   }
 
-
   if (!res.ok) {
     const msg = await readErrorMessage(res);
     console.error("[SuperFrete] HTTP", res.status, msg);
@@ -412,6 +423,8 @@ export async function calculateShippingSuperFrete(
       e
     );
   }
+
+  console.debug("[SuperFrete] resposta bruta:", JSON.stringify(raw));
 
   const rows = coerceRows(raw);
   if (rows.length === 0) {

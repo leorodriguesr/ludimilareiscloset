@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import { Header } from "@/components/Header";
 import { FooterGate } from "@/components/FooterGate";
 import { AppProviders } from "@/components/providers/AppProviders";
+import { GoogleOneTapGate } from "@/components/GoogleOneTapGate";
 import "./globals.css";
 
 const inter = Inter({
@@ -26,6 +27,7 @@ export default function RootLayout({
       <body className="flex min-h-screen w-full min-w-0 flex-col bg-white font-sans text-stone-900">
         <AppProviders>
           <Header />
+          <GoogleOneTapGate />
           <main className="min-w-0 w-full flex-1">{children}</main>
           <FooterGate />
         </AppProviders>

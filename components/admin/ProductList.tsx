@@ -94,6 +94,7 @@ export function ProductList({ products, onRefresh }: ProductListProps) {
                       })),
                     })),
                     categoryIds: product.categories.map((pc) => pc.categoryId),
+                    sectionIds: (product.sections ?? []).map((ps) => ps.sectionId),
                   }}
                   onSuccess={() => {
                     setEditingId(null);

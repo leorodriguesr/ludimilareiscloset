@@ -1,323 +1,1091 @@
 "use client";
 
+import React from "react";
 import Image from "next/image";
 import Link from "next/link";
 import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useTransition,
 } from "react";
-import { placeOrderAction } from "@/app/checkout/actions";
+import { placeOrderAction, updateUserPhoneAction } from "@/app/checkout/actions";
 import { useCart } from "@/components/cart/CartProvider";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
-import {
-  CheckoutShippingSection,
-  type CheckoutShippingSelection,
-} from "@/components/checkout/CheckoutShippingSection";
 import { GUEST_CHECKOUT_EMAIL_KEY } from "@/lib/checkout/guest-email-storage";
 import { describeCartPieceSelection } from "@/lib/cart/format-piece-selections";
 import { formatPrice } from "@/lib/format";
-import { CHECKOUT_SHIPPING_AMOUNT_BRL } from "@/lib/config/checkout-shipping-charge";
+import { installmentValueEqualParts } from "@/lib/product-pricing";
+import type { NormalizedShippingOption } from "@/lib/shipping/types";
+import type { CartPieceSelection } from "@/lib/cart/types";
 
-type Props = {
-  initialEmail: string;
-  loggedIn: boolean;
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type Props = { initialEmail: string; initialName: string; initialPhone: string; loggedIn: boolean };
+type ContactData = { name: string; email: string; phone: string; cpf: string };
+type ShippingData = {
+  cep: string; street: string; number: string; complement: string;
+  neighborhood: string; city: string; state: string;
+  optionId: string; optionLabel: string; optionPrice: number; deliveryLabel: string;
+};
+type PaymentMethod = "pix" | "card" | null;
+type CartLine = {
+  lineId: string; productId: string; name: string; image: string | null;
+  quantity: number; price: number; pixPrice?: number | null; installmentCount?: number | null;
+  pieceSelections?: CartPieceSelection[];
 };
 
-export function CheckoutClient({ initialEmail, loggedIn }: Props) {
-  const { items, hydrated, clear } = useCart();
-  const [email, setEmail] = useState(initialEmail);
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const onlyDigits = (s: string) => s.replace(/\D/g, "").slice(0, 8);
+const cepMask = (d: string) => d.length <= 5 ? d : `${d.slice(0, 5)}-${d.slice(5)}`;
+const phoneFmt = (v: string) => {
+  const d = v.replace(/\D/g, "").slice(0, 11);
+  if (d.length <= 2) return d;
+  if (d.length <= 7) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+};
+const cpfFmt = (v: string) => {
+  const d = v.replace(/\D/g, "").slice(0, 11);
+  if (d.length <= 3) return d;
+  if (d.length <= 6) return `${d.slice(0, 3)}.${d.slice(3)}`;
+  if (d.length <= 9) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6)}`;
+  return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+};
+const daysLabel = (o: NormalizedShippingOption) => {
+  const { deliveryDaysMin: a, deliveryDaysMax: b } = o;
+  if (a <= 0 && b <= 0) return "Prazo sob consulta";
+  return a === b ? `${a} dia(s) útil(is)` : `${a}–${b} dias úteis`;
+};
+function rankHighlights(opts: NormalizedShippingOption[]) {
+  if (!opts.length) return { cheapestIds: new Set<string>(), fastestIds: new Set<string>() };
+  const minP = Math.min(...opts.map((o) => o.price));
+  const cheapestIds = new Set(opts.filter((o) => o.price === minP).map((o) => o.id));
+  const known = opts.filter((o) => o.deliveryDaysMin > 0 || o.deliveryDaysMax > 0);
+  if (!known.length) return { cheapestIds, fastestIds: new Set<string>() };
+  const sc = (o: NormalizedShippingOption) =>
+    o.deliveryDaysMin > 0 ? o.deliveryDaysMin * 1000 + o.deliveryDaysMax : o.deliveryDaysMax * 1000;
+  const best = Math.min(...known.map(sc));
+  return { cheapestIds, fastestIds: new Set(known.filter((o) => sc(o) === best).map((o) => o.id)) };
+}
+
+const inputCls = "w-full rounded-lg border border-stone-200 bg-white px-4 py-3 text-sm text-stone-900 shadow-sm placeholder:text-stone-300 transition-colors focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900";
+
+// ─── Step progress bar ────────────────────────────────────────────────────────
+
+const STEPS = ["Contato", "Entrega", "Pagamento"];
+
+function StepBar({ current }: { current: number }) {
+  return (
+    <ol className="flex items-start">
+      {STEPS.map((label, i) => {
+        const n = i + 1;
+        const done = current > n;
+        const active = current === n;
+        return (
+          <li key={n} className="flex flex-1 flex-col items-center">
+            <div className="relative flex w-full items-center">
+              <div className={`h-px flex-1 ${i === 0 ? "opacity-0" : done || active ? "bg-stone-900" : "bg-stone-200"} transition-colors duration-500`} />
+              <div className={`z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 text-[11px] font-bold transition-all duration-300 ${done ? "border-stone-900 bg-stone-900 text-white" : active ? "border-stone-900 bg-white text-stone-900" : "border-stone-200 bg-white text-stone-400"}`}>
+                {done
+                  ? <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  : n}
+              </div>
+              <div className={`h-px flex-1 ${i === STEPS.length - 1 ? "opacity-0" : done ? "bg-stone-900" : "bg-stone-200"} transition-colors duration-500`} />
+            </div>
+            <span className={`mt-1.5 text-[10px] font-semibold uppercase tracking-wider ${active ? "text-stone-900" : done ? "text-stone-500" : "text-stone-300"} transition-colors`}>
+              {label}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+// ─── Mobile order summary (collapsible top bar) ───────────────────────────────
+
+function MobileOrderSummary({ lines, subtotal }: { lines: CartLine[]; subtotal: number }) {
+  const [open, setOpen] = useState(false);
+  const totalQty = lines.reduce((a, l) => a + l.quantity, 0);
+  return (
+    <div className="border-b border-stone-200 bg-white lg:hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between px-5 py-4"
+      >
+        <div className="flex items-center gap-2.5 text-sm font-medium text-stone-700">
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-stone-900 text-[10px] font-bold text-white">
+            {totalQty}
+          </span>
+          Ver resumo do pedido
+          <svg className={`h-4 w-4 text-stone-400 transition-transform ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+        <span className="text-sm font-bold tabular-nums text-stone-900">{formatPrice(subtotal)}</span>
+      </button>
+
+      {open && (
+        <div className="border-t border-stone-100 px-5 pb-5 pt-3">
+          <ul className="space-y-3">
+            {lines.map((l) => (
+              <li key={l.lineId} className="flex gap-3">
+                <div className="relative h-14 w-12 shrink-0 overflow-hidden rounded-md bg-stone-100">
+                  {l.image
+                    ? <Image src={l.image} alt="" fill className="object-cover" sizes="48px" />
+                    : <div className="flex h-full items-center justify-center text-[9px] text-stone-400">—</div>}
+                  {l.quantity > 1 && (
+                    <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-stone-900 text-[9px] font-bold text-white">
+                      {l.quantity}
+                    </span>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-stone-900">{l.name}</p>
+                  {l.pieceSelections?.map((r, i) => {
+                    const d = describeCartPieceSelection(r);
+                    return d ? <p key={i} className="text-xs text-stone-500">{d}</p> : null;
+                  })}
+                </div>
+                <p className="shrink-0 text-sm tabular-nums font-medium text-stone-900">
+                  {formatPrice(l.price * l.quantity)}
+                </p>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-4 space-y-1.5 border-t border-stone-100 pt-3 text-sm">
+            <div className="flex justify-between text-stone-500">
+              <span>Subtotal</span>
+              <span className="tabular-nums">{formatPrice(subtotal)}</span>
+            </div>
+            <div className="flex justify-between font-semibold text-stone-900">
+              <span>Total</span>
+              <span className="tabular-nums">{formatPrice(subtotal)}</span>
+            </div>
+            <p className="text-[11px] text-stone-400">+ frete calculado na próxima etapa</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Desktop right summary panel ──────────────────────────────────────────────
+
+function DesktopSummary({
+  lines, shipping, deliveryDone, subtotal, subtotalPix,
+  step, paymentMethod, onPay, pending,
+}: {
+  lines: CartLine[]; shipping: ShippingData;
+  deliveryDone: boolean; subtotal: number; subtotalPix: number;
+  step: number; paymentMethod: PaymentMethod; onPay: () => void; pending: boolean;
+}) {
+  const canPay = step === 3 && paymentMethod !== null;
+
+  // Max installments across all items (fallback 6)
+  const maxInstallments = lines.reduce((acc, l) => {
+    const n = l.installmentCount ?? 0;
+    return n > acc ? n : acc;
+  }, 0) || 6;
+  const cardInstallmentValue = installmentValueEqualParts(subtotal, maxInstallments);
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
+      {/* Header */}
+      <div className="border-b border-stone-200 px-5 py-4">
+        <h2 className="text-base font-semibold text-stone-900">Resumo do pedido</h2>
+      </div>
+
+      {/* Items — styled like CartDrawer, with pix + card prices */}
+      <div className="px-5 py-4">
+        <ul className="divide-y divide-stone-200">
+          {lines.map((l) => {
+            const lineCard = l.price * l.quantity;
+            const linePix = l.pixPrice != null && l.pixPrice > 0 ? l.pixPrice * l.quantity : null;
+            const inst = (() => {
+              const parts = Math.floor(l.installmentCount ?? 0);
+              if (parts < 1) return null;
+              return { parts, each: installmentValueEqualParts(l.price * l.quantity, parts) };
+            })();
+            return (
+              <li key={l.lineId} className="flex gap-3 py-4 first:pt-0 last:pb-0">
+                <div className="relative h-20 w-16 shrink-0 overflow-hidden rounded-md bg-stone-100">
+                  {l.image
+                    ? <Image src={l.image} alt="" fill className="object-cover" sizes="64px" />
+                    : <div className="flex h-full items-center justify-center text-[9px] text-stone-400 px-1 text-center">Sem foto</div>}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="line-clamp-2 text-sm font-medium text-stone-900">{l.name}</p>
+                  {l.pieceSelections?.map((r, i) => {
+                    const d = describeCartPieceSelection(r);
+                    return d ? <p key={i} className="mt-0.5 text-xs text-stone-500">{d}</p> : null;
+                  })}
+                  <p className="mt-1 text-xs text-stone-400 tabular-nums">{l.quantity} × {formatPrice(l.price)}</p>
+                </div>
+                {/* Prices column: Pix + Card */}
+                <div className="flex shrink-0 flex-col items-end gap-2 text-right">
+                  {linePix != null && (
+                    <div className="flex items-start gap-1.5">
+                      <Image src="/pix-icon.svg" alt="" width={14} height={14} unoptimized className="mt-0.5 h-3.5 w-3.5 shrink-0 object-contain" />
+                      <div>
+                        <p className="text-sm font-semibold tabular-nums text-stone-900">{formatPrice(linePix)}</p>
+                        <p className="text-[10px] text-stone-400">à vista</p>
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex items-start gap-1.5">
+                    <svg className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24" aria-hidden>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                    </svg>
+                    <div>
+                      <p className="text-sm font-semibold tabular-nums text-stone-900">{formatPrice(lineCard)}</p>
+                      {inst && <p className="text-[10px] tabular-nums text-stone-400">{inst.parts}× {formatPrice(inst.each)}</p>}
+                    </div>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+
+      {/* Shipping section */}
+      <div className="border-t border-stone-200 px-5 py-4">
+        <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-stone-400">Frete</p>
+        {deliveryDone && shipping.optionLabel ? (
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm text-stone-600">{shipping.optionLabel}</p>
+            <span className={`text-sm font-semibold tabular-nums ${shipping.optionPrice === 0 ? "text-emerald-600" : "text-stone-900"}`}>
+              {shipping.optionPrice === 0 ? "Grátis" : formatPrice(shipping.optionPrice)}
+            </span>
+          </div>
+        ) : (
+          <p className="text-sm text-stone-400">Calculado na etapa de entrega</p>
+        )}
+      </div>
+
+      {/* Total by payment method — only on step 3 */}
+      {step === 3 && (
+        <div className="border-t border-stone-200 bg-stone-50 px-5 py-4">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-stone-400">Total a pagar</p>
+          {paymentMethod === null && (
+            <div className="flex items-center gap-2 rounded-lg border border-dashed border-amber-300 bg-amber-50 px-3 py-3">
+              <svg className="h-4 w-4 shrink-0 text-amber-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+              <p className="text-sm text-amber-700">Selecione a forma de pagamento</p>
+            </div>
+          )}
+          {paymentMethod === "pix" && (
+            <div className="rounded-lg bg-stone-100 px-4 py-3 ring-1 ring-stone-200">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Image src="/pix-icon.svg" alt="Pix" width={16} height={16} unoptimized className="h-4 w-4 shrink-0 object-contain" />
+                  <span className="text-sm font-medium text-stone-700">Pix · à vista</ span>
+                </div>
+                <span className="text-lg font-bold tabular-nums text-stone-900">
+                  {formatPrice(subtotalPix + (deliveryDone ? shipping.optionPrice : 0))}
+                </span>
+              </div>
+            </div>
+          )}
+          {paymentMethod === "card" && (
+            <div className="rounded-lg bg-stone-100 px-4 py-3 ring-1 ring-stone-200">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <svg className="h-4 w-4 shrink-0 text-stone-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                  </svg>
+                  <span className="text-sm font-medium text-stone-700">Cartão de crédito</span>
+                </div>
+                <span className="text-lg font-bold tabular-nums text-stone-900">
+                  {formatPrice(subtotal + (deliveryDone ? shipping.optionPrice : 0))}
+                </span>
+              </div>
+              <p className="mt-1 text-right text-xs tabular-nums text-stone-500">
+                {maxInstallments}× de {formatPrice(installmentValueEqualParts(subtotal + (deliveryDone ? shipping.optionPrice : 0), maxInstallments))} s/ juros
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Pay button — only on step 3, in summary panel */}
+      {step === 3 && (
+        <div className="px-5 pb-5 pt-4">
+          <button
+            type="button"
+            onClick={onPay}
+            disabled={!canPay || pending}
+            className={`w-full rounded-xl py-4 text-sm font-bold transition-all ${canPay && !pending ? "bg-stone-900 text-white shadow-md hover:bg-stone-800 cursor-pointer active:scale-[0.98]" : "cursor-not-allowed bg-stone-100 text-stone-400"}`}
+          >
+            {pending ? (
+              <span className="flex items-center justify-center gap-2">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-stone-300 border-t-stone-700" />
+                Processando…
+              </span>
+            ) : canPay ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" /></svg>
+                Efetuar pagamento
+              </span>
+            ) : "Selecione a forma de pagamento"}
+          </button>
+          {!canPay && <p className="mt-2 text-center text-[11px] text-stone-400">Preencha os dados e selecione Pix ou Cartão</p>}
+
+          {/* Trust / security bar */}
+          <div className="mt-4 flex items-center justify-center gap-3 text-[10px] text-stone-400">
+            <span className="flex items-center gap-1">
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" /></svg>
+              Compra segura
+            </span>
+            <span className="text-stone-200">·</span>
+            <span className="flex items-center gap-1">
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" /></svg>
+              Dados criptografados
+            </span>
+            <span className="text-stone-200">·</span>
+            <span>InfinitePay</span>
+          </div>
+        </div>
+      )}
+
+      {/* Steps 1 & 2: placeholder note */}
+      {step < 3 && (
+        <div className="border-t border-stone-200 bg-stone-50 px-5 py-3">
+          <p className="text-[11px] text-stone-400">Forma de pagamento selecionada no último passo</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Step: Contato ────────────────────────────────────────────────────────────
+
+function ContactStep({
+  loggedIn, hadNoPhone, initialEmail, initialName, data, onChange, onNext,
+  registerSubmit,
+}: {
+  loggedIn: boolean; hadNoPhone: boolean; initialEmail: string; initialName: string;
+  data: ContactData; onChange: (d: ContactData) => void; onNext: () => void;
+  registerSubmit: (fn: () => Promise<void>) => void;
+}) {
   const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
-  const [shipping, setShipping] = useState<CheckoutShippingSelection | null>(
-    null
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!data.email && initialEmail) onChange({ ...data, email: initialEmail });
+    if (!data.name && initialName) onChange({ ...data, name: initialName });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleNext = useCallback(async () => {
+    if (!loggedIn && !data.name.trim()) { setError("Informe seu nome."); return; }
+    if (!data.email.trim()) { setError("Informe seu e-mail."); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email.trim())) { setError("E-mail inválido."); return; }
+    if (data.phone.replace(/\D/g, "").length < 10) { setError("Informe um telefone válido com DDD."); return; }
+    if (data.cpf.replace(/\D/g, "").length !== 11) { setError("Informe um CPF válido (11 dígitos)."); return; }
+    setError(null);
+    if (loggedIn && hadNoPhone && data.phone.replace(/\D/g, "").length >= 10) {
+      setSaving(true);
+      try { await updateUserPhoneAction(data.phone); } catch {}
+      finally { setSaving(false); }
+    }
+    onNext();
+  }, [loggedIn, hadNoPhone, data, onNext]);
+
+  // Register submit fn for mobile bottom bar
+  useEffect(() => { registerSubmit(handleNext); }, [registerSubmit, handleNext]);
+
+  return (
+    <div className="space-y-5">
+      {!loggedIn && (
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500" htmlFor="c-name">Nome completo</label>
+          <input id="c-name" type="text" autoComplete="name" placeholder="Seu nome completo"
+            value={data.name} onChange={(e) => onChange({ ...data, name: e.target.value })} className={inputCls} />
+        </div>
+      )}
+      <div>
+        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500" htmlFor="c-email">E-mail</label>
+        {loggedIn ? (
+          <div className="flex items-center gap-2.5 rounded-lg border border-stone-200 bg-stone-50 px-4 py-3">
+            <svg className="h-4 w-4 shrink-0 text-stone-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+            </svg>
+            <span className="text-sm text-stone-600">{initialEmail}</span>
+          </div>
+        ) : (
+          <input id="c-email" type="email" autoComplete="email" placeholder="seu@email.com"
+            value={data.email} onChange={(e) => onChange({ ...data, email: e.target.value })} className={inputCls} />
+        )}
+      </div>
+      <div>
+        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500" htmlFor="c-phone">Telefone</label>
+        <input id="c-phone" type="tel" autoComplete="tel" placeholder="(00) 00000-0000"
+          value={data.phone} onChange={(e) => onChange({ ...data, phone: phoneFmt(e.target.value) })} className={inputCls} />
+      </div>
+      <div>
+        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500" htmlFor="c-cpf">CPF</label>
+        <input id="c-cpf" type="text" inputMode="numeric" autoComplete="off" placeholder="000.000.000-00"
+          value={data.cpf} onChange={(e) => onChange({ ...data, cpf: cpfFmt(e.target.value) })} className={inputCls} />
+      </div>
+      {!loggedIn && (
+        <div className="rounded-lg border border-stone-100 bg-stone-50 p-4">
+          <p className="mb-2.5 text-xs text-stone-500">Já tem conta? Entre para vincular o pedido ao seu histórico.</p>
+          <GoogleSignInButton nextPath="/checkout"
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-stone-200 bg-white py-2.5 text-sm font-medium text-stone-700 shadow-sm transition hover:bg-stone-50" />
+        </div>
+      )}
+      {error && <p className="rounded-lg bg-red-50 px-4 py-2.5 text-sm text-red-600">{error}</p>}
+
+      {/* Desktop-only button */}
+      <button type="button" onClick={handleNext} disabled={saving}
+        className="hidden lg:flex w-full items-center justify-center gap-1.5 rounded-xl bg-stone-900 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800 disabled:opacity-60">
+        {saving ? "Salvando…" : "Continuar para entrega →"}
+      </button>
+    </div>
+  );
+}
+
+// ─── Step: Entrega ────────────────────────────────────────────────────────────
+
+function DeliveryStep({
+  lines, data, onChange, onNext, onBack, registerSubmit,
+}: {
+  lines: { productId: string; quantity: number }[];
+  data: ShippingData; onChange: (d: ShippingData) => void;
+  onNext: () => void; onBack: () => void;
+  registerSubmit: (fn: () => Promise<void>) => void;
+}) {
+  const [cepDigits, setCepDigits] = useState(data.cep);
+  const [loadingCep, setLoadingCep] = useState(false);
+  const [cepError, setCepError] = useState<string | null>(null);
+  const [options, setOptions] = useState<NormalizedShippingOption[] | null>(null);
+  const [loadingShipping, setLoadingShipping] = useState(false);
+  const [shippingError, setShippingError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(data.optionId || null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const abortRef = useRef<AbortController | null>(null);
+  const debRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { cheapestIds, fastestIds } = useMemo(() => rankHighlights(options ?? []), [options]);
+
+  const lookupCep = useCallback(async (digits: string) => {
+    setLoadingCep(true); setCepError(null);
+    try {
+      const r = await fetch(`https://viacep.com.br/ws/${digits}/json/`);
+      const d = await r.json() as Record<string, string>;
+      if (d.erro) { setCepError("CEP não encontrado."); return; }
+      onChange({ ...data, cep: digits, street: d.logradouro || data.street, neighborhood: d.bairro || data.neighborhood, city: d.localidade || data.city, state: d.uf || data.state });
+    } catch { setCepError("Não foi possível consultar o CEP."); }
+    finally { setLoadingCep(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, onChange]);
+
+  const quoteShipping = useCallback(async (digits: string) => {
+    abortRef.current?.abort();
+    const ac = new AbortController(); abortRef.current = ac;
+    setLoadingShipping(true); setShippingError(null); setOptions(null);
+    try {
+      const r = await fetch("/api/shipping", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ destinationCep: digits, lines }), signal: ac.signal });
+      const j = await r.json() as { options?: NormalizedShippingOption[]; error?: string };
+      if (!r.ok || !j.options?.length) { setShippingError(j.error ?? "Nenhuma opção disponível."); return; }
+      setOptions(j.options);
+    } catch (e) { if (e instanceof DOMException && e.name === "AbortError") return; setShippingError("Erro ao calcular frete."); }
+    finally { setLoadingShipping(false); }
+  }, [lines]);
+
+  useEffect(() => {
+    if (debRef.current) clearTimeout(debRef.current);
+    if (cepDigits.length !== 8) { setOptions(null); setShippingError(null); return; }
+    debRef.current = setTimeout(() => {
+      void lookupCep(cepDigits); void quoteShipping(cepDigits);
+      try { sessionStorage.setItem("shipping_cep", cepDigits); } catch {}
+    }, 600);
+    return () => { if (debRef.current) clearTimeout(debRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cepDigits]);
+
+  useEffect(() => {
+    if (!options?.length) return;
+    const first = options.find((o) => cheapestIds.has(o.id)) ?? options[0];
+    if (!selectedId || !options.some((o) => o.id === selectedId)) setSelectedId(first?.id ?? null);
+  }, [options, cheapestIds, selectedId]);
+
+  useEffect(() => {
+    if (!selectedId || !options?.length) return;
+    const o = options.find((x) => x.id === selectedId); if (!o) return;
+    onChange({ ...data, optionId: o.id, optionLabel: `${o.carrierName} — ${o.serviceName}`, optionPrice: o.price, deliveryLabel: daysLabel(o) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, options]);
+
+  const handleNext = useCallback(async () => {
+    if (cepDigits.length !== 8) { setFormError("Informe um CEP válido."); return; }
+    if (!data.street.trim()) { setFormError("Informe a rua/logradouro."); return; }
+    if (!data.number.trim()) { setFormError("Informe o número."); return; }
+    if (!data.city.trim() || !data.state.trim()) { setFormError("Informe cidade e estado."); return; }
+    if (!selectedId) { setFormError("Selecione uma opção de frete."); return; }
+    setFormError(null); onNext();
+  }, [cepDigits.length, data, selectedId, onNext]);
+
+  useEffect(() => { registerSubmit(handleNext); }, [registerSubmit, handleNext]);
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">CEP</label>
+        <div className="relative">
+          <input type="text" inputMode="numeric" autoComplete="postal-code" placeholder="00000-000"
+            value={cepMask(cepDigits)} onChange={(e) => { const d = onlyDigits(e.target.value); setCepDigits(d); onChange({ ...data, cep: d }); if (d.length < 8) { setOptions(null); setShippingError(null); } }}
+            className={inputCls} />
+          {loadingCep && <span className="absolute right-3.5 top-1/2 -translate-y-1/2"><span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-stone-200 border-t-stone-700" /></span>}
+        </div>
+        {cepDigits.length > 0 && cepDigits.length < 8 && <p className="mt-1.5 text-xs text-stone-400">CEP incompleto.</p>}
+        {cepError && <p className="mt-1.5 text-xs text-red-500">{cepError}</p>}
+      </div>
+
+      <div>
+        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Rua / Logradouro</label>
+        <input type="text" autoComplete="street-address" placeholder="Rua das Flores"
+          value={data.street} onChange={(e) => onChange({ ...data, street: e.target.value })} className={inputCls} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Número</label>
+          <input type="text" placeholder="123"
+            value={data.number} onChange={(e) => onChange({ ...data, number: e.target.value })} className={inputCls} />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">
+            Complemento <span className="font-normal normal-case tracking-normal text-stone-400">(opcional)</span>
+          </label>
+          <input type="text" placeholder="Apto 4"
+            value={data.complement} onChange={(e) => onChange({ ...data, complement: e.target.value })} className={inputCls} />
+        </div>
+      </div>
+
+      <div>
+        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Bairro</label>
+        <input type="text" placeholder="Centro"
+          value={data.neighborhood} onChange={(e) => onChange({ ...data, neighborhood: e.target.value })} className={inputCls} />
+      </div>
+
+      <div className="grid grid-cols-[1fr_5rem] gap-4">
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Cidade</label>
+          <input type="text" autoComplete="address-level2" placeholder="São Paulo"
+            value={data.city} onChange={(e) => onChange({ ...data, city: e.target.value })} className={inputCls} />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">UF</label>
+          <input type="text" autoComplete="address-level1" placeholder="SP" maxLength={2}
+            value={data.state} onChange={(e) => onChange({ ...data, state: e.target.value.toUpperCase() })} className={inputCls} />
+        </div>
+      </div>
+
+      {cepDigits.length === 8 && (
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-500">Opções de frete</p>
+          <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+            {loadingShipping && (
+              <div className="flex items-center gap-3 px-4 py-4 text-sm text-stone-500">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-stone-200 border-t-stone-700" />
+                Calculando frete…
+              </div>
+            )}
+            {shippingError && !loadingShipping && <p className="px-4 py-4 text-sm text-red-500">{shippingError}</p>}
+            {!loadingShipping && options?.length ? (
+              <ul className="divide-y divide-stone-100">
+                {options.map((o, idx) => {
+                  const isCheap = cheapestIds.has(o.id); const isFast = fastestIds.has(o.id);
+                  const id = `ship-${idx}-${o.id}`; const sel = selectedId === o.id;
+                  return (
+                    <li key={id}>
+                      <label htmlFor={id} className={`flex cursor-pointer items-start gap-3 px-4 py-3.5 text-sm transition-colors ${sel ? "bg-stone-50" : "hover:bg-stone-50/50"}`}>
+                        <input id={id} type="radio" name="ship-opt" checked={sel} onChange={() => setSelectedId(o.id)} className="mt-0.5 shrink-0 accent-stone-900" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`font-medium ${sel ? "text-stone-900" : "text-stone-700"}`}>{o.carrierName}</span>
+                            <div className="flex shrink-0 gap-1">
+                              {isCheap && <span className="rounded-md bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">Menor preço</span>}
+                              {isFast && <span className="rounded-md bg-amber-500 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">Mais rápido</span>}
+                            </div>
+                          </div>
+                          <div className="mt-0.5 flex items-center justify-between gap-2">
+                            <span className="text-xs text-stone-500">{o.serviceName} · {daysLabel(o)}</span>
+                            <span className={`shrink-0 text-xs font-semibold tabular-nums ${o.price === 0 ? "text-emerald-600" : "text-stone-900"}`}>
+                              {o.price === 0 ? "Grátis" : formatPrice(o.price)}
+                            </span>
+                          </div>
+                        </div>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      {formError && <p className="rounded-lg bg-red-50 px-4 py-2.5 text-sm text-red-600">{formError}</p>}
+
+      {/* Desktop-only buttons */}
+      <div className="hidden lg:flex gap-3 pt-1">
+        <button type="button" onClick={onBack}
+          className="flex items-center gap-1.5 rounded-xl border border-stone-200 px-5 py-3 text-sm font-medium text-stone-600 transition hover:bg-stone-50">
+          ← Voltar
+        </button>
+        <button type="button" onClick={handleNext}
+          className="flex flex-1 items-center justify-center rounded-xl bg-stone-900 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800">
+          Confirmar endereço →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Step: Confirmar ──────────────────────────────────────────────────────────
+
+function ConfirmStep({
+  loggedIn, contact, shipping, lines, subtotal, subtotalPix,
+  paymentMethod, onPaymentMethodChange,
+  onPay, onBack, error, pending,
+}: {
+  loggedIn: boolean; contact: ContactData; shipping: ShippingData; lines: CartLine[];
+  subtotal: number; subtotalPix: number;
+  paymentMethod: PaymentMethod; onPaymentMethodChange: (m: PaymentMethod) => void;
+  onPay: () => void; onBack: () => void; error: string | null; pending: boolean;
+}) {
+  // Max installments across all items (fallback 6)
+  const maxInstallments = lines.reduce((acc, l) => {
+    const n = l.installmentCount ?? 0;
+    return n > acc ? n : acc;
+  }, 0) || 6;
+
+  const shippingAmount = shipping.optionPrice;
+  const pixTotal = subtotalPix + shippingAmount;
+  const cardTotal = subtotal + shippingAmount;
+  const cardInstallmentValue = installmentValueEqualParts(cardTotal, maxInstallments);
+
+  const ReviewCard = ({ title, onEdit, children }: { title: string; onEdit: () => void; children: React.ReactNode }) => (
+    <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+      <div className="flex items-center justify-between border-b border-stone-100 px-4 py-3">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">{title}</p>
+        <button type="button" onClick={onEdit} className="text-xs font-medium text-stone-500 underline-offset-2 hover:text-stone-900 hover:underline transition-colors">Editar</button>
+      </div>
+      <div className="px-4 py-3 text-sm text-stone-700 space-y-0.5">{children}</div>
+    </div>
   );
 
-  const onShippingChange = useCallback(
-    (s: CheckoutShippingSelection | null) => setShipping(s),
-    []
+  return (
+    <div className="space-y-4">
+      {/* Contact review */}
+      <ReviewCard title="Contato" onEdit={onBack}>
+        {!loggedIn && contact.name && <p className="font-medium">{contact.name}</p>}
+        <p>{contact.email}</p>
+        {contact.phone && <p className="text-stone-500">{contact.phone}</p>}
+        {contact.cpf && <p className="text-stone-500">CPF: {contact.cpf}</p>}
+      </ReviewCard>
+
+      {/* Delivery review */}
+      <ReviewCard title="Endereço de entrega" onEdit={onBack}>
+        <p>{shipping.street}{shipping.number ? `, ${shipping.number}` : ""}{shipping.complement ? ` — ${shipping.complement}` : ""}</p>
+        {shipping.neighborhood && <p className="text-xs text-stone-500">{shipping.neighborhood}</p>}
+        <p className="text-xs text-stone-500">{shipping.city}{shipping.state ? ` — ${shipping.state}` : ""} · CEP {cepMask(shipping.cep)}</p>
+        {shipping.optionLabel && (
+          <div className="mt-2 flex items-center justify-between border-t border-stone-100 pt-2">
+            <div>
+              <p className="text-xs font-medium text-stone-800">{shipping.optionLabel}</p>
+              <p className="text-[11px] text-stone-400">{shipping.deliveryLabel}</p>
+            </div>
+            <span className={`text-sm font-bold tabular-nums ${shipping.optionPrice === 0 ? "text-emerald-600" : "text-stone-900"}`}>
+              {shipping.optionPrice === 0 ? "Grátis" : formatPrice(shipping.optionPrice)}
+            </span>
+          </div>
+        )}
+      </ReviewCard>
+
+      {/* Payment method selector */}
+      <div className={`overflow-hidden rounded-xl border-2 bg-white shadow-sm transition-colors ${paymentMethod === null ? "border-amber-400" : "border-stone-200"}`}>
+        <div className="flex items-center justify-between border-b border-stone-100 px-4 py-3">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">Forma de pagamento</p>
+          {paymentMethod === null && (
+            <span className="flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-600">
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+              Obrigatório
+            </span>
+          )}
+        </div>
+
+        {paymentMethod === null && (
+          <p className="px-4 pb-0 pt-3 text-sm font-medium text-stone-600">
+            Escolha como deseja pagar:
+          </p>
+        )}
+
+        <div className="grid grid-cols-2 gap-3 p-4">
+          {/* Pix */}
+          <button
+            type="button"
+            onClick={() => onPaymentMethodChange("pix")}
+            className={`flex flex-col items-start gap-2 rounded-xl border-2 p-4 text-left transition-all ${
+              paymentMethod === "pix"
+                ? "border-stone-900 bg-stone-50 shadow-sm"
+                : paymentMethod === null
+                  ? "border-dashed border-stone-300 hover:border-stone-400 hover:bg-stone-50/50"
+                  : "border-stone-200 opacity-60 hover:opacity-100 hover:border-stone-300"
+            }`}
+          >
+            <div className="flex w-full items-center gap-2">
+              <Image src="/pix-icon.svg" alt="Pix" width={18} height={18} unoptimized className="h-[18px] w-[18px] shrink-0 object-contain" />
+              <span className="text-sm font-semibold text-stone-900">Pix</span>
+              <span className={`ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 transition-all ${paymentMethod === "pix" ? "border-stone-900 bg-stone-900" : "border-stone-300 bg-white"}`}>
+                {paymentMethod === "pix" && <svg className="h-2.5 w-2.5 text-white" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+              </span>
+            </div>
+            <div>
+              <p className="text-base font-bold tabular-nums text-stone-900">{formatPrice(pixTotal)}</p>
+              <p className="text-[11px] text-stone-400">à vista · inclui frete</p>
+            </div>
+          </button>
+
+          {/* Cartão */}
+          <button
+            type="button"
+            onClick={() => onPaymentMethodChange("card")}
+            className={`flex flex-col items-start gap-2 rounded-xl border-2 p-4 text-left transition-all ${
+              paymentMethod === "card"
+                ? "border-stone-900 bg-stone-50 shadow-sm"
+                : paymentMethod === null
+                  ? "border-dashed border-stone-300 hover:border-stone-400 hover:bg-stone-50/50"
+                  : "border-stone-200 opacity-60 hover:opacity-100 hover:border-stone-300"
+            }`}
+          >
+            <div className="flex w-full items-center gap-2">
+              <svg className="h-[18px] w-[18px] shrink-0 text-stone-600" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+              </svg>
+              <span className="text-sm font-semibold text-stone-900">Cartão</span>
+              <span className={`ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 transition-all ${paymentMethod === "card" ? "border-stone-900 bg-stone-900" : "border-stone-300 bg-white"}`}>
+                {paymentMethod === "card" && <svg className="h-2.5 w-2.5 text-white" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+              </span>
+            </div>
+            <div>
+              <p className="text-base font-bold tabular-nums text-stone-900">{formatPrice(cardTotal)}</p>
+              <p className="text-[11px] text-stone-400">{maxInstallments}× de {formatPrice(cardInstallmentValue)} s/ juros · inclui frete</p>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* Items — only shown on mobile (desktop has the right panel) */}
+      <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm lg:hidden">
+        <p className="border-b border-stone-100 px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-stone-400">Itens</p>
+        <ul className="divide-y divide-stone-100">
+          {lines.map((l) => (
+            <li key={l.lineId} className="flex gap-3 px-4 py-3">
+              <div className="relative h-12 w-10 shrink-0 overflow-hidden rounded-md bg-stone-100">
+                {l.image ? <Image src={l.image} alt="" fill className="object-cover" sizes="40px" /> : null}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-stone-900">{l.name}</p>
+                <p className="text-xs text-stone-500">{l.quantity} × {formatPrice(l.price)}</p>
+              </div>
+              <p className="shrink-0 text-sm font-semibold tabular-nums text-stone-900">{formatPrice(l.price * l.quantity)}</p>
+            </li>
+          ))}
+        </ul>
+        <div className="border-t border-stone-100 px-4 py-3 space-y-1.5 text-sm">
+          <div className="flex justify-between text-stone-500">
+            <span>Subtotal</span>
+            <span className="tabular-nums">{formatPrice(subtotal)}</span>
+          </div>
+          <div className="flex justify-between text-stone-500">
+            <span>Frete</span>
+            <span className={`tabular-nums ${shippingAmount === 0 ? "text-emerald-600" : ""}`}>
+              {shippingAmount === 0 ? "Grátis" : formatPrice(shippingAmount)}
+            </span>
+          </div>
+          <div className="flex justify-between font-bold text-stone-900">
+            <span>Total</span>
+            <span className="tabular-nums">{formatPrice(cardTotal)}</span>
+          </div>
+        </div>
+      </div>
+
+      {error && <p className="rounded-lg bg-red-50 px-4 py-2.5 text-sm text-red-600">{error}</p>}
+
+      {/* Desktop: only Voltar — pay button lives in the right summary panel */}
+      <div className="hidden lg:flex gap-3 pt-1">
+        <button type="button" onClick={onBack}
+          className="flex items-center gap-1.5 rounded-xl border border-stone-200 px-5 py-3.5 text-sm font-medium text-stone-600 transition hover:bg-stone-50">
+          ← Voltar
+        </button>
+      </div>
+
+      {/* Mobile: pay button in fixed bottom bar (handled by mobileTriggerRef), but we still expose onPay for mobile */}
+    </div>
   );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+export function CheckoutClient({ initialEmail, initialName, initialPhone, loggedIn }: Props) {
+  const { items, hydrated, clear, subtotalPix } = useCart();
+  const [step, setStep] = useState(1);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(null);
+  const [animKey, setAnimKey] = useState(0);
+  const [dir, setDir] = useState<"fwd" | "bwd">("fwd");
+  const [contactDone, setContactDone] = useState(false);
+  const [deliveryDone, setDeliveryDone] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [redirecting, setRedirecting] = useState(false);
+  const [pending, startTransition] = useTransition();
+
+  // Ref for mobile bottom bar to trigger current step's submit
+  const mobileTriggerRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const registerSubmit = useCallback((fn: () => Promise<void>) => {
+    mobileTriggerRef.current = fn;
+  }, []);
+
+  const sanitizedPhone =
+    !initialPhone || initialPhone === "-" || initialPhone.replace(/\D/g, "").length < 10 ? "" : initialPhone;
+
+  const [contact, setContact] = useState<ContactData>({ name: initialName, email: initialEmail, phone: sanitizedPhone, cpf: "" });
+  const [shipping, setShipping] = useState<ShippingData>({
+    cep: "", street: "", number: "", complement: "", neighborhood: "", city: "", state: "",
+    optionId: "", optionLabel: "", optionPrice: 0, deliveryLabel: "",
+  });
 
   useEffect(() => {
     if (loggedIn || typeof window === "undefined") return;
     try {
-      const stored = window.sessionStorage.getItem(GUEST_CHECKOUT_EMAIL_KEY);
-      if (stored?.trim()) {
-        setEmail(stored.trim());
-        window.sessionStorage.removeItem(GUEST_CHECKOUT_EMAIL_KEY);
-      }
-    } catch {
-      /* private mode */
-    }
+      const s = window.sessionStorage.getItem(GUEST_CHECKOUT_EMAIL_KEY);
+      if (s?.trim()) { setContact((p) => ({ ...p, email: s.trim() })); window.sessionStorage.removeItem(GUEST_CHECKOUT_EMAIL_KEY); }
+    } catch {}
   }, [loggedIn]);
 
-  const lines = useMemo(
-    () =>
-      items.map((i) => ({
-        lineId: i.lineId,
-        productId: i.productId,
-        quantity: i.quantity,
-        name: i.name,
-        price: i.price,
-        image: i.image,
-        pieceSelections: i.pieceSelections,
-      })),
-    [items]
-  );
+  useEffect(() => {
+    try { const c = sessionStorage.getItem("shipping_cep") ?? ""; if (c.length === 8) setShipping((p) => ({ ...p, cep: c })); } catch {}
+  }, []);
 
-  const shippingLines = useMemo(
-    () =>
-      lines.map((l) => ({ productId: l.productId, quantity: l.quantity })),
-    [lines]
-  );
+  const lines = useMemo(() => items.map((i) => ({ lineId: i.lineId, productId: i.productId, quantity: i.quantity, name: i.name, price: i.price, pixPrice: i.pixPrice, installmentCount: i.installmentCount, image: i.image, pieceSelections: i.pieceSelections })), [items]);
+  const shippingLines = useMemo(() => lines.map((l) => ({ productId: l.productId, quantity: l.quantity })), [lines]);
+  const subtotal = useMemo(() => lines.reduce((a, l) => a + l.price * l.quantity, 0), [lines]);
 
-  const subtotalProducts = useMemo(() => {
-    return lines.reduce((acc, l) => acc + l.price * l.quantity, 0);
-  }, [lines]);
+  function navigate(to: number, direction: "fwd" | "bwd") {
+    setDir(direction); setStep(to); setAnimKey((k) => k + 1);
+  }
 
-  const grandTotal = useMemo(
-    () => subtotalProducts + CHECKOUT_SHIPPING_AMOUNT_BRL,
-    [subtotalProducts]
-  );
-
-  const onSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault();
-      setError(null);
-
-      if (lines.length === 0) {
-        setError("Seu carrinho está vazio.");
-        return;
-      }
-
-      if (!loggedIn && !email.trim()) {
-        setError("Informe seu e-mail.");
-        return;
-      }
-
-      if (!shipping) {
-        setError("Informe o CEP e escolha uma opção de frete.");
-        return;
-      }
-
-      startTransition(async () => {
-        const res = await placeOrderAction({
-          email: loggedIn ? undefined : email.trim(),
-          lines: lines.map((l) => ({
-            productId: l.productId,
-            quantity: l.quantity,
-            ...(l.pieceSelections?.length
-              ? { pieceSelections: l.pieceSelections }
-              : {}),
-          })),
-          shipping: {
-            destinationCep: shipping.destinationCep,
-            optionId: shipping.optionId,
-          },
-        });
-
-        if (!res.ok) {
-          setError(res.error);
-          return;
-        }
-
-        clear();
-        window.location.assign(res.checkoutUrl);
+  const handlePay = useCallback(() => {
+    setSubmitError(null);
+    startTransition(async () => {
+      const res = await placeOrderAction({
+        email: loggedIn ? undefined : contact.email.trim(),
+        lines: lines.map((l) => ({ productId: l.productId, quantity: l.quantity, ...(l.pieceSelections?.length ? { pieceSelections: l.pieceSelections } : {}) })),
+        shipping: { destinationCep: shipping.cep, optionId: shipping.optionId },
+        contact: { name: contact.name.trim() || undefined, phone: contact.phone.replace(/\D/g, "") || undefined },
+        cpf: contact.cpf.replace(/\D/g, "") || undefined,
+        address: { street: shipping.street.trim() || undefined, number: shipping.number.trim() || undefined, complement: shipping.complement.trim() || undefined, neighborhood: shipping.neighborhood.trim() || undefined, city: shipping.city.trim() || undefined, state: shipping.state.trim() || undefined },
       });
-    },
-    [lines, loggedIn, email, shipping, clear]
-  );
+      if (!res.ok) { setSubmitError(res.error); return; }
+      setRedirecting(true); clear(); window.location.assign(res.checkoutUrl);
+    });
+  }, [loggedIn, contact, shipping, lines, clear]);
 
-  if (!hydrated) {
+  // Mobile back navigation
+  function mobileBack() {
+    if (step === 2) { setContactDone(false); navigate(1, "bwd"); }
+    else if (step === 3) { setDeliveryDone(false); navigate(2, "bwd"); }
+  }
+
+  // Redirecting overlay
+  if (pending || redirecting) {
     return (
-      <div className="mx-auto max-w-lg px-6 py-16 text-sm text-stone-500">
-        Carregando…
+      <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center gap-6 bg-white">
+        <div className="relative flex items-center justify-center">
+          <span className="absolute h-16 w-16 animate-ping rounded-full bg-stone-100 opacity-75" />
+          <span className="relative flex h-12 w-12 items-center justify-center rounded-full bg-stone-900">
+            <svg className="h-6 w-6 text-white" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+            </svg>
+          </span>
+        </div>
+        <div className="text-center">
+          <p className="text-base font-semibold text-stone-900">Finalizando seu pedido…</p>
+          <p className="mt-1 text-sm text-stone-500">Você será redirecionado para o pagamento seguro.</p>
+        </div>
+        <p className="flex items-center gap-1.5 text-xs text-stone-400">
+          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" /></svg>
+          Ambiente seguro · Não feche esta página
+        </p>
       </div>
     );
   }
+
+  if (!hydrated) return <div className="mx-auto max-w-lg px-6 py-16 text-sm text-stone-500">Carregando…</div>;
 
   if (lines.length === 0) {
     return (
       <div className="mx-auto max-w-lg px-6 py-16 text-center">
         <h1 className="text-xl font-semibold text-stone-900">Checkout</h1>
-        <p className="mt-3 text-sm text-stone-600">
-          Seu carrinho está vazio.
-        </p>
-        <Link
-          href="/"
-          className="mt-8 inline-block rounded-full bg-stone-900 px-6 py-3 text-sm font-medium text-white hover:bg-stone-800 transition-colors"
-        >
-          Ver produtos
-        </Link>
+        <p className="mt-3 text-sm text-stone-600">Seu carrinho está vazio.</p>
+        <Link href="/" className="mt-8 inline-block rounded-full bg-stone-900 px-6 py-3 text-sm font-medium text-white hover:bg-stone-800 transition-colors">Ver produtos</Link>
       </div>
     );
   }
 
-  return (
-    <div className="mx-auto max-w-lg px-6 py-10">
-      <h1 className="text-xl font-semibold text-stone-900">Checkout</h1>
-      <p className="mt-1 text-sm text-stone-500">
-        O frete cobrado no pagamento está em {formatPrice(CHECKOUT_SHIPPING_AMOUNT_BRL)}{" "}
-        (testes; sem homologação). Transportadora e CEP continuam registrados. Ao
-        confirmar, abre o checkout InfinitePay.
-      </p>
+  const mobileActionLabel = step === 1 ? "Continuar para entrega →" : step === 2 ? "Confirmar endereço →" : "Efetuar pagamento →";
 
-      <form onSubmit={onSubmit} className="mt-8 space-y-8">
-        <section className="space-y-3">
-          <h2 className="text-xs font-semibold uppercase tracking-widest text-stone-500">
-            Resumo
-          </h2>
-          <ul className="divide-y divide-stone-200 rounded-lg border border-stone-200">
-            {lines.map((line) => (
-              <li key={line.lineId} className="flex gap-3 p-3">
-                <div className="relative h-16 w-14 shrink-0 overflow-hidden rounded bg-stone-100">
-                  {line.image ? (
-                    <Image
-                      src={line.image}
-                      alt=""
-                      fill
-                      className="object-cover"
-                      sizes="56px"
-                    />
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-[9px] text-stone-400 px-0.5 text-center">
-                      —
-                    </div>
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-stone-900 truncate">
-                    {line.name}
-                  </p>
-                  <p className="text-xs text-stone-500">
-                    {line.quantity} × {formatPrice(line.price)}
-                  </p>
-                  {line.pieceSelections && line.pieceSelections.length > 0 && (
-                    <ul className="mt-1.5 space-y-1">
-                      {line.pieceSelections.map((row, idx) => {
-                        const detail = describeCartPieceSelection(row);
-                        if (!detail) return null;
-                        return (
-                          <li
-                            key={`${row.pieceName}-${idx}`}
-                            className="text-xs text-stone-600"
-                          >
-                            {line.pieceSelections!.length > 1 ? (
-                              <>
-                                <span className="font-medium text-stone-700">
-                                  {row.pieceName}:{" "}
-                                </span>
-                                {detail}
-                              </>
-                            ) : (
-                              detail
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </div>
-                <p className="text-sm font-medium tabular-nums text-stone-900">
-                  {formatPrice(line.price * line.quantity)}
+  return (
+    <>
+      <style>{`
+        @keyframes ckFwd { from { opacity:0; transform:translateX(24px); } to { opacity:1; transform:translateX(0); } }
+        @keyframes ckBwd { from { opacity:0; transform:translateX(-24px); } to { opacity:1; transform:translateX(0); } }
+        .ck-fwd { animation: ckFwd 300ms cubic-bezier(.4,0,.2,1) both; }
+        .ck-bwd { animation: ckBwd 300ms cubic-bezier(.4,0,.2,1) both; }
+      `}</style>
+
+      {/* ══════════════════════════════ MOBILE ══════════════════════════════ */}
+      <div className="flex flex-col lg:hidden">
+        {/* Product summary at top (collapsible) */}
+        <MobileOrderSummary lines={lines} subtotal={subtotal} />
+
+        {/* Sticky step bar — sticks just below the site header (h-14 = 56px) */}
+        <div className="sticky top-14 z-40 border-b border-stone-200 bg-white/95 px-5 py-3 backdrop-blur-sm">
+          <StepBar current={step} />
+        </div>
+
+        {/* Scrollable form content */}
+        <div className="px-5 pb-32 pt-7">
+          {/* Step heading */}
+          <div className="mb-6">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-stone-400">
+              {["Seus dados de contato", "Para onde enviamos", "Revise e finalize"][step - 1]}
+            </p>
+            <h2 className="mt-1 text-2xl font-bold tracking-tight text-stone-900">
+              {["Contato", "Endereço de entrega", "Confirmar pedido"][step - 1]}
+            </h2>
+          </div>
+
+          {/* Animated step */}
+          <div key={animKey} className={dir === "fwd" ? "ck-fwd" : "ck-bwd"}>
+            {step === 1 && (
+              <ContactStep loggedIn={loggedIn} hadNoPhone={sanitizedPhone === ""}
+                initialEmail={initialEmail} initialName={initialName}
+                data={contact} onChange={setContact} registerSubmit={registerSubmit}
+                onNext={() => { setContactDone(true); navigate(2, "fwd"); }} />
+            )}
+            {step === 2 && (
+              <DeliveryStep lines={shippingLines} data={shipping} onChange={setShipping}
+                registerSubmit={registerSubmit}
+                onNext={() => { setDeliveryDone(true); navigate(3, "fwd"); }}
+                onBack={() => { setContactDone(false); navigate(1, "bwd"); }} />
+            )}
+            {step === 3 && (
+              <ConfirmStep loggedIn={loggedIn} contact={contact} shipping={shipping}
+                lines={lines} subtotal={subtotal} subtotalPix={subtotalPix}
+                paymentMethod={paymentMethod} onPaymentMethodChange={setPaymentMethod}
+                onPay={handlePay} onBack={() => { setDeliveryDone(false); navigate(2, "bwd"); }}
+                error={submitError} pending={pending} />
+            )}
+          </div>
+        </div>
+
+        {/* Fixed bottom action bar */}
+        <div className="fixed bottom-0 inset-x-0 z-50 border-t border-stone-200 bg-white/95 backdrop-blur-sm">
+          <div className="flex items-center gap-3 px-5 py-4">
+            {step > 1 && (
+              <button type="button" onClick={mobileBack}
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-stone-200 text-stone-600 transition hover:bg-stone-50">
+                ←
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={step === 3 ? handlePay : () => void mobileTriggerRef.current()}
+              disabled={pending}
+              className="flex flex-1 items-center justify-center rounded-xl bg-stone-900 py-3.5 text-sm font-bold text-white shadow-sm transition hover:bg-stone-800 disabled:opacity-60"
+            >
+              {pending
+                ? <span className="flex items-center gap-2"><span className="h-4 w-4 animate-spin rounded-full border-2 border-stone-400 border-t-white" />Processando…</span>
+                : mobileActionLabel}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ══════════════════════════════ DESKTOP ══════════════════════════════ */}
+      <div className="hidden lg:block min-h-screen bg-stone-50">
+        <div className="mx-auto max-w-5xl px-8 py-10">
+          {/* Header row */}
+          <div className="mb-8 flex items-center justify-between">
+            <Link href="/" className="text-xs font-medium text-stone-400 transition hover:text-stone-700">← Voltar à loja</Link>
+            <h1 className="text-lg font-semibold text-stone-900">Checkout</h1>
+            <div className="w-24" />
+          </div>
+
+          <div className="grid grid-cols-[1fr_380px] gap-10 items-start">
+            {/* Left: form — white card */}
+            <div className="rounded-2xl bg-white p-8 shadow-sm">
+              {/* Step bar */}
+              <div className="mb-8 max-w-xs">
+                <StepBar current={step} />
+              </div>
+
+              {/* Step heading */}
+              <div className="mb-7">
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-stone-400">
+                  {["Seus dados de contato", "Para onde enviamos", "Você está quase lá!"][step - 1]}
                 </p>
-              </li>
-            ))}
-          </ul>
-          <div className="space-y-1 text-sm">
-            <div className="flex justify-between">
-              <span className="text-stone-600">Subtotal</span>
-              <span className="tabular-nums text-stone-900">
-                {formatPrice(subtotalProducts)}
-              </span>
+                <h2 className="mt-1 text-2xl font-bold tracking-tight text-stone-900">
+                  {["Contato", "Endereço de entrega", "Confirmar pedido"][step - 1]}
+                </h2>
+              </div>
+
+              {/* Animated step */}
+              <div key={animKey} className={dir === "fwd" ? "ck-fwd" : "ck-bwd"}>
+                {step === 1 && (
+                  <ContactStep loggedIn={loggedIn} hadNoPhone={sanitizedPhone === ""}
+                    initialEmail={initialEmail} initialName={initialName}
+                    data={contact} onChange={setContact} registerSubmit={registerSubmit}
+                    onNext={() => { setContactDone(true); navigate(2, "fwd"); }} />
+                )}
+                {step === 2 && (
+                  <DeliveryStep lines={shippingLines} data={shipping} onChange={setShipping}
+                    registerSubmit={registerSubmit}
+                    onNext={() => { setDeliveryDone(true); navigate(3, "fwd"); }}
+                    onBack={() => { setContactDone(false); navigate(1, "bwd"); }} />
+                )}
+                {step === 3 && (
+                  <ConfirmStep loggedIn={loggedIn} contact={contact} shipping={shipping}
+                    lines={lines} subtotal={subtotal} subtotalPix={subtotalPix}
+                    paymentMethod={paymentMethod} onPaymentMethodChange={setPaymentMethod}
+                    onPay={handlePay} onBack={() => { setDeliveryDone(false); navigate(2, "bwd"); }}
+                    error={submitError} pending={pending} />
+                )}
+              </div>
             </div>
-            <div className="flex justify-between">
-              <span className="text-stone-600">Frete (cobrado)</span>
-              <span className="tabular-nums text-stone-900">
-                {shipping
-                  ? formatPrice(CHECKOUT_SHIPPING_AMOUNT_BRL)
-                  : "—"}
-              </span>
-            </div>
-            <div className="flex justify-between pt-1 border-t border-stone-200">
-              <span className="text-stone-800 font-medium">Total</span>
-              <span className="font-semibold text-stone-900 tabular-nums">
-                {formatPrice(grandTotal)}
-              </span>
+
+            {/* Right: summary (sticky) */}
+            <div className="sticky top-24">
+              <DesktopSummary
+                lines={lines} shipping={shipping}
+                deliveryDone={deliveryDone}
+                subtotal={subtotal} subtotalPix={subtotalPix}
+                step={step} paymentMethod={paymentMethod}
+                onPay={handlePay} pending={pending}
+              />
             </div>
           </div>
-        </section>
-
-        <CheckoutShippingSection
-          lines={shippingLines}
-          onFulfillmentChange={onShippingChange}
-        />
-
-        <section className="space-y-3">
-          <h2 className="text-xs font-semibold uppercase tracking-widest text-stone-500">
-            Contato
-          </h2>
-          {loggedIn ? (
-            <p className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2.5 text-sm text-stone-800">
-              Pedido vinculado a <span className="font-medium">{email}</span>
-            </p>
-          ) : (
-            <>
-              <div>
-                <label
-                  htmlFor="checkout-email"
-                  className="block text-xs text-stone-500 mb-1.5"
-                >
-                  E-mail
-                </label>
-                <input
-                  id="checkout-email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-900 focus:border-transparent"
-                  placeholder="seu@email.com"
-                />
-              </div>
-              <div className="pt-1">
-                <GoogleSignInButton
-                  nextPath="/checkout"
-                  className="flex w-full items-center justify-center gap-2 rounded-lg border border-stone-300 bg-white py-2.5 text-sm font-medium text-stone-800 shadow-sm transition-colors hover:bg-stone-50"
-                />
-                <p className="mt-2 text-xs text-stone-500">
-                  Se já tem conta, entre com Google para vincular o pedido.
-                </p>
-              </div>
-            </>
-          )}
-        </section>
-
-        {error && (
-          <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-md px-3 py-2">
-            {error}
-          </p>
-        )}
-
-        <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
-          <Link
-            href="/"
-            className="rounded-full border border-stone-300 px-5 py-2.5 text-center text-sm font-medium text-stone-800 hover:bg-stone-50 transition-colors"
-          >
-            Voltar à loja
-          </Link>
-          <button
-            type="submit"
-            disabled={pending}
-            className="rounded-full bg-stone-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50 transition-colors"
-          >
-            {pending ? "Gerando pagamento…" : "Confirmar pedido"}
-          </button>
         </div>
-      </form>
-    </div>
+      </div>
+    </>
   );
 }

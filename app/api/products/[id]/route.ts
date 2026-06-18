@@ -57,6 +57,7 @@ export async function PUT(
     images,
     pieces,
     categoryIds,
+    sectionIds,
   } = body as Record<string, unknown>;
 
   try {
@@ -173,10 +174,13 @@ export async function PUT(
       if (images !== undefined) {
         await tx.productImage.deleteMany({ where: { productId: id } });
         await tx.productImage.createMany({
-          data: (images as { url: string }[]).map((img, i) => ({
+          data: (images as { url: string; colorName?: string | null }[]).map((img, i) => ({
             url: img.url,
             order: i,
             productId: id,
+            colorName: typeof img.colorName === "string" && img.colorName.trim()
+              ? img.colorName.trim()
+              : null,
           })),
         });
       }
@@ -275,6 +279,26 @@ export async function PUT(
           });
         }
       }
+
+      if (sectionIds !== undefined) {
+        const ids = Array.isArray(sectionIds)
+          ? sectionIds.filter((x): x is string => typeof x === "string")
+          : [];
+        if (ids.length > 0) {
+          const found = await tx.section.findMany({
+            where: { id: { in: ids } },
+          });
+          if (found.length !== ids.length) {
+            throw new Error("INVALID_SECTION");
+          }
+        }
+        await tx.productSection.deleteMany({ where: { productId: id } });
+        if (ids.length > 0) {
+          await tx.productSection.createMany({
+            data: ids.map((sectionId) => ({ productId: id, sectionId })),
+          });
+        }
+      }
     });
 
     const product = await prisma.product.findUnique({
@@ -293,6 +317,12 @@ export async function PUT(
     if (e instanceof Error && e.message === "INVALID_CATEGORY") {
       return NextResponse.json(
         { error: "Uma ou mais categorias são inválidas." },
+        { status: 400 }
+      );
+    }
+    if (e instanceof Error && e.message === "INVALID_SECTION") {
+      return NextResponse.json(
+        { error: "Uma ou mais seções são inválidas." },
         { status: 400 }
       );
     }

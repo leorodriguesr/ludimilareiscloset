@@ -77,6 +77,7 @@ export async function GET(request: NextRequest) {
         googleId: profile.id,
         email: profile.email,
         name: profile.name ?? "",
+        picture: profile.picture,
       });
     } catch (e) {
       console.error("[google/callback] Prisma:", e);

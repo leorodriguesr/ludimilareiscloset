@@ -157,83 +157,80 @@ export function ProductShippingQuote({
         >
           Simular frete
         </label>
-        <div className="flex gap-2">
-          <input
-            id="product-shipping-cep"
-            type="text"
-            inputMode="numeric"
-            autoComplete="postal-code"
-            placeholder="00000-000"
-            value={formatCepMask(cepDigits)}
-            onChange={(e) => setCepDigits(onlyDigits(e.target.value))}
-            className="flex-1 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-900 focus:border-transparent"
-          />
-        </div>
+        <input
+          id="product-shipping-cep"
+          type="text"
+          inputMode="numeric"
+          autoComplete="postal-code"
+          placeholder="00000-000"
+          value={formatCepMask(cepDigits)}
+          onChange={(e) => {
+            const digits = onlyDigits(e.target.value);
+            setCepDigits(digits);
+              if (digits.length === 8) {
+                try { sessionStorage.setItem("shipping_cep", digits); } catch {}
+              }
+          }}
+          className="w-full rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-900 focus:border-transparent"
+        />
         <p className="mt-1.5 text-xs text-stone-500">
           Digite o CEP para ver transportadoras, valores e prazos.
           {qty > 1 && (
             <span className="block mt-1 text-stone-600">
-              Cotação para {qty} unidades (peso total proporcional; mesma caixa
-              do cadastro).
+              Cotação para {qty} unidades.
             </span>
           )}
         </p>
+        {cepDigits.length > 0 && cepDigits.length < 8 && (
+          <p className="mt-1 text-xs text-stone-400">CEP incompleto.</p>
+        )}
       </div>
 
-      {cepDigits.length > 0 && cepDigits.length < 8 && (
-        <p className="text-xs text-stone-500">CEP incompleto.</p>
-      )}
-
       {loading && (
-        <div className="flex items-center gap-2 text-sm text-stone-600">
-          <span
-            className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-stone-200 border-t-stone-800"
-            aria-hidden
-          />
+        <div className="flex items-center gap-2 text-sm text-stone-500">
+          <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-stone-200 border-t-stone-700" aria-hidden />
           Calculando frete…
         </div>
       )}
 
       {error && !loading && cepDigits.length === 8 && (
-        <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-md px-3 py-2">
-          {error}
-        </p>
+        <p className="text-xs text-red-600">{error}</p>
       )}
 
+      {/* Lista de opções */}
       {!loading && options && options.length > 0 && (
-        <ul className="space-y-2 pt-1">
+        <ul className="overflow-hidden rounded-lg border border-stone-200 divide-y divide-stone-100">
           {options.map((o, index) => {
             const isCheap = cheapestIds.has(o.id);
             const isFast = fastestIds.has(o.id);
             return (
               <li
                 key={`${index}-${o.id}-${o.serviceName}`}
-                className={`rounded-md border px-3 py-2.5 text-sm ${
-                  isCheap || isFast
-                    ? "border-stone-900 bg-stone-50"
-                    : "border-stone-200 bg-white"
-                }`}
+                className="px-3 py-2.5 bg-white text-sm"
               >
-                <div className="flex flex-wrap items-center gap-2 gap-y-1">
-                  <span className="font-medium text-stone-900">
-                    {o.carrierName}
-                  </span>
-                  {isCheap && (
-                    <span className="text-[10px] font-semibold uppercase tracking-wide bg-emerald-700 text-white px-2 py-0.5 rounded">
-                      Menor preço
-                    </span>
-                  )}
-                  {isFast && (
-                    <span className="text-[10px] font-semibold uppercase tracking-wide bg-amber-700 text-white px-2 py-0.5 rounded">
-                      Mais rápido
-                    </span>
-                  )}
+                {/* Linha 1: transportadora + badges */}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-stone-900">{o.carrierName}</span>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {isCheap && (
+                      <span className="rounded bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
+                        Menor preço
+                      </span>
+                    )}
+                    {isFast && (
+                      <span className="rounded bg-amber-500 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
+                        Mais rápido
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <p className="text-stone-600 mt-0.5">{o.serviceName}</p>
-                <div className="mt-1 flex flex-wrap justify-between gap-2 text-stone-800">
-                  <span>{deliveryLabel(o)}</span>
-                  <span className="font-semibold tabular-nums">
-                    {formatPrice(o.price)}
+                {/* Linha 2: serviço + prazo · preço */}
+                <div className="mt-0.5 flex items-center justify-between gap-2">
+                  <span className="text-xs text-stone-500">
+                    {o.serviceName} · {deliveryLabel(o)}
+                  </span>
+                  <span className={`shrink-0 text-xs font-semibold tabular-nums ${o.price === 0 ? "text-emerald-600" : "text-stone-900"}`}>
+                    {o.price === 0 ? "Grátis" : formatPrice(o.price)}
                   </span>
                 </div>
               </li>

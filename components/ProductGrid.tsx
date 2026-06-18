@@ -2,6 +2,7 @@ import { ProductCard } from "./ProductCard";
 
 interface ProductImage {
   url: string;
+  colorName?: string | null;
 }
 
 interface ProductListItem {
@@ -39,11 +40,8 @@ export function ProductGrid({ products }: ProductGridProps) {
           id={product.id}
           name={product.name}
           price={product.price}
-          imageUrl={product.images[0]?.url ?? null}
+          images={product.images}
           tag={product.tag}
-          categoryLabel={
-            product.categories?.[0]?.category.name ?? null
-          }
         />
       ))}
     </div>

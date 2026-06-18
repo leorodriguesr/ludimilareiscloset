@@ -153,9 +153,25 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const imageCreates: { url: string; order: number }[] = [];
+  const sectionIds = Array.isArray(b.sectionIds)
+    ? b.sectionIds.filter((x): x is string => typeof x === "string")
+    : [];
+
+  if (sectionIds.length > 0) {
+    const found = await prisma.section.findMany({
+      where: { id: { in: sectionIds } },
+    });
+    if (found.length !== sectionIds.length) {
+      return NextResponse.json(
+        { error: "Uma ou mais seções são inválidas." },
+        { status: 400 }
+      );
+    }
+  }
+
+  const imageCreates: { url: string; order: number; colorName: string | null }[] = [];
   for (let i = 0; i < images.length; i++) {
-    const item = images[i] as { url?: unknown };
+    const item = images[i] as { url?: unknown; colorName?: unknown };
     const url = typeof item?.url === "string" ? item.url.trim() : "";
     if (!url) {
       return NextResponse.json(
@@ -163,7 +179,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    imageCreates.push({ url, order: i });
+    const colorName = typeof item?.colorName === "string" && item.colorName.trim()
+      ? item.colorName.trim()
+      : null;
+    imageCreates.push({ url, order: i, colorName });
   }
 
   const pieceCreates: {
@@ -265,6 +284,14 @@ export async function POST(request: NextRequest) {
               ? {
                   create: categoryIds.map((categoryId) => ({
                     category: { connect: { id: categoryId } },
+                  })),
+                }
+              : undefined,
+          sections:
+            sectionIds.length > 0
+              ? {
+                  create: sectionIds.map((sectionId) => ({
+                    section: { connect: { id: sectionId } },
                   })),
                 }
               : undefined,

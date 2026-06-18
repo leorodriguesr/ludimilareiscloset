@@ -6,15 +6,24 @@ export default async function CheckoutPage() {
   const session = await getAppSession();
   const loggedIn = Boolean(session.user);
   let initialEmail = "";
+  let initialName = "";
+  let initialPhone = "";
   if (session.user) {
     const u = await prisma.user.findUnique({
       where: { id: session.user.userId },
-      select: { email: true },
+      select: { email: true, name: true, phone: true },
     });
     initialEmail = u?.email ?? "";
+    initialName = u?.name ?? "";
+    initialPhone = u?.phone ?? "";
   }
 
   return (
-    <CheckoutClient initialEmail={initialEmail} loggedIn={loggedIn} />
+    <CheckoutClient
+      initialEmail={initialEmail}
+      initialName={initialName}
+      initialPhone={initialPhone}
+      loggedIn={loggedIn}
+    />
   );
 }

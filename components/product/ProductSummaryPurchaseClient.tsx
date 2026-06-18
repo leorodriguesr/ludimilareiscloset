@@ -52,10 +52,7 @@ export function ProductSummaryPurchaseClient({
         />
       </div>
 
-      <div className="space-y-4 border-t border-stone-100 pt-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-400">
-          Sacola e envio
-        </p>
+      <div className="space-y-4 ">
         <ProductPurchaseShippingSection
           {...purchase}
           imageUrl={coverImage}

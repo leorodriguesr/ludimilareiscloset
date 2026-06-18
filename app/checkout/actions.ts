@@ -6,6 +6,8 @@ import {
   createOrderFromCheckout,
   OrderCreateError,
   type CheckoutLineInput,
+  type OrderContactInput,
+  type OrderAddressInput,
 } from "@/lib/orders/create-order";
 import {
   createInfinitePayCheckoutLink,
@@ -18,6 +20,18 @@ import { isLocalPaymentCallbackBaseUrl } from "@/lib/site-url";
 export type PlaceOrderState =
   | { ok: true; orderId: string; checkoutUrl: string }
   | { ok: false; error: string };
+
+/** Atualiza o telefone do usuário logado caso esteja vazio ou inválido. */
+export async function updateUserPhoneAction(phone: string): Promise<void> {
+  const session = await getAppSession();
+  if (!session.user) return;
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length < 10) return;
+  await prisma.user.update({
+    where: { id: session.user.userId },
+    data: { phone: digits },
+  });
+}
 
 function guestDisplayName(email: string): string {
   const local = email.split("@")[0]?.trim();
@@ -37,6 +51,9 @@ export async function placeOrderAction(input: {
   email?: string;
   lines: CheckoutLineInput[];
   shipping: { destinationCep: string; optionId: string };
+  contact?: OrderContactInput;
+  address?: OrderAddressInput;
+  cpf?: string;
 }): Promise<PlaceOrderState> {
   const session = await getAppSession();
   const userId: string | null = session.user?.userId ?? null;
@@ -62,6 +79,11 @@ export async function placeOrderAction(input: {
       userId,
       lines: input.lines,
       shipping: input.shipping,
+      contact: {
+        ...input.contact,
+        cpf: input.cpf ?? undefined,
+      },
+      address: input.address,
     });
 
     const full = await prisma.order.findUnique({
@@ -92,23 +114,29 @@ export async function placeOrderAction(input: {
       phone_number?: string;
     };
 
+    // Telefone: preferência → coletado no checkout → User.phone (logado) → nenhum
+    const checkoutPhone = input.contact?.phone
+      ? normalizePhone(input.contact.phone)
+      : undefined;
+
     if (session.user) {
       const u = await prisma.user.findUnique({
         where: { id: session.user.userId },
         select: { name: true, phone: true },
       });
-      if (u) {
-        const phone = normalizePhone(u.phone);
-        customer = {
-          name: u.name.slice(0, 120),
-          email,
-          ...(phone ? { phone_number: phone } : {}),
-        };
-      } else {
-        customer = { name: guestDisplayName(email), email };
-      }
+      const phone = checkoutPhone ?? (u ? normalizePhone(u.phone) : undefined);
+      const name =
+        (input.contact?.name?.trim() || u?.name || guestDisplayName(email)).slice(0, 120);
+      customer = { name, email, ...(phone ? { phone_number: phone } : {}) };
     } else {
-      customer = { name: guestDisplayName(email), email };
+      const name = (
+        input.contact?.name?.trim() || guestDisplayName(email)
+      ).slice(0, 120);
+      customer = {
+        name,
+        email,
+        ...(checkoutPhone ? { phone_number: checkoutPhone } : {}),
+      };
     }
 
     const destDigits = (full.destinationCep ?? "").replace(/\D/g, "");
@@ -127,7 +155,15 @@ export async function placeOrderAction(input: {
         webhookUrl: infinitePayWebhookUrl(),
         customer,
         ...(destDigits.length === 8
-          ? { address: { cep: destDigits } }
+          ? {
+              address: {
+                cep: destDigits,
+                ...(input.address?.street ? { street: input.address.street } : {}),
+                ...(input.address?.number ? { number: input.address.number } : {}),
+                ...(input.address?.complement ? { complement: input.address.complement } : {}),
+                ...(input.address?.neighborhood ? { neighborhood: input.address.neighborhood } : {}),
+              },
+            }
           : {}),
       });
       if (invoiceSlug) {

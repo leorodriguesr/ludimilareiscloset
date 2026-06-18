@@ -51,6 +51,7 @@ export function PieceSelector({
       ...prev,
       [pieceId]: { ...prev[pieceId]!, color: colorName },
     }));
+    window.dispatchEvent(new CustomEvent("color:selected", { detail: colorName }));
   }
 
   function selectSize(pieceId: string, sizeName: string) {
@@ -132,8 +133,8 @@ export function PieceSelector({
                             onClick={() => selectSize(piece.id, size.name)}
                             className={`min-w-[2.25rem] shrink-0 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-30 sm:min-w-[2.5rem] sm:px-3 sm:py-2 sm:text-sm ${
                               sel?.size === size.name
-                                ? "border-stone-400 bg-stone-200 text-stone-900 shadow-sm"
-                                : "border-stone-300 bg-white text-stone-700 hover:border-stone-400"
+                                ? "border-2 border-black bg-white text-stone-900"
+                                : "border border-stone-300 bg-white text-stone-700 hover:border-stone-500"
                             }`}
                           >
                             {size.name}
@@ -184,10 +185,10 @@ export function PieceSelector({
                             disabled={disabled}
                             onClick={() => selectColor(piece.id, color.name)}
                             title={color.name}
-                            className={`h-6 w-6 rounded-full border-2 transition-all disabled:cursor-not-allowed disabled:opacity-30 sm:h-7 sm:w-7 ${
+                            className={`h-6 w-6 rounded-full transition-all disabled:cursor-not-allowed disabled:opacity-30 sm:h-7 sm:w-7 ${
                               sel?.color === color.name
-                                ? "border-stone-500 ring-2 ring-stone-400 ring-offset-1"
-                                : "border-stone-200 hover:border-stone-400"
+                                ? "border-2 border-black"
+                                : "border-2 border-stone-200 hover:border-stone-400"
                             }`}
                           >
                             <span
@@ -253,8 +254,8 @@ export function PieceSelector({
                             onClick={() => selectSize(piece.id, size.name)}
                             className={`min-w-[2.25rem] shrink-0 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-30 sm:min-w-[2.5rem] sm:px-3 sm:py-2 sm:text-sm ${
                               sel?.size === size.name
-                                ? "border-stone-400 bg-stone-200 text-stone-900 shadow-sm"
-                                : "border-stone-300 bg-white text-stone-700 hover:border-stone-400"
+                                ? "border-2 border-stone-900 bg-white text-stone-900"
+                                : "border border-stone-300 bg-white text-stone-700 hover:border-stone-500"
                             }`}
                           >
                             {size.name}
@@ -305,10 +306,10 @@ export function PieceSelector({
                             disabled={disabled}
                             onClick={() => selectColor(piece.id, color.name)}
                             title={color.name}
-                            className={`h-6 w-6 rounded-full border-2 transition-all disabled:cursor-not-allowed disabled:opacity-30 sm:h-7 sm:w-7 ${
+                            className={`h-6 w-6 rounded-full transition-all disabled:cursor-not-allowed disabled:opacity-30 sm:h-7 sm:w-7 ${
                               sel?.color === color.name
-                                ? "border-stone-500 ring-2 ring-stone-400 ring-offset-1"
-                                : "border-stone-200 hover:border-stone-400"
+                                ? "border-2 border-stone-900"
+                                : "border-2 border-stone-200 hover:border-stone-400"
                             }`}
                           >
                             <span

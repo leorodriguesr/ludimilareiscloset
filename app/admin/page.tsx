@@ -5,6 +5,8 @@ import { ProductForm } from "@/components/admin/ProductForm";
 import { ProductList } from "@/components/admin/ProductList";
 import { BannerForm } from "@/components/admin/BannerForm";
 import { CategoryManager } from "@/components/admin/CategoryManager";
+import { SectionManager } from "@/components/admin/SectionManager";
+import { SalesManager } from "@/components/admin/SalesManager";
 import { LogoutButton } from "@/components/auth/LogoutButton";
 import type { Product } from "@/lib/types";
 
@@ -12,7 +14,7 @@ export default function AdminPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [bannerUrl, setBannerUrl] = useState("");
   const [activeSection, setActiveSection] = useState<
-    "products" | "categories" | "banner"
+    "products" | "sections" | "categories" | "banner" | "sales"
   >("products");
   const [showProductForm, setShowProductForm] = useState(false);
 
@@ -44,6 +46,8 @@ export default function AdminPage() {
 
   const navItems = [
     { id: "products" as const, label: "Produtos" },
+    { id: "sales" as const, label: "Vendas" },
+    { id: "sections" as const, label: "Seções" },
     { id: "categories" as const, label: "Categorias" },
     { id: "banner" as const, label: "Banner" },
   ];
@@ -124,6 +128,26 @@ export default function AdminPage() {
 
               <ProductList products={products} onRefresh={fetchProducts} />
             </div>
+          )}
+
+          {activeSection === "sales" && (
+            <section>
+              <SalesManager />
+            </section>
+          )}
+
+          {activeSection === "sections" && (
+            <section>
+              <h2 className="text-lg font-medium text-stone-900 mb-4">
+                Seções da vitrine
+              </h2>
+              <p className="text-sm text-stone-500 mb-6">
+                Seções são vitrines temáticas exibidas na página inicial (ex:
+                Promoção, Lançamentos, Mais Vendidos). Reordene-as para
+                controlar a ordem de exibição.
+              </p>
+              <SectionManager onSectionsChange={fetchProducts} />
+            </section>
           )}
 
           {activeSection === "categories" && (
