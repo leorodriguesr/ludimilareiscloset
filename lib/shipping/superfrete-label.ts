@@ -10,7 +10,9 @@ import {
   resolveStoreSender,
 } from "@/lib/shipping/superfrete-account";
 
-export { ShippingQuoteError } from "@/lib/shipping/types";
+import { ShippingQuoteError } from "@/lib/shipping/types";
+
+export { ShippingQuoteError };
 
 export type LabelProduct = {
   name: string;
