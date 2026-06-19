@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { formatPrice } from "@/lib/format";
 import type { CartPieceSelection } from "@/lib/cart/types";
@@ -42,6 +42,8 @@ type AdminOrder = {
   paidAt: string | null;
   paymentCaptureMethod: string | null;
   shippingStatus: string;
+  superfreteStatus: string | null;
+  trackingCode: string | null;
   superfreteShipmentId: string | null;
   labelUrl: string | null;
   createdAt: string;
@@ -119,9 +121,11 @@ function displayOrDash(v: string | null | undefined): string {
 }
 
 const SHIPPING_STATUS = [
-  { value: "to_pack",  label: "Por embalar", dot: "bg-amber-400"   },
-  { value: "packed",   label: "Embalado",    dot: "bg-blue-500"    },
-  { value: "shipped",  label: "Enviado",     dot: "bg-emerald-500" },
+  { value: "to_pack",    label: "Por embalar", dot: "bg-amber-400"   },
+  { value: "packed",     label: "Embalado",    dot: "bg-blue-500"    },
+  { value: "shipped",    label: "Enviado",     dot: "bg-emerald-500" },
+  { value: "delivered",  label: "Entregue",    dot: "bg-teal-500"    },
+  { value: "cancelled",  label: "Cancelado",   dot: "bg-red-400"     },
 ] as const;
 function sInfo(v: string) { return SHIPPING_STATUS.find((s) => s.value === v) ?? SHIPPING_STATUS[0]; }
 
@@ -160,11 +164,10 @@ function ExpandedRow({ order, colSpan, onRefresh }: { order: AdminOrder; colSpan
       const res = await fetch(`/api/admin/orders/${order.id}/label`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ serviceId: 1 }),
       });
       const data = (await res.json()) as { labelUrl?: string; error?: string };
       if (!res.ok) { setLabelError(data.error ?? "Erro ao gerar etiqueta."); return; }
-      if (data.labelUrl) window.open(data.labelUrl, "_blank");
+      window.open(`/api/admin/orders/${order.id}/label/pdf`, "_blank");
       onRefresh();
     } catch { setLabelError("Erro de conexão."); }
     finally { setGeneratingLabel(false); }
@@ -298,8 +301,13 @@ function ExpandedRow({ order, colSpan, onRefresh }: { order: AdminOrder; colSpan
                 >
                   {SHIPPING_STATUS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
+                {order.trackingCode && (
+                  <p className="text-xs text-stone-500">
+                    Rastreio: <span className="font-mono">{order.trackingCode}</span>
+                  </p>
+                )}
                 {order.labelUrl ? (
-                  <a href={order.labelUrl} target="_blank" rel="noopener noreferrer"
+                  <a href={`/api/admin/orders/${order.id}/label/pdf`} target="_blank" rel="noopener noreferrer"
                     className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-stone-300 bg-white py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 transition-colors">
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
@@ -516,8 +524,8 @@ export function SalesManager() {
                 const customerName = order.recipientName || order.user?.name || order.email.split("@")[0];
 
                 return (
-                  <>
-                    <tr key={order.id}
+                  <Fragment key={order.id}>
+                    <tr
                       className={`border-b border-stone-100 transition-colors ${isExpanded ? "bg-stone-50" : "hover:bg-stone-50/60"} ${isSelected ? "bg-stone-100" : ""}`}>
 
                       {/* Checkbox */}
@@ -591,9 +599,9 @@ export function SalesManager() {
                     </tr>
 
                     {isExpanded && (
-                      <ExpandedRow key={`exp-${order.id}`} order={order} colSpan={COL_COUNT + 1} onRefresh={fetchOrders} />
+                      <ExpandedRow order={order} colSpan={COL_COUNT + 1} onRefresh={fetchOrders} />
                     )}
-                  </>
+                  </Fragment>
                 );
               })}
             </tbody>

@@ -31,6 +31,13 @@ type ShippingData = {
   optionId: string; optionLabel: string; optionPrice: number; deliveryLabel: string;
 };
 type PaymentMethod = "pix" | "card" | null;
+type PixData = {
+  orderId: string;
+  pixCode: string;
+  pixQrBase64: string | null;
+  expiresAt: string;
+  amount: number;
+};
 type CartLine = {
   lineId: string; productId: string; name: string; image: string | null;
   quantity: number; price: number; pixPrice?: number | null; installmentCount?: number | null;
@@ -834,6 +841,158 @@ function ConfirmStep({
   );
 }
 
+// ─── PIX Payment Screen ───────────────────────────────────────────────────────
+
+function PixPaymentScreen({ data, onBack }: { data: PixData; onBack: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const [pollingStatus, setPollingStatus] = useState<"waiting" | "paid" | "expired">("waiting");
+  const [secondsLeft, setSecondsLeft] = useState(() => {
+    const diff = Math.floor((new Date(data.expiresAt).getTime() - Date.now()) / 1000);
+    return Math.max(0, diff);
+  });
+
+  useEffect(() => {
+    if (secondsLeft <= 0) { setPollingStatus((s) => s === "waiting" ? "expired" : s); return; }
+    const t = setInterval(() => {
+      setSecondsLeft((s) => {
+        const next = s - 1;
+        if (next <= 0) setPollingStatus((cur) => cur === "waiting" ? "expired" : cur);
+        return Math.max(0, next);
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (pollingStatus !== "waiting") return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/checkout/pix-status/${data.orderId}`);
+        if (!res.ok) return;
+        const json = (await res.json()) as { status: string };
+        if (json.status === "paid") {
+          setPollingStatus("paid");
+          window.location.assign(`/pedido/${data.orderId}`);
+        }
+      } catch {}
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [data.orderId, pollingStatus]);
+
+  function formatTime(s: number) {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  }
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(data.pixCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 3000);
+    } catch {}
+  }
+
+  if (pollingStatus === "paid") {
+    return (
+      <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center gap-6 bg-white">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500">
+          <svg className="h-8 w-8 text-white" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <div className="text-center">
+          <p className="text-lg font-semibold text-stone-900">Pagamento confirmado!</p>
+          <p className="mt-1 text-sm text-stone-500">Redirecionando…</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-[9999] overflow-y-auto bg-white">
+      <div className="mx-auto flex min-h-screen max-w-sm flex-col items-center justify-center gap-5 px-6 py-12">
+
+        <div className="text-center">
+          <div className="mb-2 flex items-center justify-center gap-2">
+            <Image src="/pix-icon.svg" alt="Pix" width={22} height={22} unoptimized />
+            <span className="text-lg font-bold text-stone-900">Pague com PIX</span>
+          </div>
+          <p className="text-sm text-stone-500">{formatPrice(data.amount)} · à vista</p>
+        </div>
+
+        {data.pixQrBase64 ? (
+          <div className="overflow-hidden rounded-2xl border border-stone-200 p-3 shadow-sm">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={`data:image/png;base64,${data.pixQrBase64}`} alt="QR Code PIX" className="h-52 w-52 object-contain" />
+          </div>
+        ) : (
+          <div className="flex h-52 w-52 items-center justify-center rounded-2xl border border-stone-200 bg-stone-50">
+            <p className="text-xs text-stone-400">QR Code indisponível</p>
+          </div>
+        )}
+
+        {pollingStatus === "expired" ? (
+          <div className="w-full rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-center">
+            <p className="text-sm font-semibold text-red-700">PIX expirado</p>
+            <p className="mt-0.5 text-xs text-red-600">O tempo de pagamento esgotou.</p>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 rounded-xl bg-stone-50 px-4 py-2.5">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+            <p className="text-sm text-stone-600">
+              Aguardando pagamento…{" "}
+              <span className={`font-mono font-semibold tabular-nums ${secondsLeft < 60 ? "text-red-600" : "text-stone-900"}`}>
+                {formatTime(secondsLeft)}
+              </span>
+            </p>
+          </div>
+        )}
+
+        <div className="w-full">
+          <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-stone-400">Copia e cola</p>
+          <div className="flex gap-2">
+            <code className="flex-1 truncate rounded-lg border border-stone-200 bg-stone-50 px-3 py-2.5 text-[11px] text-stone-600">
+              {data.pixCode}
+            </code>
+            <button type="button" onClick={handleCopy}
+              className={`shrink-0 rounded-lg px-3 py-2.5 text-xs font-semibold transition-colors ${copied ? "bg-emerald-600 text-white" : "bg-stone-900 text-white hover:bg-stone-700"}`}>
+              {copied ? "Copiado!" : "Copiar"}
+            </button>
+          </div>
+        </div>
+
+        <ol className="w-full space-y-1 text-xs text-stone-500">
+          <li>1. Abra o app do seu banco ou carteira digital.</li>
+          <li>2. Escolha pagar via PIX com QR Code ou copia e cola.</li>
+          <li>3. O pagamento é confirmado automaticamente em segundos.</li>
+        </ol>
+
+        <div className="flex w-full flex-col gap-2">
+          {pollingStatus === "expired" && (
+            <button type="button" onClick={onBack}
+              className="w-full rounded-xl bg-stone-900 py-3.5 text-sm font-semibold text-white transition-colors hover:bg-stone-700">
+              Tentar novamente
+            </button>
+          )}
+          <button type="button" onClick={() => window.location.assign(`/pedido/${data.orderId}`)}
+            className="w-full rounded-xl border border-stone-200 py-3 text-sm font-medium text-stone-600 transition-colors hover:bg-stone-50">
+            Ver detalhes do pedido
+          </button>
+        </div>
+
+        <p className="flex items-center gap-1.5 text-xs text-stone-400">
+          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+          </svg>
+          Ambiente seguro · Mercado Pago
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function CheckoutClient({ initialEmail, initialName, initialPhone, loggedIn }: Props) {
@@ -846,6 +1005,7 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, logged
   const [deliveryDone, setDeliveryDone] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [redirecting, setRedirecting] = useState(false);
+  const [pixData, setPixData] = useState<PixData | null>(null);
   const [pending, startTransition] = useTransition();
 
   // Ref for mobile bottom bar to trigger current step's submit
@@ -884,6 +1044,7 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, logged
   }
 
   const handlePay = useCallback(() => {
+    if (!paymentMethod) { setSubmitError("Selecione a forma de pagamento."); return; }
     setSubmitError(null);
     startTransition(async () => {
       const res = await placeOrderAction({
@@ -893,16 +1054,27 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, logged
         contact: { name: contact.name.trim() || undefined, phone: contact.phone.replace(/\D/g, "") || undefined },
         cpf: contact.cpf.replace(/\D/g, "") || undefined,
         address: { street: shipping.street.trim() || undefined, number: shipping.number.trim() || undefined, complement: shipping.complement.trim() || undefined, neighborhood: shipping.neighborhood.trim() || undefined, city: shipping.city.trim() || undefined, state: shipping.state.trim() || undefined },
+        paymentMethod,
       });
       if (!res.ok) { setSubmitError(res.error); return; }
-      setRedirecting(true); clear(); window.location.assign(res.checkoutUrl);
+      clear();
+      if (res.type === "pix") {
+        setPixData({ orderId: res.orderId, pixCode: res.pixCode, pixQrBase64: res.pixQrBase64, expiresAt: res.expiresAt, amount: res.amount });
+      } else {
+        setRedirecting(true); window.location.assign(res.checkoutUrl);
+      }
     });
-  }, [loggedIn, contact, shipping, lines, clear]);
+  }, [paymentMethod, loggedIn, contact, shipping, lines, clear]);
 
   // Mobile back navigation
   function mobileBack() {
     if (step === 2) { setContactDone(false); navigate(1, "bwd"); }
     else if (step === 3) { setDeliveryDone(false); navigate(2, "bwd"); }
+  }
+
+  // PIX payment screen
+  if (pixData) {
+    return <PixPaymentScreen data={pixData} onBack={() => setPixData(null)} />;
   }
 
   // Redirecting overlay

@@ -3,6 +3,7 @@ import { cartLineKey } from "@/lib/cart/pure";
 import type { CartPieceSelection } from "@/lib/cart/types";
 import { prisma } from "@/lib/prisma";
 import { quoteShippingForCartLines } from "@/lib/shipping/quote-cart";
+import { parseSuperfreteServiceId } from "@/lib/shipping/service-id";
 import { normalizePostalCode } from "@/lib/shipping/superfrete";
 import { CHECKOUT_SHIPPING_AMOUNT_BRL } from "@/lib/config/checkout-shipping-charge";
 
@@ -47,6 +48,8 @@ export async function createOrderFromCheckout(input: {
   shipping: OrderShippingInput;
   contact?: OrderContactInput;
   address?: OrderAddressInput;
+  /** "pix" usa pixPrice dos produtos; "card" (padrão) usa price. */
+  paymentMethod?: "pix" | "card";
 }): Promise<CreateOrderResult> {
   const normalizedEmail = input.email.trim().toLowerCase();
   if (!EMAIL_RE.test(normalizedEmail)) {
@@ -98,9 +101,9 @@ export async function createOrderFromCheckout(input: {
     quantity: l.quantity,
   }));
 
-  let shippingOptions;
+  let quoteResult;
   try {
-    shippingOptions = await quoteShippingForCartLines(cartLinesForQuote, destCep);
+    quoteResult = await quoteShippingForCartLines(cartLinesForQuote, destCep);
   } catch (e) {
     console.error("[createOrderFromCheckout] frete", e);
     throw new OrderCreateError(
@@ -109,7 +112,7 @@ export async function createOrderFromCheckout(input: {
     );
   }
 
-  const chosen = shippingOptions.find((o) => o.id === input.shipping.optionId);
+  const chosen = quoteResult.options.find((o) => o.id === input.shipping.optionId);
   if (!chosen) {
     throw new OrderCreateError(
       "SHIPPING_OPTION",
@@ -118,7 +121,15 @@ export async function createOrderFromCheckout(input: {
   }
 
   const shippingAmount = CHECKOUT_SHIPPING_AMOUNT_BRL;
+  const shippingQuotedPrice = Math.round(chosen.price * 100) / 100;
+  const shippingDeliveryDaysMin =
+    chosen.deliveryDaysMin > 0 ? Math.floor(chosen.deliveryDaysMin) : null;
+  const shippingDeliveryDaysMax =
+    chosen.deliveryDaysMax > 0 ? Math.floor(chosen.deliveryDaysMax) : null;
   const shippingLabel = `${chosen.carrierName} — ${chosen.serviceName}`;
+  const shippingServiceId =
+    chosen.serviceId ?? parseSuperfreteServiceId(input.shipping.optionId);
+  const ideal = quoteResult.idealPackage;
 
   return prisma.$transaction(async (tx) => {
     const resolved: {
@@ -129,12 +140,15 @@ export async function createOrderFromCheckout(input: {
     }[] = [];
     let subtotal = 0;
 
+    const usePix = input.paymentMethod === "pix";
+
     for (const line of lines) {
       const product = await tx.product.findUnique({
         where: { id: line.productId },
         select: {
           id: true,
           price: true,
+          pixPrice: true,
           stockType: true,
           stockQuantity: true,
         },
@@ -157,15 +171,19 @@ export async function createOrderFromCheckout(input: {
         }
       }
 
+      const linePrice = usePix
+        ? (product.pixPrice ?? product.price)
+        : product.price;
+
       resolved.push({
         productId: product.id,
         quantity: line.quantity,
-        price: product.price,
+        price: linePrice,
         ...(line.pieceSelections?.length
           ? { pieceSelections: line.pieceSelections }
           : {}),
       });
-      subtotal += product.price * line.quantity;
+      subtotal += linePrice * line.quantity;
     }
 
     subtotal = Math.round(subtotal * 100) / 100;
@@ -186,6 +204,7 @@ export async function createOrderFromCheckout(input: {
           : {}),
         status: "pending_payment",
         total,
+        paymentMethod: input.paymentMethod ?? "card",
         items: {
           create: resolved.map((r) => ({
             quantity: r.quantity,
@@ -203,7 +222,11 @@ export async function createOrderFromCheckout(input: {
     await tx.$executeRawUnsafe(
       `UPDATE "Order" SET
         "shippingAmount" = ?,
+        "shippingQuotedPrice" = ?,
+        "shippingDeliveryDaysMin" = ?,
+        "shippingDeliveryDaysMax" = ?,
         "shippingServiceName" = ?,
+        "shippingServiceId" = ?,
         "destinationCep" = ?,
         "recipientName" = ?,
         "phone" = ?,
@@ -214,10 +237,18 @@ export async function createOrderFromCheckout(input: {
         "addressNeighborhood" = ?,
         "addressCity" = ?,
         "addressState" = ?,
+        "packageHeightCm" = ?,
+        "packageWidthCm" = ?,
+        "packageLengthCm" = ?,
+        "packageWeightKg" = ?,
         "updatedAt" = datetime('now')
       WHERE "id" = ?`,
       shippingAmount,
+      shippingQuotedPrice,
+      shippingDeliveryDaysMin,
+      shippingDeliveryDaysMax,
       shippingLabel,
+      shippingServiceId,
       destCep,
       input.contact?.name ?? null,
       input.contact?.phone ?? null,
@@ -228,6 +259,10 @@ export async function createOrderFromCheckout(input: {
       input.address?.neighborhood ?? null,
       input.address?.city ?? null,
       input.address?.state ?? null,
+      ideal?.heightCm ?? null,
+      ideal?.widthCm ?? null,
+      ideal?.lengthCm ?? null,
+      ideal?.weightKg ?? null,
       created.id
     );
 

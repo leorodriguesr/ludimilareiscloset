@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdminApi } from "@/lib/require-admin-api";
 
-const VALID_SHIPPING_STATUSES = ["to_pack", "packed", "shipped"] as const;
+const VALID_SHIPPING_STATUSES = [
+  "to_pack",
+  "packed",
+  "shipped",
+  "delivered",
+  "cancelled",
+] as const;
 
 export async function PATCH(
   request: NextRequest,

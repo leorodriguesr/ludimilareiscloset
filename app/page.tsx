@@ -15,32 +15,57 @@ interface HomeProps {
 export default async function Home({ searchParams }: HomeProps) {
   const { c: categoryId } = await searchParams;
 
-  const [sections, filteredProducts, settings, categories] = await Promise.all([
-    categoryId
-      ? Promise.resolve([])
-      : prisma.section.findMany({
-          where: { isActive: true },
-          orderBy: { order: "asc" },
-          include: {
-            products: {
-              include: {
-                product: { include: productListInclude },
+  const [sections, filteredProducts, unsectionedProducts, settings, categories] =
+    await Promise.all([
+      categoryId
+        ? Promise.resolve([])
+        : prisma.section.findMany({
+            where: { isActive: true },
+            orderBy: { order: "asc" },
+            include: {
+              products: {
+                include: {
+                  product: { include: productListInclude },
+                },
               },
             },
-          },
-        }),
-    categoryId
-      ? prisma.product.findMany({
-          where: { categories: { some: { categoryId } } },
-          orderBy: { createdAt: "desc" },
-          include: productListInclude,
-        })
-      : Promise.resolve([]),
-    prisma.storeSettings.findUnique({ where: { id: "default" } }),
-    prisma.category.findMany({ orderBy: { name: "asc" } }),
-  ]);
+          }),
+      categoryId
+        ? prisma.product.findMany({
+            where: { categories: { some: { categoryId } } },
+            orderBy: { createdAt: "desc" },
+            include: productListInclude,
+          })
+        : Promise.resolve([]),
+      categoryId
+        ? Promise.resolve([])
+        : prisma.product.findMany({
+            where: {
+              NOT: {
+                sections: {
+                  some: { section: { isActive: true } },
+                },
+              },
+            },
+            orderBy: { createdAt: "desc" },
+            include: productListInclude,
+          }),
+      prisma.storeSettings.findUnique({ where: { id: "default" } }),
+      prisma.category.findMany({ orderBy: { name: "asc" } }),
+    ]);
 
   const activeCategory = categories.find((c) => c.id === categoryId);
+
+  const sectionProductBlocks = sections
+    .map((section) => ({
+      id: section.id,
+      label: section.name,
+      products: section.products.map((ps) => ps.product),
+    }))
+    .filter((block) => block.products.length > 0);
+
+  const hasTodosProducts =
+    sectionProductBlocks.length > 0 || unsectionedProducts.length > 0;
 
   return (
     <>
@@ -66,52 +91,36 @@ export default async function Home({ searchParams }: HomeProps) {
               <EmptyState message="Nenhum produto encontrado nesta categoria." />
             ) : (
               <ProductGrid>
-                {filteredProducts.map((product) => (
-                  <ProductCard
-                    key={product.id}
-                    id={product.id}
-                    name={product.name}
-                    price={product.price}
-                    pixPrice={product.pixPrice}
-                    installmentCount={product.installmentCount}
-                    images={product.images}
-                    tag={product.tag}
-                    colors={uniqueColors(product.pieces)}
-                  />
-                ))}
+                <ProductCards products={filteredProducts} />
               </ProductGrid>
             )}
           </section>
-        ) : sections.length === 0 ? (
+        ) : !hasTodosProducts ? (
           <EmptyState message="Nenhum produto disponível no momento." />
         ) : (
           <div className="space-y-10">
-            {sections.map((section) => {
-              const products = section.products.map((ps) => ps.product);
-              if (products.length === 0) return null;
-              return (
-                <section key={section.id}>
-                  <div className="mb-5 ">
-                    <SectionHeading label={section.name} />
+            {sectionProductBlocks.map((block) => (
+              <section key={block.id}>
+                <div className="mb-5">
+                  <SectionHeading label={block.label} />
+                </div>
+                <ProductGrid>
+                  <ProductCards products={block.products} />
+                </ProductGrid>
+              </section>
+            ))}
+            {unsectionedProducts.length > 0 && (
+              <section>
+                {sectionProductBlocks.length > 0 && (
+                  <div className="mb-5">
+                    <SectionHeading label="Produtos" />
                   </div>
-                  <ProductGrid>
-                    {products.map((product) => (
-                      <ProductCard
-                        key={product.id}
-                        id={product.id}
-                        name={product.name}
-                        price={product.price}
-                        pixPrice={product.pixPrice}
-                        installmentCount={product.installmentCount}
-                        images={product.images}
-                        tag={product.tag}
-                        colors={uniqueColors(product.pieces)}
-                      />
-                    ))}
-                  </ProductGrid>
-                </section>
-              );
-            })}
+                )}
+                <ProductGrid>
+                  <ProductCards products={unsectionedProducts} />
+                </ProductGrid>
+              </section>
+            )}
           </div>
         )}
       </div>
@@ -127,6 +136,37 @@ function uniqueColors(pieces: { colors: { id: string; name: string; hex: string 
     seen.add(key);
     return true;
   });
+}
+
+type ProductCardData = {
+  id: string;
+  name: string;
+  price: number;
+  pixPrice: number | null;
+  installmentCount: number | null;
+  images: { url: string; order: number; colorName: string | null }[];
+  tag: string | null;
+  pieces: { colors: { id: string; name: string; hex: string | null }[] }[];
+};
+
+function ProductCards({ products }: { products: ProductCardData[] }) {
+  return (
+    <>
+      {products.map((product) => (
+        <ProductCard
+          key={product.id}
+          id={product.id}
+          name={product.name}
+          price={product.price}
+          pixPrice={product.pixPrice}
+          installmentCount={product.installmentCount}
+          images={product.images}
+          tag={product.tag}
+          colors={uniqueColors(product.pieces)}
+        />
+      ))}
+    </>
+  );
 }
 
 function SectionHeading({ label }: { label: string }) {

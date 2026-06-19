@@ -1,4 +1,7 @@
 import { prisma } from "@/lib/prisma";
+import type { SuperFreteProductInput } from "@/lib/shipping/superfrete";
+import { normalizeSuperfreteInsurance } from "@/lib/shipping/insurance";
+import { packageToSuperFreteKgCm } from "@/lib/shipping/superfrete";
 
 const DEFAULT_PKG = {
   weightGrams: 300,
@@ -22,11 +25,11 @@ export type BuiltCartPackage = {
   heightCm: number;
   insuranceDeclared: number;
   useInsurance: boolean;
+  products: SuperFreteProductInput[];
 };
 
 /**
- * Agrega peso e dimensões das linhas do carrinho para cotação (um volume).
- * Peso soma; cada dimensão usa o máximo entre os itens (heurística simples).
+ * Monta linhas de produto para cotação SuperFrete (modo products[]).
  */
 export async function buildCartShippingPackage(
   lines: CartShippingLine[]
@@ -35,15 +38,11 @@ export async function buildCartShippingPackage(
   for (const l of lines) {
     const id = l.productId.trim();
     const q = Math.floor(Number(l.quantity));
-    if (!id || q < 1) {
-      throw new Error("INVALID_LINE");
-    }
+    if (!id || q < 1) throw new Error("INVALID_LINE");
     merged.set(id, (merged.get(id) ?? 0) + q);
   }
 
-  if (merged.size === 0) {
-    throw new Error("EMPTY");
-  }
+  if (merged.size === 0) throw new Error("EMPTY");
 
   const products = await prisma.product.findMany({
     where: { id: { in: [...merged.keys()] } },
@@ -57,15 +56,14 @@ export async function buildCartShippingPackage(
     },
   });
 
-  if (products.length !== merged.size) {
-    throw new Error("PRODUCT_NOT_FOUND");
-  }
+  if (products.length !== merged.size) throw new Error("PRODUCT_NOT_FOUND");
 
   let weightGrams = 0;
   let lengthCm = DEFAULT_PKG.lengthCm;
   let widthCm = DEFAULT_PKG.widthCm;
   let heightCm = DEFAULT_PKG.heightCm;
-  let insuranceDeclared = 0;
+  let insuranceDeclaredRaw = 0;
+  const sfProducts: SuperFreteProductInput[] = [];
 
   for (const p of products) {
     const qty = merged.get(p.id) ?? 0;
@@ -73,26 +71,40 @@ export async function buildCartShippingPackage(
       p.weightGrams != null && p.weightGrams > 0
         ? p.weightGrams
         : DEFAULT_PKG.weightGrams;
+
+    const dims = packageToSuperFreteKgCm({
+      weightGrams: unitGrams,
+      lengthCm: positiveDimCm(p.lengthCm) ?? DEFAULT_PKG.lengthCm,
+      widthCm: positiveDimCm(p.widthCm) ?? DEFAULT_PKG.widthCm,
+      heightCm: positiveDimCm(p.heightCm) ?? DEFAULT_PKG.heightCm,
+    });
+
     weightGrams += Math.round(unitGrams * qty);
+    if (dims.lengthCm > lengthCm) lengthCm = dims.lengthCm;
+    if (dims.widthCm > widthCm) widthCm = dims.widthCm;
+    if (dims.heightCm > heightCm) heightCm = dims.heightCm;
 
-    const len = positiveDimCm(p.lengthCm);
-    const wid = positiveDimCm(p.widthCm);
-    const hgt = positiveDimCm(p.heightCm);
-    if (len != null) lengthCm = Math.max(lengthCm, len);
-    if (wid != null) widthCm = Math.max(widthCm, wid);
-    if (hgt != null) heightCm = Math.max(heightCm, hgt);
+    insuranceDeclaredRaw += Math.max(0, Math.round(p.price * qty * 100) / 100);
 
-    insuranceDeclared += Math.max(0, Math.round(p.price * qty * 100) / 100);
+    sfProducts.push({
+      quantity: qty,
+      weight: dims.weightKg,
+      height: dims.heightCm,
+      width: dims.widthCm,
+      length: dims.lengthCm,
+    });
   }
 
-  const useInsurance = insuranceDeclared > 0;
+  const { insuranceValue, useInsurance } =
+    normalizeSuperfreteInsurance(insuranceDeclaredRaw);
 
   return {
     weightGrams,
     lengthCm,
     widthCm,
     heightCm,
-    insuranceDeclared,
+    insuranceDeclared: insuranceValue ?? 0,
     useInsurance,
+    products: sfProducts,
   };
 }

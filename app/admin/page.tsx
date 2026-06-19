@@ -7,6 +7,7 @@ import { BannerForm } from "@/components/admin/BannerForm";
 import { CategoryManager } from "@/components/admin/CategoryManager";
 import { SectionManager } from "@/components/admin/SectionManager";
 import { SalesManager } from "@/components/admin/SalesManager";
+import { ShippingManager } from "@/components/admin/ShippingManager";
 import { LogoutButton } from "@/components/auth/LogoutButton";
 import type { Product } from "@/lib/types";
 
@@ -14,7 +15,7 @@ export default function AdminPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [bannerUrl, setBannerUrl] = useState("");
   const [activeSection, setActiveSection] = useState<
-    "products" | "sections" | "categories" | "banner" | "sales"
+    "products" | "sections" | "categories" | "banner" | "sales" | "shipping"
   >("products");
   const [showProductForm, setShowProductForm] = useState(false);
 
@@ -47,6 +48,7 @@ export default function AdminPage() {
   const navItems = [
     { id: "products" as const, label: "Produtos" },
     { id: "sales" as const, label: "Vendas" },
+    { id: "shipping" as const, label: "Envios" },
     { id: "sections" as const, label: "Seções" },
     { id: "categories" as const, label: "Categorias" },
     { id: "banner" as const, label: "Banner" },
@@ -133,6 +135,12 @@ export default function AdminPage() {
           {activeSection === "sales" && (
             <section>
               <SalesManager />
+            </section>
+          )}
+
+          {activeSection === "shipping" && (
+            <section>
+              <ShippingManager />
             </section>
           )}
 

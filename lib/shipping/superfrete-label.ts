@@ -1,68 +1,25 @@
 /**
- * Geração de etiqueta via SuperFrete.
- *
- * Fluxo: POST /api/v0/cart  →  POST /api/v0/checkout  →  URL de impressão
- *
- * Variáveis de ambiente adicionais necessárias para emissão de etiqueta:
- *   STORE_NAME, STORE_DOCUMENT, STORE_PHONE, STORE_EMAIL
- *   STORE_ADDRESS, STORE_NUMBER, STORE_COMPLEMENT, STORE_DISTRICT
- *   STORE_CITY, STORE_STATE   (usará SHIPPING_ORIGIN_POSTAL_CODE já existente)
+ * Geração, impressão, cancelamento e consulta de etiquetas SuperFrete.
+ * Fluxo: POST /cart → POST /checkout → POST /tag/print
  */
 
-import { ShippingQuoteError } from "@/lib/shipping/types";
+import { normalizeSuperfreteInsurance } from "@/lib/shipping/insurance";
+import { superfreteRequest } from "@/lib/shipping/superfrete-client";
+import {
+  formatSuperfretePersonName,
+  resolveStoreSender,
+} from "@/lib/shipping/superfrete-account";
+
 export { ShippingQuoteError } from "@/lib/shipping/types";
 
-const DEFAULT_API_ORIGIN = "https://api.superfrete.com";
-
-function readConfig() {
-  const token = process.env.SUPERFRETE_TOKEN?.trim();
-  if (!token) throw new ShippingQuoteError("CONFIG", "SUPERFRETE_TOKEN não configurado.", 503);
-
-  const apiOrigin = (process.env.SUPERFRETE_API_ORIGIN?.trim() || DEFAULT_API_ORIGIN).replace(/\/$/, "");
-  const userAgent =
-    process.env.SUPERFRETE_USER_AGENT?.trim() || "LudimilaReisCloset/1.0";
-
-  const originPostalCode = (process.env.SHIPPING_ORIGIN_POSTAL_CODE ?? "").replace(/\D/g, "");
-  if (originPostalCode.length !== 8)
-    throw new ShippingQuoteError("CONFIG", "SHIPPING_ORIGIN_POSTAL_CODE inválido.", 503);
-
-  const storeName = process.env.STORE_NAME?.trim() || "Ludimila Reis Closet";
-  const storeDocument = process.env.STORE_DOCUMENT?.trim() || "";
-  const storePhone = (process.env.STORE_PHONE ?? "").replace(/\D/g, "");
-  const storeEmail = process.env.STORE_EMAIL?.trim() || "";
-  const storeAddress = process.env.STORE_ADDRESS?.trim() || "";
-  const storeNumber = process.env.STORE_NUMBER?.trim() || "S/N";
-  const storeComplement = process.env.STORE_COMPLEMENT?.trim() || "";
-  const storeDistrict = process.env.STORE_DISTRICT?.trim() || "";
-  const storeCity = process.env.STORE_CITY?.trim() || "";
-  const storeState = process.env.STORE_STATE?.trim() || "";
-
-  return {
-    token,
-    apiOrigin,
-    userAgent,
-    originPostalCode,
-    store: {
-      name: storeName,
-      document: storeDocument,
-      phone: storePhone,
-      email: storeEmail,
-      address: storeAddress,
-      number: storeNumber,
-      complement: storeComplement,
-      district: storeDistrict,
-      city: storeCity,
-      state_abbr: storeState,
-      postal_code: originPostalCode,
-      country_id: "BR",
-    },
-  };
-}
+export type LabelProduct = {
+  name: string;
+  quantity: number;
+  unitary_value: number;
+};
 
 export type LabelInput = {
-  /** ID do serviço SuperFrete (1=PAC, 2=SEDEX, 17=Mini Envios, etc.) */
   serviceId: number;
-  /** Destinatário */
   to: {
     name: string;
     phone?: string;
@@ -76,130 +33,178 @@ export type LabelInput = {
     state_abbr: string;
     postal_code: string;
   };
-  /** Produtos para declaração */
-  products: { name: string; quantity: number; unitary_value: number; weight: number }[];
-  /** Volume do pacote */
+  products: LabelProduct[];
   volume: { height: number; width: number; length: number; weight: number };
-  /** Valor declarado para seguro */
   insuranceValue?: number;
-  /** Tag para rastreio (ex.: ID do pedido da loja) */
   tag?: string;
+  orderNumber?: number | null;
 };
 
 export type LabelResult = {
-  /** ID do pedido na SuperFrete */
   shipmentId: string;
-  /** URL para impressão/download da etiqueta */
+  /** Pode ser string vazia se o PDF ainda não estiver disponível após checkout. */
   labelUrl: string;
+  superfreteStatus: string;
 };
 
-async function sfFetch(
-  apiOrigin: string,
-  token: string,
-  userAgent: string,
-  path: string,
-  body: unknown
-): Promise<unknown> {
-  const res = await fetch(`${apiOrigin}${path}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "User-Agent": userAgent,
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  });
+export type SuperfreteOrderInfo = {
+  id: string;
+  status: string;
+  tracking: string | null;
+  price: number | null;
+  serviceId: number | null;
+  deliveryMin: number | null;
+  deliveryMax: number | null;
+  labelUrl: string | null;
+};
 
-  const text = await res.text();
-  let json: unknown;
-  try { json = JSON.parse(text); } catch { json = text; }
-
-  if (!res.ok) {
-    const msg = typeof json === "object" && json !== null
-      ? ((json as Record<string, unknown>).message ?? (json as Record<string, unknown>).error ?? text)
-      : text;
-    console.error(`[SuperFrete label] ${path} HTTP ${res.status}:`, msg);
-    throw new ShippingQuoteError("UPSTREAM", String(msg || "Erro na SuperFrete."), res.status);
-  }
-
-  return json;
+function asRecord(v: unknown): Record<string, unknown> | null {
+  if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>;
+  return null;
 }
 
-/**
- * Cria um envio na SuperFrete (cart + checkout) e retorna o ID e a URL da etiqueta.
- */
-export async function createSuperfreteLabelForOrder(input: LabelInput): Promise<LabelResult> {
-  const cfg = readConfig();
+function extractShipmentId(raw: unknown): string | null {
+  const item = Array.isArray(raw) ? raw[0] : raw;
+  const obj = asRecord(item);
+  if (!obj) return null;
+  if (typeof obj.id === "string" && obj.id) return obj.id;
+  if (typeof obj.shipment_id === "string" && obj.shipment_id) return obj.shipment_id;
+  return null;
+}
 
-  const cartBody = {
+export async function printSuperfreteLabel(shipmentId: string): Promise<string> {
+  const raw = await superfreteRequest("POST", "/api/v0/tag/print", {
+    orders: [shipmentId],
+  });
+  const obj = asRecord(raw);
+  const url =
+    (typeof obj?.url === "string" && obj.url) ||
+    (typeof obj?.link === "string" && obj.link) ||
+    (Array.isArray(obj?.urls) && typeof obj.urls[0] === "string" ? obj.urls[0] : null);
+  if (!url) {
+    throw new ShippingQuoteError(
+      "PARSE",
+      "URL de impressão não retornada pela SuperFrete.",
+      502,
+      raw
+    );
+  }
+  return url;
+}
+
+export async function createSuperfreteLabelForOrder(input: LabelInput): Promise<LabelResult> {
+  const store = await resolveStoreSender();
+
+  const insurance = normalizeSuperfreteInsurance(
+    input.insuranceValue ?? 0,
+    input.serviceId
+  );
+
+  const cartBody: Record<string, unknown> = {
     service: input.serviceId,
     agency: 0,
-    from: cfg.store,
+    from: store,
     to: {
-      name: input.to.name,
+      name: formatSuperfretePersonName(input.to.name, "Destinatário"),
       phone: (input.to.phone ?? "").replace(/\D/g, "") || undefined,
       email: input.to.email || undefined,
-      document: input.to.document || undefined,
-      address: input.to.address,
-      complement: input.to.complement || "",
-      number: input.to.number || "S/N",
-      district: input.to.district || "",
-      city: input.to.city,
-      state_abbr: input.to.state_abbr,
+      document: (input.to.document ?? "").replace(/\D/g, "") || undefined,
+      address: input.to.address.slice(0, 50),
+      complement: (input.to.complement ?? "").slice(0, 20),
+      number: (input.to.number ?? "S/N").slice(0, 10),
+      district: (input.to.district ?? "NA").slice(0, 60),
+      city: input.to.city.slice(0, 50),
+      state_abbr: input.to.state_abbr.toUpperCase().slice(0, 2),
       postal_code: input.to.postal_code.replace(/\D/g, ""),
       country_id: "BR",
     },
-    products: input.products,
-    volumes: [input.volume],
+    products: input.products.map((p) => ({
+      name: p.name.slice(0, 100),
+      quantity: p.quantity,
+      unitary_value: p.unitary_value,
+    })),
+    volumes: {
+      height: input.volume.height,
+      width: input.volume.width,
+      length: input.volume.length,
+      weight: input.volume.weight,
+    },
     options: {
-      insurance_value: input.insuranceValue ?? 0,
+      insurance_value: insurance.insuranceValue,
       receipt: false,
       own_hand: false,
-      collect: false,
-      reverse: false,
-      non_commercial: false,
+      non_commercial: true,
     },
-    tag: input.tag || undefined,
+    platform: "Ludimila Reis Closet",
+    tag: input.tag || (input.orderNumber != null ? String(input.orderNumber) : undefined),
   };
 
   console.debug("[SuperFrete label] POST /api/v0/cart", JSON.stringify(cartBody));
-  const cartRaw = await sfFetch(
-    cfg.apiOrigin,
-    cfg.token,
-    cfg.userAgent,
-    "/api/v0/cart",
-    cartBody
-  );
-
-  // A SuperFrete pode retornar array ou objeto com o item de carrinho
-  const cartItem = Array.isArray(cartRaw) ? cartRaw[0] : cartRaw;
-  const cartObj = cartItem as Record<string, unknown>;
-  const shipmentId =
-    (typeof cartObj?.id === "string" ? cartObj.id : null) ??
-    (typeof cartObj?.shipment_id === "string" ? cartObj.shipment_id : null);
-
+  const cartRaw = await superfreteRequest("POST", "/api/v0/cart", cartBody);
+  const shipmentId = extractShipmentId(cartRaw);
   if (!shipmentId) {
-    console.error("[SuperFrete label] ID do envio não encontrado na resposta do cart:", cartRaw);
-    throw new ShippingQuoteError("PARSE", "ID do envio não retornado pela SuperFrete.", 502);
+    throw new ShippingQuoteError(
+      "PARSE",
+      "ID do envio não retornado pela SuperFrete.",
+      502,
+      cartRaw
+    );
   }
 
-  // Checkout (paga com saldo da conta SuperFrete)
-  const checkoutBody = { orders: [shipmentId] };
-  console.debug("[SuperFrete label] POST /api/v0/checkout", JSON.stringify(checkoutBody));
-  const checkoutRaw = await sfFetch(
-    cfg.apiOrigin,
-    cfg.token,
-    cfg.userAgent,
-    "/api/v0/checkout",
-    checkoutBody
-  );
+  console.debug("[SuperFrete label] POST /api/v0/checkout", { orders: [shipmentId] });
+  await superfreteRequest("POST", "/api/v0/checkout", { orders: [shipmentId] });
 
-  console.debug("[SuperFrete label] checkout response:", JSON.stringify(checkoutRaw));
+  // Após o checkout o saldo já foi debitado. Obtemos a URL do PDF mas não
+  // verificamos sua disponibilidade aqui — o proxy /label/pdf faz retry sob demanda.
+  let labelUrl = "";
+  try {
+    labelUrl = await printSuperfreteLabel(shipmentId);
+  } catch (e) {
+    console.error("[SuperFrete label] Não foi possível obter URL da etiqueta (shipmentId salvo no banco):", e instanceof Error ? e.message : e);
+  }
 
-  // URL de impressão da etiqueta
-  const labelUrl = `${cfg.apiOrigin}/api/v0/print?orders[]=${shipmentId}&type=pdf`;
+  return {
+    shipmentId,
+    labelUrl,
+    superfreteStatus: "released",
+  };
+}
 
-  return { shipmentId, labelUrl };
+export async function fetchSuperfreteOrderInfo(
+  shipmentId: string
+): Promise<SuperfreteOrderInfo> {
+  const raw = await superfreteRequest("GET", `/api/v0/order/info/${encodeURIComponent(shipmentId)}`);
+  const obj = asRecord(raw);
+  if (!obj) {
+    throw new ShippingQuoteError("PARSE", "Resposta inválida da SuperFrete.", 502, raw);
+  }
+
+  const print = asRecord(obj.print);
+  const serviceIdRaw = obj.service_id ?? obj.serviceId;
+  const serviceId =
+    typeof serviceIdRaw === "number"
+      ? serviceIdRaw
+      : typeof serviceIdRaw === "string"
+        ? Number(serviceIdRaw)
+        : null;
+
+  return {
+    id: String(obj.id ?? shipmentId),
+    status: String(obj.status ?? "unknown"),
+    tracking: typeof obj.tracking === "string" && obj.tracking ? obj.tracking : null,
+    price: typeof obj.price === "number" ? obj.price : null,
+    serviceId: Number.isFinite(serviceId) ? serviceId : null,
+    deliveryMin: typeof obj.delivery_min === "number" ? obj.delivery_min : null,
+    deliveryMax: typeof obj.delivery_max === "number" ? obj.delivery_max : null,
+    labelUrl: print && typeof print.url === "string" ? print.url : null,
+  };
+}
+
+export async function cancelSuperfreteOrder(
+  shipmentId: string,
+  reason = "Cancelado pelo administrador"
+): Promise<void> {
+  await superfreteRequest("POST", "/api/v0/order/cancel", {
+    order: { id: shipmentId, reason },
+  });
 }

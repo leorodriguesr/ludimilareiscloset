@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateOrderLabel } from "@/lib/shipping/generate-order-label";
+import { syncOrderShipmentFromSuperfrete } from "@/lib/shipping/generate-order-label";
 import { ShippingQuoteError } from "@/lib/shipping/types";
 import { requireAdminApi } from "@/lib/require-admin-api";
 
@@ -13,13 +13,13 @@ export async function POST(
   const { id } = await params;
 
   try {
-    const result = await generateOrderLabel(id);
-    return NextResponse.json(result);
+    const info = await syncOrderShipmentFromSuperfrete(id);
+    return NextResponse.json(info);
   } catch (e) {
     if (e instanceof ShippingQuoteError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
-    console.error("[POST /api/admin/orders/:id/label]", e);
-    return NextResponse.json({ error: "Erro ao gerar etiqueta." }, { status: 500 });
+    console.error("[POST /api/admin/orders/:id/shipment/sync]", e);
+    return NextResponse.json({ error: "Erro ao sincronizar envio." }, { status: 500 });
   }
 }

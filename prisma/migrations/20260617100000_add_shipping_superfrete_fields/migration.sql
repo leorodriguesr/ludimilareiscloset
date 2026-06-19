@@ -1,0 +1,9 @@
+-- AlterTable: campos SuperFrete para envios automatizados
+ALTER TABLE "Order" ADD COLUMN "shippingServiceId" INTEGER;
+ALTER TABLE "Order" ADD COLUMN "superfreteStatus" TEXT;
+ALTER TABLE "Order" ADD COLUMN "trackingCode" TEXT;
+ALTER TABLE "Order" ADD COLUMN "packageHeightCm" REAL;
+ALTER TABLE "Order" ADD COLUMN "packageWidthCm" REAL;
+ALTER TABLE "Order" ADD COLUMN "packageLengthCm" REAL;
+ALTER TABLE "Order" ADD COLUMN "packageWeightKg" REAL;
+ALTER TABLE "Order" ADD COLUMN "labelGeneratedAt" DATETIME;

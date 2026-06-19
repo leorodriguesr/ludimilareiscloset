@@ -14,7 +14,8 @@
     "db:deploy:production": "tsx scripts/turso-migrate.ts production",
     "db:seed": "prisma db seed",
     "db:seed:staging": "DB_TARGET=staging prisma db seed",
-    "db:seed:production": "DB_TARGET=production prisma db seed"
+    "db:seed:production": "DB_TARGET=production prisma db seed",
+    "db:mark-paid": "tsx scripts/mark-order-paid.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",

@@ -16,9 +16,19 @@ import {
 } from "@/lib/payments/infinitepay";
 import { orderToInfinitePayItems } from "@/lib/payments/order-to-infinitepay-items";
 import { isLocalPaymentCallbackBaseUrl } from "@/lib/site-url";
+import { createPixPayment } from "@/lib/payments/create-pix-payment";
 
 export type PlaceOrderState =
-  | { ok: true; orderId: string; checkoutUrl: string }
+  | { ok: true; type: "card"; orderId: string; checkoutUrl: string }
+  | {
+      ok: true;
+      type: "pix";
+      orderId: string;
+      pixCode: string;
+      pixQrBase64: string | null;
+      expiresAt: string;
+      amount: number;
+    }
   | { ok: false; error: string };
 
 /** Atualiza o telefone do usuário logado caso esteja vazio ou inválido. */
@@ -54,6 +64,7 @@ export async function placeOrderAction(input: {
   contact?: OrderContactInput;
   address?: OrderAddressInput;
   cpf?: string;
+  paymentMethod: "pix" | "card";
 }): Promise<PlaceOrderState> {
   const session = await getAppSession();
   const userId: string | null = session.user?.userId ?? null;
@@ -84,8 +95,63 @@ export async function placeOrderAction(input: {
         cpf: input.cpf ?? undefined,
       },
       address: input.address,
+      paymentMethod: input.paymentMethod,
     });
 
+    // ── PIX via Mercado Pago ──────────────────────────────────────────────────
+    if (input.paymentMethod === "pix") {
+      const payerName =
+        input.contact?.name?.trim() ||
+        (session.user
+          ? (
+              await prisma.user.findUnique({
+                where: { id: session.user.userId },
+                select: { name: true },
+              })
+            )?.name
+          : undefined) ||
+        guestDisplayName(email);
+
+      try {
+        const pix = await createPixPayment({
+          orderId: order.id,
+          amount: order.total,
+          description: `Pedido Ludimila Reis Closet`,
+          payerEmail: email,
+          payerName,
+          payerCpf: input.cpf,
+        });
+
+        // Guarda o ID da Order do Mercado Pago para polling/webhook
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { mercadoPagoPaymentId: pix.mpOrderId },
+        });
+
+        return {
+          ok: true,
+          type: "pix",
+          orderId: order.id,
+          pixCode: pix.pixCode,
+          pixQrBase64: pix.pixQrBase64,
+          expiresAt: pix.expiresAt,
+          amount: order.total,
+        };
+      } catch (e) {
+        console.error("[placeOrderAction] Mercado Pago PIX", e);
+        const msg =
+          e instanceof Error ? e.message : "Não foi possível gerar o PIX.";
+        if (msg.includes("MERCADO_PAGO_ACCESS_TOKEN")) {
+          return {
+            ok: false,
+            error: "Pagamento PIX não configurado no servidor.",
+          };
+        }
+        return { ok: false, error: msg };
+      }
+    }
+
+    // ── Cartão via InfinitePay ────────────────────────────────────────────────
     const full = await prisma.order.findUnique({
       where: { id: order.id },
       include: {
@@ -114,7 +180,6 @@ export async function placeOrderAction(input: {
       phone_number?: string;
     };
 
-    // Telefone: preferência → coletado no checkout → User.phone (logado) → nenhum
     const checkoutPhone = input.contact?.phone
       ? normalizePhone(input.contact.phone)
       : undefined;
@@ -125,8 +190,9 @@ export async function placeOrderAction(input: {
         select: { name: true, phone: true },
       });
       const phone = checkoutPhone ?? (u ? normalizePhone(u.phone) : undefined);
-      const name =
-        (input.contact?.name?.trim() || u?.name || guestDisplayName(email)).slice(0, 120);
+      const name = (
+        input.contact?.name?.trim() || u?.name || guestDisplayName(email)
+      ).slice(0, 120);
       customer = { name, email, ...(phone ? { phone_number: phone } : {}) };
     } else {
       const name = (
@@ -143,36 +209,50 @@ export async function placeOrderAction(input: {
 
     if (isLocalPaymentCallbackBaseUrl()) {
       console.warn(
-        "[placeOrderAction] retorno e webhook usam base URL local. A InfinitePay não alcança webhooks em localhost. Defina PAYMENT_CALLBACK_BASE_URL ou NEXT_PUBLIC_SITE_URL com origem pública (https), ex. domínio em produção ou túnel ngrok em dev."
+        "[placeOrderAction] retorno e webhook usam base URL local. A InfinitePay não alcança webhooks em localhost."
       );
     }
 
     try {
-      const { checkoutUrl, slug: invoiceSlug } = await createInfinitePayCheckoutLink({
-        items,
-        orderNsu: full.id,
-        redirectUrl: infinitePayOrderRedirectUrl(full.id),
-        webhookUrl: infinitePayWebhookUrl(),
-        customer,
-        ...(destDigits.length === 8
-          ? {
-              address: {
-                cep: destDigits,
-                ...(input.address?.street ? { street: input.address.street } : {}),
-                ...(input.address?.number ? { number: input.address.number } : {}),
-                ...(input.address?.complement ? { complement: input.address.complement } : {}),
-                ...(input.address?.neighborhood ? { neighborhood: input.address.neighborhood } : {}),
-              },
-            }
-          : {}),
-      });
+      const { checkoutUrl, slug: invoiceSlug } =
+        await createInfinitePayCheckoutLink({
+          items,
+          orderNsu: full.id,
+          redirectUrl: infinitePayOrderRedirectUrl(full.id),
+          webhookUrl: infinitePayWebhookUrl(),
+          customer,
+          ...(destDigits.length === 8
+            ? {
+                address: {
+                  cep: destDigits,
+                  ...(input.address?.street
+                    ? { street: input.address.street }
+                    : {}),
+                  ...(input.address?.number
+                    ? { number: input.address.number }
+                    : {}),
+                  ...(input.address?.complement
+                    ? { complement: input.address.complement }
+                    : {}),
+                  ...(input.address?.neighborhood
+                    ? { neighborhood: input.address.neighborhood }
+                    : {}),
+                },
+              }
+            : {}),
+        });
       if (invoiceSlug) {
         await prisma.order.update({
           where: { id: full.id },
           data: { infinitePayInvoiceSlug: invoiceSlug },
         });
       }
-      return { ok: true, orderId: full.id, checkoutUrl };
+      return {
+        ok: true,
+        type: "card",
+        orderId: full.id,
+        checkoutUrl,
+      };
     } catch (e) {
       console.error("[placeOrderAction] InfinitePay", e);
       const msg =
@@ -182,8 +262,7 @@ export async function placeOrderAction(input: {
       if (msg.includes("INFINITEPAY_HANDLE")) {
         return {
           ok: false,
-          error:
-            "Pagamento não configurado no servidor (INFINITEPAY_HANDLE).",
+          error: "Pagamento não configurado no servidor (INFINITEPAY_HANDLE).",
         };
       }
       return { ok: false, error: msg };
