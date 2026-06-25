@@ -70,7 +70,11 @@ export default async function Home({ searchParams }: HomeProps) {
   return (
     <>
       <Banner imageUrl={settings?.bannerImageUrl ?? ""} />
-      <TrustBar />
+      <TrustBar
+        freeShippingEnabled={settings?.freeShippingEnabled ?? false}
+        freeShippingType={settings?.freeShippingType ?? "minimum_value"}
+        freeShippingMinValue={settings?.freeShippingMinValue ?? 0}
+      />
 
       {/* Tab-bar de categorias — sticky abaixo do header */}
       {categories.length > 0 && (

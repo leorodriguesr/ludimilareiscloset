@@ -8,14 +8,16 @@ export default async function CheckoutPage() {
   let initialEmail = "";
   let initialName = "";
   let initialPhone = "";
+  let initialCpf = "";
   if (session.user) {
     const u = await prisma.user.findUnique({
       where: { id: session.user.userId },
-      select: { email: true, name: true, phone: true },
+      select: { email: true, name: true, phone: true, cpf: true },
     });
     initialEmail = u?.email ?? "";
     initialName = u?.name ?? "";
     initialPhone = u?.phone ?? "";
+    initialCpf = u?.cpf ?? "";
   }
 
   return (
@@ -23,6 +25,7 @@ export default async function CheckoutPage() {
       initialEmail={initialEmail}
       initialName={initialName}
       initialPhone={initialPhone}
+      initialCpf={initialCpf}
       loggedIn={loggedIn}
     />
   );

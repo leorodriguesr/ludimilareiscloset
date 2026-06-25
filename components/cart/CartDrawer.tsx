@@ -9,6 +9,8 @@ import { describeCartPieceSelection } from "@/lib/cart/format-piece-selections";
 import type { CartItem } from "@/lib/cart/types";
 import { formatPrice } from "@/lib/format";
 import { installmentValueEqualParts } from "@/lib/product-pricing";
+import { useStoreSettings } from "@/lib/hooks/use-store-settings";
+import { checkFreeShipping } from "@/lib/shipping/free-shipping";
 
 const DRAWER_MS = 300;
 
@@ -61,6 +63,7 @@ export function CartDrawer() {
     drawerOpen,
     closeCart,
   } = useCart();
+  const { settings } = useStoreSettings();
 
   /** Mantém o DOM durante a animação de fechamento. */
   const [mounted, setMounted] = useState(false);
@@ -165,7 +168,7 @@ export function CartDrawer() {
               <button
                 type="button"
                 onClick={closeCart}
-                className="mt-6 inline-block rounded-full border border-stone-300 px-5 py-2.5 text-sm font-medium text-stone-800 hover:bg-stone-50"
+                className="mt-6 inline-block rounded-full border border-stone-300 px-5 py-2.5 text-sm font-medium text-stone-800 hover:bg-stone-50 cursor-pointer"
               >
                 Continuar comprando
               </button>
@@ -258,10 +261,25 @@ export function CartDrawer() {
                         </div>
                         <button
                           type="button"
-                          className="text-xs font-medium text-red-700 hover:underline"
+                          className="text-red-700 transition-colors hover:text-red-800"
                           onClick={() => removeItem(item.lineId)}
+                          aria-label="Remover"
+                          title="Remover"
                         >
-                          Remover
+                          <svg
+                            className="h-4 w-4"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={1.5}
+                            viewBox="0 0 24 24"
+                            aria-hidden="true"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"
+                            />
+                          </svg>
                         </button>
                       </div>
                     </div>
@@ -314,6 +332,41 @@ export function CartDrawer() {
 
         {hydrated && items.length > 0 && (
           <div className="border-t border-stone-200 bg-stone-50 px-4 py-4 space-y-3">
+            {/* Barra de progresso frete grátis */}
+            {settings && (() => {
+              const fs = checkFreeShipping(settings, subtotal);
+              if (!settings.freeShippingEnabled) return null;
+              if (fs.isFree) {
+                return (
+                  <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2.5">
+                    <svg className="h-4 w-4 shrink-0 text-emerald-600" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    <p className="text-xs font-medium text-emerald-700">Frete grátis conquistado!</p>
+                  </div>
+                );
+              }
+              if (fs.missingAmount != null && fs.minValue != null) {
+                const progress = Math.min(100, (subtotal / fs.minValue) * 100);
+                return (
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-stone-600">
+                      Falta{" "}
+                      <span className="font-semibold text-stone-900">{formatPrice(fs.missingAmount)}</span>{" "}
+                      para <span className="font-semibold text-stone-900">frete grátis</span>
+                    </p>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-200">
+                      <div
+                        className="h-full rounded-full bg-stone-900 transition-all duration-500"
+                        style={{ width: `${progress}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+
             <div className="space-y-2 text-sm">
 
               <div className="flex items-center justify-between gap-3">
@@ -346,7 +399,7 @@ export function CartDrawer() {
               <button
                 type="button"
                 onClick={closeCart}
-                className="w-full rounded-full border border-stone-300 bg-white py-2.5 text-sm font-medium text-stone-800 hover:bg-stone-100 transition-colors"
+                className="cursor-pointer w-full rounded-full border border-stone-300 bg-white py-2.5 text-sm font-medium text-stone-800 hover:bg-stone-100 transition-colors"
               >
                 Continuar comprando
               </button>

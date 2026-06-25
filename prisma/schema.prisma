@@ -22,6 +22,7 @@ model User {
   name         String
   email        String     @unique
   phone        String
+  cpf          String?
   /** Null quando a conta é só OAuth (ex.: Google). */
   passwordHash String?
   /** ID estável da conta Google (sub / id do userinfo). */
@@ -238,4 +239,11 @@ model PieceVariant {
 model StoreSettings {
   id             String @id @default("default")
   bannerImageUrl String @default("")
+
+  /** Frete grátis habilitado na loja */
+  freeShippingEnabled  Boolean @default(false)
+  /** "always" = sempre grátis | "minimum_value" = grátis acima de um valor mínimo */
+  freeShippingType     String  @default("minimum_value")
+  /** Valor mínimo do carrinho (R$) para frete grátis (usado quando type = minimum_value) */
+  freeShippingMinValue Float   @default(0)
 }

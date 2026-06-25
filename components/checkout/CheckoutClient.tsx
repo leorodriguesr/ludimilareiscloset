@@ -11,7 +11,7 @@ import {
   useState,
   useTransition,
 } from "react";
-import { placeOrderAction, updateUserPhoneAction } from "@/app/checkout/actions";
+import { placeOrderAction, updateUserCheckoutContactAction } from "@/app/checkout/actions";
 import { useCart } from "@/components/cart/CartProvider";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { GUEST_CHECKOUT_EMAIL_KEY } from "@/lib/checkout/guest-email-storage";
@@ -20,10 +20,12 @@ import { formatPrice } from "@/lib/format";
 import { installmentValueEqualParts } from "@/lib/product-pricing";
 import type { NormalizedShippingOption } from "@/lib/shipping/types";
 import type { CartPieceSelection } from "@/lib/cart/types";
+import { useStoreSettings } from "@/lib/hooks/use-store-settings";
+import { checkFreeShipping } from "@/lib/shipping/free-shipping";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Props = { initialEmail: string; initialName: string; initialPhone: string; loggedIn: boolean };
+type Props = { initialEmail: string; initialName: string; initialPhone: string; initialCpf: string; loggedIn: boolean };
 type ContactData = { name: string; email: string; phone: string; cpf: string };
 type ShippingData = {
   cep: string; street: string; number: string; complement: string;
@@ -115,9 +117,14 @@ function StepBar({ current }: { current: number }) {
 
 // ─── Mobile order summary (collapsible top bar) ───────────────────────────────
 
-function MobileOrderSummary({ lines, subtotal }: { lines: CartLine[]; subtotal: number }) {
+function MobileOrderSummary({ lines, subtotal, subtotalPix }: { lines: CartLine[]; subtotal: number; subtotalPix: number }) {
   const [open, setOpen] = useState(false);
   const totalQty = lines.reduce((a, l) => a + l.quantity, 0);
+  const maxInstallments = lines.reduce((acc, l) => {
+    const n = l.installmentCount ?? 0;
+    return n > acc ? n : acc;
+  }, 0) || 6;
+  const cardInstallmentValue = installmentValueEqualParts(subtotal, maxInstallments);
   return (
     <div className="border-b border-stone-200 bg-white lg:hidden">
       <button
@@ -125,22 +132,41 @@ function MobileOrderSummary({ lines, subtotal }: { lines: CartLine[]; subtotal: 
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center justify-between px-5 py-4"
       >
-        <div className="flex items-center gap-2.5 text-sm font-medium text-stone-700">
+        <div className="flex items-center gap-2.5 text-sm font-medium text-stone-700 w-full">
           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-stone-900 text-[10px] font-bold text-white">
             {totalQty}
           </span>
           Ver resumo do pedido
-          <svg className={`h-4 w-4 text-stone-400 transition-transform ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <svg className={`ml-auto h-4 w-4 text-stone-400 transition-transform ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
         </div>
-        <span className="text-sm font-bold tabular-nums text-stone-900">{formatPrice(subtotal)}</span>
+        {/* <div className="flex shrink-0 flex-col items-end gap-1 text-right">
+          <div className="flex items-center gap-1.5">
+            <Image src="/pix-icon.svg" alt="" width={14} height={14} unoptimized className="h-3.5 w-3.5 shrink-0 object-contain" />
+            <span className="text-sm font-bold tabular-nums text-stone-900">{formatPrice(subtotalPix)}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <svg className="h-3.5 w-3.5 shrink-0 text-stone-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+            </svg>
+            <span className="text-sm font-bold tabular-nums text-stone-900">{formatPrice(subtotal)}</span>
+          </div>
+        </div> */}
       </button>
 
       {open && (
         <div className="border-t border-stone-100 px-5 pb-5 pt-3">
           <ul className="space-y-3">
-            {lines.map((l) => (
+            {lines.map((l) => {
+              const lineCard = l.price * l.quantity;
+              const linePix = l.pixPrice != null && l.pixPrice > 0 ? l.pixPrice * l.quantity : null;
+              const inst = (() => {
+                const parts = Math.floor(l.installmentCount ?? 0);
+                if (parts < 1) return null;
+                return { parts, each: installmentValueEqualParts(l.price * l.quantity, parts) };
+              })();
+              return (
               <li key={l.lineId} className="flex gap-3">
                 <div className="relative h-14 w-12 shrink-0 overflow-hidden rounded-md bg-stone-100">
                   {l.image
@@ -158,21 +184,51 @@ function MobileOrderSummary({ lines, subtotal }: { lines: CartLine[]; subtotal: 
                     const d = describeCartPieceSelection(r);
                     return d ? <p key={i} className="text-xs text-stone-500">{d}</p> : null;
                   })}
+                  <p className="mt-1 text-xs text-stone-400 tabular-nums">{l.quantity} × {formatPrice(l.price)}</p>
                 </div>
-                <p className="shrink-0 text-sm tabular-nums font-medium text-stone-900">
-                  {formatPrice(l.price * l.quantity)}
-                </p>
+                <div className="flex shrink-0 flex-col items-end gap-2 text-right">
+                  {linePix != null && (
+                    <div className="flex items-start gap-1.5">
+                      <Image src="/pix-icon.svg" alt="" width={14} height={14} unoptimized className="mt-0.5 h-3.5 w-3.5 shrink-0 object-contain" />
+                      <div>
+                        <p className="text-[12px] tabular-nums text-stone-500">{formatPrice(linePix)}</p>
+                        {/* <p className="text-[10px] text-stone-400">à vista</p> */}
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex items-start gap-1.5">
+                    <svg className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24" aria-hidden>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                    </svg>
+                    <div>
+                      <p className="text-[12px] tabular-nums text-stone-500">{formatPrice(lineCard)}</p>
+                      {/* {inst && <p className="text-[10px] tabular-nums text-stone-400">{inst.parts}× {formatPrice(inst.each)}</p>} */}
+                    </div>
+                  </div>
+                </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
-          <div className="mt-4 space-y-1.5 border-t border-stone-100 pt-3 text-sm">
-            <div className="flex justify-between text-stone-500">
-              <span>Subtotal</span>
-              <span className="tabular-nums">{formatPrice(subtotal)}</span>
+          <div className="mt-4 space-y-2 border-t border-stone-100 pt-3 text-sm">
+            <div className="flex items-center justify-between gap-3 text-stone-600">
+              <span className="flex items-center gap-1.5">
+                <Image src="/pix-icon.svg" alt="" width={16} height={16} unoptimized className="h-4 w-4 shrink-0 object-contain" />
+                Subtotal Pix
+              </span>
+              <span className="font-semibold tabular-nums text-emerald-700">{formatPrice(subtotalPix)}</span>
             </div>
-            <div className="flex justify-between font-semibold text-stone-900">
-              <span>Total</span>
-              <span className="tabular-nums">{formatPrice(subtotal)}</span>
+            <div className="flex items-start justify-between gap-3 text-stone-600">
+              <span className="flex items-center gap-1.5">
+                <svg className="h-4 w-4 shrink-0 text-stone-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                </svg>
+                Subtotal Cartão
+              </span>
+              <div className="text-right">
+                <span className="font-semibold tabular-nums text-stone-900">{formatPrice(subtotal)}</span>
+                <p className="text-[10px] tabular-nums text-stone-400">{maxInstallments}× {formatPrice(cardInstallmentValue)} s/ juros</p>
+              </div>
             </div>
             <p className="text-[11px] text-stone-400">+ frete calculado na próxima etapa</p>
           </div>
@@ -193,6 +249,10 @@ function DesktopSummary({
   step: number; paymentMethod: PaymentMethod; onPay: () => void; pending: boolean;
 }) {
   const canPay = step === 3 && paymentMethod !== null;
+  const { settings } = useStoreSettings();
+
+  // Frete não é cobrado no pagamento — R$0 sempre para totais
+  const effectiveShipping = 0;
 
   // Max installments across all items (fallback 6)
   const maxInstallments = lines.reduce((acc, l) => {
@@ -240,17 +300,17 @@ function DesktopSummary({
                     <div className="flex items-start gap-1.5">
                       <Image src="/pix-icon.svg" alt="" width={14} height={14} unoptimized className="mt-0.5 h-3.5 w-3.5 shrink-0 object-contain" />
                       <div>
-                        <p className="text-sm font-semibold tabular-nums text-stone-900">{formatPrice(linePix)}</p>
+                        <p className="text-[12px] tabular-nums text-stone-500">{formatPrice(linePix)}</p>
                         <p className="text-[10px] text-stone-400">à vista</p>
                       </div>
                     </div>
                   )}
                   <div className="flex items-start gap-1.5">
-                    <svg className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24" aria-hidden>
+                    <svg className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24" aria-hidden>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                     </svg>
                     <div>
-                      <p className="text-sm font-semibold tabular-nums text-stone-900">{formatPrice(lineCard)}</p>
+                      <p className="text-[12px] tabular-nums text-stone-500">{formatPrice(lineCard)}</p>
                       {inst && <p className="text-[10px] tabular-nums text-stone-400">{inst.parts}× {formatPrice(inst.each)}</p>}
                     </div>
                   </div>
@@ -265,15 +325,31 @@ function DesktopSummary({
       <div className="border-t border-stone-200 px-5 py-4">
         <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-stone-400">Frete</p>
         {deliveryDone && shipping.optionLabel ? (
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-start justify-between gap-2">
             <p className="text-sm text-stone-600">{shipping.optionLabel}</p>
-            <span className={`text-sm font-semibold tabular-nums ${shipping.optionPrice === 0 ? "text-emerald-600" : "text-stone-900"}`}>
-              {shipping.optionPrice === 0 ? "Grátis" : formatPrice(shipping.optionPrice)}
-            </span>
+            <div className="flex shrink-0 flex-col items-end gap-0.5">
+              {shipping.optionPrice > 0 && (
+                <span className="text-xs tabular-nums text-stone-400 line-through">{formatPrice(shipping.optionPrice)}</span>
+              )}
+              <span className="text-sm font-semibold text-emerald-600">Grátis</span>
+            </div>
           </div>
         ) : (
           <p className="text-sm text-stone-400">Calculado na etapa de entrega</p>
         )}
+        {/* Mensagem de falta para frete grátis */}
+        {/* {settings && (() => {
+          const fs = checkFreeShipping(settings, subtotal);
+          if (!settings.freeShippingEnabled || fs.isFree) return null;
+          if (fs.missingAmount != null) {
+            return (
+              <p className="mt-2 text-xs text-stone-500">
+                Falta <span className="font-semibold text-stone-700">{formatPrice(fs.missingAmount)}</span> para frete grátis
+              </p>
+            );
+          }
+          return null;
+        })()} */}
       </div>
 
       {/* Total by payment method — only on step 3 */}
@@ -291,10 +367,10 @@ function DesktopSummary({
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <Image src="/pix-icon.svg" alt="Pix" width={16} height={16} unoptimized className="h-4 w-4 shrink-0 object-contain" />
-                  <span className="text-sm font-medium text-stone-700">Pix · à vista</ span>
+                  <span className="text-sm font-medium text-stone-700">Pix · à vista</span>
                 </div>
                 <span className="text-lg font-bold tabular-nums text-stone-900">
-                  {formatPrice(subtotalPix + (deliveryDone ? shipping.optionPrice : 0))}
+                  {formatPrice(subtotalPix + effectiveShipping)}
                 </span>
               </div>
             </div>
@@ -309,11 +385,11 @@ function DesktopSummary({
                   <span className="text-sm font-medium text-stone-700">Cartão de crédito</span>
                 </div>
                 <span className="text-lg font-bold tabular-nums text-stone-900">
-                  {formatPrice(subtotal + (deliveryDone ? shipping.optionPrice : 0))}
+                  {formatPrice(subtotal + effectiveShipping)}
                 </span>
               </div>
               <p className="mt-1 text-right text-xs tabular-nums text-stone-500">
-                {maxInstallments}× de {formatPrice(installmentValueEqualParts(subtotal + (deliveryDone ? shipping.optionPrice : 0), maxInstallments))} s/ juros
+                {maxInstallments}× de {formatPrice(installmentValueEqualParts(subtotal + effectiveShipping, maxInstallments))} s/ juros
               </p>
             </div>
           )}
@@ -373,36 +449,38 @@ function DesktopSummary({
 // ─── Step: Contato ────────────────────────────────────────────────────────────
 
 function ContactStep({
-  loggedIn, hadNoPhone, initialEmail, initialName, data, onChange, onNext,
+  loggedIn, initialEmail, data, onChange, onNext,
   registerSubmit,
 }: {
-  loggedIn: boolean; hadNoPhone: boolean; initialEmail: string; initialName: string;
+  loggedIn: boolean; initialEmail: string;
   data: ContactData; onChange: (d: ContactData) => void; onNext: () => void;
   registerSubmit: (fn: () => Promise<void>) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (!data.email && initialEmail) onChange({ ...data, email: initialEmail });
-    if (!data.name && initialName) onChange({ ...data, name: initialName });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const handleNext = useCallback(async () => {
-    if (!loggedIn && !data.name.trim()) { setError("Informe seu nome."); return; }
+    if (!data.name.trim()) { setError("Informe seu nome."); return; }
     if (!data.email.trim()) { setError("Informe seu e-mail."); return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email.trim())) { setError("E-mail inválido."); return; }
     if (data.phone.replace(/\D/g, "").length < 10) { setError("Informe um telefone válido com DDD."); return; }
     if (data.cpf.replace(/\D/g, "").length !== 11) { setError("Informe um CPF válido (11 dígitos)."); return; }
     setError(null);
-    if (loggedIn && hadNoPhone && data.phone.replace(/\D/g, "").length >= 10) {
+    if (loggedIn) {
       setSaving(true);
-      try { await updateUserPhoneAction(data.phone); } catch {}
-      finally { setSaving(false); }
+      try {
+        const res = await updateUserCheckoutContactAction({
+          name: data.name.trim(),
+          phone: data.phone,
+          cpf: data.cpf,
+        });
+        if (!res.ok) { setError(res.error); return; }
+      } finally {
+        setSaving(false);
+      }
     }
     onNext();
-  }, [loggedIn, hadNoPhone, data, onNext]);
+  }, [loggedIn, data, onNext]);
 
   // Register submit fn for mobile bottom bar
   useEffect(() => { registerSubmit(handleNext); }, [registerSubmit, handleNext]);
@@ -410,12 +488,26 @@ function ContactStep({
   return (
     <div className="space-y-5">
       {!loggedIn && (
-        <div>
-          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500" htmlFor="c-name">Nome completo</label>
-          <input id="c-name" type="text" autoComplete="name" placeholder="Seu nome completo"
-            value={data.name} onChange={(e) => onChange({ ...data, name: e.target.value })} className={inputCls} />
-        </div>
+        <>
+          <GoogleSignInButton
+            nextPath="/checkout"
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-stone-200 bg-white py-2.5 text-sm font-medium text-stone-700 shadow-sm transition hover:bg-stone-50"
+          />
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center" aria-hidden>
+              <div className="w-full border-t border-stone-200" />
+            </div>
+            <div className="relative flex justify-center">
+              <span className="bg-white px-3 text-xs font-medium uppercase tracking-wider text-stone-400">ou</span>
+            </div>
+          </div>
+        </>
       )}
+      <div>
+        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500" htmlFor="c-name">Nome completo</label>
+        <input id="c-name" type="text" autoComplete="name" placeholder="Seu nome completo"
+          value={data.name} onChange={(e) => onChange({ ...data, name: e.target.value })} className={inputCls} />
+      </div>
       <div>
         <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500" htmlFor="c-email">E-mail</label>
         {loggedIn ? (
@@ -423,7 +515,7 @@ function ContactStep({
             <svg className="h-4 w-4 shrink-0 text-stone-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
             </svg>
-            <span className="text-sm text-stone-600">{initialEmail}</span>
+            <span className="text-sm text-stone-600">{data.email || initialEmail}</span>
           </div>
         ) : (
           <input id="c-email" type="email" autoComplete="email" placeholder="seu@email.com"
@@ -440,13 +532,6 @@ function ContactStep({
         <input id="c-cpf" type="text" inputMode="numeric" autoComplete="off" placeholder="000.000.000-00"
           value={data.cpf} onChange={(e) => onChange({ ...data, cpf: cpfFmt(e.target.value) })} className={inputCls} />
       </div>
-      {!loggedIn && (
-        <div className="rounded-lg border border-stone-100 bg-stone-50 p-4">
-          <p className="mb-2.5 text-xs text-stone-500">Já tem conta? Entre para vincular o pedido ao seu histórico.</p>
-          <GoogleSignInButton nextPath="/checkout"
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-stone-200 bg-white py-2.5 text-sm font-medium text-stone-700 shadow-sm transition hover:bg-stone-50" />
-        </div>
-      )}
       {error && <p className="rounded-lg bg-red-50 px-4 py-2.5 text-sm text-red-600">{error}</p>}
 
       {/* Desktop-only button */}
@@ -461,13 +546,15 @@ function ContactStep({
 // ─── Step: Entrega ────────────────────────────────────────────────────────────
 
 function DeliveryStep({
-  lines, data, onChange, onNext, onBack, registerSubmit,
+  lines, data, onChange, onNext, onBack, registerSubmit, subtotal,
 }: {
   lines: { productId: string; quantity: number }[];
   data: ShippingData; onChange: (d: ShippingData) => void;
   onNext: () => void; onBack: () => void;
   registerSubmit: (fn: () => Promise<void>) => void;
+  subtotal: number;
 }) {
+  const { settings } = useStoreSettings();
   const [cepDigits, setCepDigits] = useState(data.cep);
   const [loadingCep, setLoadingCep] = useState(false);
   const [cepError, setCepError] = useState<string | null>(null);
@@ -480,6 +567,15 @@ function DeliveryStep({
   const abortRef = useRef<AbortController | null>(null);
   const debRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { cheapestIds, fastestIds } = useMemo(() => rankHighlights(options ?? []), [options]);
+
+  // Quando frete grátis, ordena opções do mais barato para o mais caro
+  const freeShippingResult = settings ? checkFreeShipping(settings, subtotal) : null;
+  const isFreeShipping = freeShippingResult?.isFree ?? false;
+  const displayOptions = useMemo(() => {
+    if (!options) return null;
+    if (isFreeShipping) return [...options].sort((a, b) => a.price - b.price);
+    return options;
+  }, [options, isFreeShipping]);
 
   const lookupCep = useCallback(async (digits: string) => {
     setLoadingCep(true); setCepError(null);
@@ -519,9 +615,12 @@ function DeliveryStep({
 
   useEffect(() => {
     if (!options?.length) return;
-    const first = options.find((o) => cheapestIds.has(o.id)) ?? options[0];
+    // Quando frete grátis, pré-seleciona o mais barato (primeiro após ordenação)
+    const first = isFreeShipping
+      ? [...options].sort((a, b) => a.price - b.price)[0]
+      : (options.find((o) => cheapestIds.has(o.id)) ?? options[0]);
     if (!selectedId || !options.some((o) => o.id === selectedId)) setSelectedId(first?.id ?? null);
-  }, [options, cheapestIds, selectedId]);
+  }, [options, cheapestIds, selectedId, isFreeShipping]);
 
   useEffect(() => {
     if (!selectedId || !options?.length) return;
@@ -543,6 +642,36 @@ function DeliveryStep({
 
   return (
     <div className="space-y-5">
+      {/* Mensagem de frete grátis */}
+      {settings && (() => {
+        const fs = checkFreeShipping(settings, subtotal);
+        if (!settings.freeShippingEnabled) return null;
+        if (fs.isFree) {
+          return (
+            <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-100 px-4 py-3">
+              <svg className="h-4 w-4 shrink-0 text-emerald-600" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+              <p className="text-sm font-medium text-emerald-700">Frete grátis aplicado ao seu pedido!</p>
+            </div>
+          );
+        }
+        // if (fs.missingAmount != null && fs.minValue != null) {
+        //   const progress = Math.min(100, (subtotal / fs.minValue) * 100);
+        //   return (
+        //     <div className="space-y-2 rounded-lg bg-stone-50 border border-stone-200 px-4 py-3">
+        //       <p className="text-sm text-stone-600">
+        //         Falta <span className="font-semibold text-stone-900">{formatPrice(fs.missingAmount)}</span> para <span className="font-semibold text-stone-900">frete grátis</span>
+        //       </p>
+        //       <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-200">
+        //         <div className="h-full rounded-full bg-stone-900 transition-all duration-500" style={{ width: `${progress}%` }} />
+        //       </div>
+        //     </div>
+        //   );
+        // }
+        return null;
+      })()}
+
       <div>
         <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">CEP</label>
         <div className="relative">
@@ -561,7 +690,7 @@ function DeliveryStep({
           value={data.street} onChange={(e) => onChange({ ...data, street: e.target.value })} className={inputCls} />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-[minmax(4.5rem,20%)_1fr] gap-4">
         <div>
           <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Número</label>
           <input type="text" placeholder="123"
@@ -606,29 +735,42 @@ function DeliveryStep({
               </div>
             )}
             {shippingError && !loadingShipping && <p className="px-4 py-4 text-sm text-red-500">{shippingError}</p>}
-            {!loadingShipping && options?.length ? (
+            {!loadingShipping && displayOptions?.length ? (
               <ul className="divide-y divide-stone-100">
-                {options.map((o, idx) => {
-                  const isCheap = cheapestIds.has(o.id); const isFast = fastestIds.has(o.id);
+                {displayOptions.map((o, idx) => {
+                  const isFree = isFreeShipping && idx === 0;
                   const id = `ship-${idx}-${o.id}`; const sel = selectedId === o.id;
                   return (
                     <li key={id}>
-                      <label htmlFor={id} className={`flex cursor-pointer items-start gap-3 px-4 py-3.5 text-sm transition-colors ${sel ? "bg-stone-50" : "hover:bg-stone-50/50"}`}>
+                      <label htmlFor={id} className={`flex cursor-pointer items-center gap-3 px-4 py-3.5 transition-colors ${sel ? "bg-stone-50" : "hover:bg-stone-50/50"}`}>
                         <input id={id} type="radio" name="ship-opt" checked={sel} onChange={() => setSelectedId(o.id)} className="mt-0.5 shrink-0 accent-stone-900" />
+                        {/* Esquerda: nome + prazo */}
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className={`font-medium ${sel ? "text-stone-900" : "text-stone-700"}`}>{o.carrierName}</span>
-                            <div className="flex shrink-0 gap-1">
-                              {isCheap && <span className="rounded-md bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">Menor preço</span>}
-                              {isFast && <span className="rounded-md bg-amber-500 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">Mais rápido</span>}
-                            </div>
+                          <p className={`text-sm font-medium leading-snug ${sel ? "text-stone-900" : "text-stone-700"}`}>
+                            {o.carrierName}
+                            {o.serviceName ? ` — ${o.serviceName}` : ""}
+                          </p>
+                          <div className="mt-1 flex items-center gap-1 text-xs text-stone-400">
+                            <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                            </svg>
+                            <span>{daysLabel(o)}</span>
                           </div>
-                          <div className="mt-0.5 flex items-center justify-between gap-2">
-                            <span className="text-xs text-stone-500">{o.serviceName} · {daysLabel(o)}</span>
-                            <span className={`shrink-0 text-xs font-semibold tabular-nums ${o.price === 0 ? "text-emerald-600" : "text-stone-900"}`}>
+                        </div>
+                        {/* Direita: preço */}
+                        <div className="shrink-0 text-right">
+                          {isFree ? (
+                            <>
+                              <p className="text-base font-bold text-emerald-600">Grátis</p>
+                              {o.price > 0 && (
+                                <p className="text-xs tabular-nums text-stone-400 line-through">{formatPrice(o.price)}</p>
+                              )}
+                            </>
+                          ) : (
+                            <p className={`text-base font-bold tabular-nums ${o.price === 0 ? "text-emerald-600" : "text-stone-900"}`}>
                               {o.price === 0 ? "Grátis" : formatPrice(o.price)}
-                            </span>
-                          </div>
+                            </p>
+                          )}
                         </div>
                       </label>
                     </li>
@@ -646,7 +788,7 @@ function DeliveryStep({
       <div className="hidden lg:flex gap-3 pt-1">
         <button type="button" onClick={onBack}
           className="flex items-center gap-1.5 rounded-xl border border-stone-200 px-5 py-3 text-sm font-medium text-stone-600 transition hover:bg-stone-50">
-          ← Voltar
+          Voltar
         </button>
         <button type="button" onClick={handleNext}
           className="flex flex-1 items-center justify-center rounded-xl bg-stone-900 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800">
@@ -675,10 +817,14 @@ function ConfirmStep({
     return n > acc ? n : acc;
   }, 0) || 6;
 
-  const shippingAmount = shipping.optionPrice;
-  const pixTotal = subtotalPix + shippingAmount;
-  const cardTotal = subtotal + shippingAmount;
+  // Preço real do frete (para exibição informativa)
+  const displayShippingPrice = shipping.optionPrice;
+  // Frete não é cobrado no pagamento
+  const effectiveShipping = 0;
+  const pixTotal = subtotalPix + effectiveShipping;
+  const cardTotal = subtotal + effectiveShipping;
   const cardInstallmentValue = installmentValueEqualParts(cardTotal, maxInstallments);
+  const { settings } = useStoreSettings();
 
   const ReviewCard = ({ title, onEdit, children }: { title: string; onEdit: () => void; children: React.ReactNode }) => (
     <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
@@ -694,7 +840,7 @@ function ConfirmStep({
     <div className="space-y-4">
       {/* Contact review */}
       <ReviewCard title="Contato" onEdit={onBack}>
-        {!loggedIn && contact.name && <p className="font-medium">{contact.name}</p>}
+        {contact.name && <p className="font-medium">{contact.name}</p>}
         <p>{contact.email}</p>
         {contact.phone && <p className="text-stone-500">{contact.phone}</p>}
         {contact.cpf && <p className="text-stone-500">CPF: {contact.cpf}</p>}
@@ -711,12 +857,44 @@ function ConfirmStep({
               <p className="text-xs font-medium text-stone-800">{shipping.optionLabel}</p>
               <p className="text-[11px] text-stone-400">{shipping.deliveryLabel}</p>
             </div>
-            <span className={`text-sm font-bold tabular-nums ${shipping.optionPrice === 0 ? "text-emerald-600" : "text-stone-900"}`}>
-              {shipping.optionPrice === 0 ? "Grátis" : formatPrice(shipping.optionPrice)}
-            </span>
+            <div className="flex flex-col items-end gap-0.5">
+              {displayShippingPrice > 0 && (
+                <span className="text-xs tabular-nums text-stone-400 line-through">{formatPrice(displayShippingPrice)}</span>
+              )}
+              <span className="text-sm font-bold text-emerald-600">Grátis</span>
+            </div>
           </div>
         )}
       </ReviewCard>
+
+      {/* Mensagem de frete grátis */}
+      {settings && (() => {
+        const fs = checkFreeShipping(settings, subtotal);
+        if (!settings.freeShippingEnabled) return null;
+        if (fs.isFree) {
+          return (
+            <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-100 px-4 py-3">
+              <svg className="h-4 w-4 shrink-0 text-emerald-600" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+              <p className="text-sm font-medium text-emerald-700">Frete grátis aplicado neste pedido!</p>
+            </div>
+          );
+        }
+        // if (fs.missingAmount != null) {
+        //   return (
+        //     <div className="flex items-center gap-2 rounded-lg bg-stone-50 border border-stone-200 px-4 py-3">
+        //       <svg className="h-4 w-4 shrink-0 text-stone-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+        //         <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 18.75a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 0 1-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 0 0-3.213-9.193 2.056 2.056 0 0 0-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 0 0-10.026 0 1.106 1.106 0 0 0-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12" />
+        //       </svg>
+        //       <p className="text-sm text-stone-600">
+        //         Falta <span className="font-semibold text-stone-900">{formatPrice(fs.missingAmount)}</span> para <span className="font-semibold text-stone-900">frete grátis</span>
+        //       </p>
+        //     </div>
+        //   );
+        // }
+        return null;
+      })()}
 
       {/* Payment method selector */}
       <div className={`overflow-hidden rounded-xl border-2 bg-white shadow-sm transition-colors ${paymentMethod === null ? "border-amber-400" : "border-stone-200"}`}>
@@ -758,7 +936,8 @@ function ConfirmStep({
             </div>
             <div>
               <p className="text-base font-bold tabular-nums text-stone-900">{formatPrice(pixTotal)}</p>
-              <p className="text-[11px] text-stone-400">à vista · inclui frete</p>
+              <p className="text-[11px] text-stone-400">à vista</p>
+              <p className="text-[11px] text-emerald-600 font-medium">Frete grátis</p>
             </div>
           </button>
 
@@ -785,44 +964,117 @@ function ConfirmStep({
             </div>
             <div>
               <p className="text-base font-bold tabular-nums text-stone-900">{formatPrice(cardTotal)}</p>
-              <p className="text-[11px] text-stone-400">{maxInstallments}× de {formatPrice(cardInstallmentValue)} s/ juros · inclui frete</p>
+              <p className="text-[11px] text-stone-400">{maxInstallments}× {formatPrice(cardInstallmentValue)} s/ juros</p>
+              <p className="text-[11px] text-emerald-600 font-medium">Frete grátis</p>
             </div>
           </button>
         </div>
       </div>
 
-      {/* Items — only shown on mobile (desktop has the right panel) */}
+      {/* Order summary — mobile only; mirrors desktop Resumo do pedido */}
       <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm lg:hidden">
-        <p className="border-b border-stone-100 px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-stone-400">Itens</p>
-        <ul className="divide-y divide-stone-100">
-          {lines.map((l) => (
-            <li key={l.lineId} className="flex gap-3 px-4 py-3">
-              <div className="relative h-12 w-10 shrink-0 overflow-hidden rounded-md bg-stone-100">
-                {l.image ? <Image src={l.image} alt="" fill className="object-cover" sizes="40px" /> : null}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-stone-900">{l.name}</p>
-                <p className="text-xs text-stone-500">{l.quantity} × {formatPrice(l.price)}</p>
-              </div>
-              <p className="shrink-0 text-sm font-semibold tabular-nums text-stone-900">{formatPrice(l.price * l.quantity)}</p>
-            </li>
-          ))}
+        <p className="border-b border-stone-100 px-4 py-3 text-[10px] font-semibold uppercase tracking-wider text-stone-400">Resumo do pedido</p>
+        <ul className="divide-y divide-stone-100 px-4">
+          {lines.map((l) => {
+            const lineCard = l.price * l.quantity;
+            const linePix = l.pixPrice != null && l.pixPrice > 0 ? l.pixPrice * l.quantity : null;
+            const inst = (() => {
+              const parts = Math.floor(l.installmentCount ?? 0);
+              if (parts < 1) return null;
+              return { parts, each: installmentValueEqualParts(l.price * l.quantity, parts) };
+            })();
+            return (
+              <li key={l.lineId} className="flex gap-3 py-3 first:pt-3 last:pb-3">
+                <div className="relative h-14 w-12 shrink-0 overflow-hidden rounded-md bg-stone-100">
+                  {l.image
+                    ? <Image src={l.image} alt="" fill className="object-cover" sizes="48px" />
+                    : <div className="flex h-full items-center justify-center text-[9px] text-stone-400">—</div>}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="line-clamp-2 text-sm font-medium text-stone-900">{l.name}</p>
+                  {l.pieceSelections?.map((r, i) => {
+                    const d = describeCartPieceSelection(r);
+                    return d ? <p key={i} className="mt-0.5 text-xs text-stone-500">{d}</p> : null;
+                  })}
+                  <p className="mt-1 text-xs text-stone-400 tabular-nums">{l.quantity} × {formatPrice(l.price)}</p>
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-2 text-right">
+                  {linePix != null && (
+                    <div className="flex items-start gap-1.5">
+                      <Image src="/pix-icon.svg" alt="" width={14} height={14} unoptimized className="mt-0.5 h-3.5 w-3.5 shrink-0 object-contain" />
+                      <div>
+                        <p className="text-[12px] tabular-nums text-stone-500">{formatPrice(linePix)}</p>
+                        <p className="text-[10px] text-stone-400">à vista</p>
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex items-start gap-1.5">
+                    <svg className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24" aria-hidden>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                    </svg>
+                    <div>
+                      <p className="text-[12px] tabular-nums text-stone-500">{formatPrice(lineCard)}</p>
+                      {inst && <p className="text-[10px] tabular-nums text-stone-400">{inst.parts}× {formatPrice(inst.each)}</p>}
+                    </div>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
         </ul>
-        <div className="border-t border-stone-100 px-4 py-3 space-y-1.5 text-sm">
-          <div className="flex justify-between text-stone-500">
-            <span>Subtotal</span>
-            <span className="tabular-nums">{formatPrice(subtotal)}</span>
-          </div>
-          <div className="flex justify-between text-stone-500">
-            <span>Frete</span>
-            <span className={`tabular-nums ${shippingAmount === 0 ? "text-emerald-600" : ""}`}>
-              {shippingAmount === 0 ? "Grátis" : formatPrice(shippingAmount)}
-            </span>
-          </div>
-          <div className="flex justify-between font-bold text-stone-900">
-            <span>Total</span>
-            <span className="tabular-nums">{formatPrice(cardTotal)}</span>
-          </div>
+
+        <div className="border-t border-stone-100 px-4 py-3">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-stone-400">Frete</p>
+          {shipping.optionLabel ? (
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-sm text-stone-600">{shipping.optionLabel}</p>
+              <div className="flex shrink-0 flex-col items-end gap-0.5">
+                {displayShippingPrice > 0 && (
+                  <span className="text-xs tabular-nums text-stone-400 line-through">{formatPrice(displayShippingPrice)}</span>
+                )}
+                <span className="text-sm font-semibold text-emerald-600">Grátis</span>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-stone-400">Calculado na etapa de entrega</p>
+          )}
+        </div>
+
+        <div className="border-t border-stone-100 bg-stone-50 px-4 py-3">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-stone-400">Total a pagar</p>
+          {paymentMethod === null && (
+            <div className="flex items-center gap-2 rounded-lg border border-dashed border-amber-300 bg-amber-50 px-3 py-3">
+              <svg className="h-4 w-4 shrink-0 text-amber-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+              <p className="text-sm text-amber-700">Selecione a forma de pagamento</p>
+            </div>
+          )}
+          {paymentMethod === "pix" && (
+            <div className="rounded-lg bg-stone-100 px-4 py-3 ring-1 ring-stone-200">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Image src="/pix-icon.svg" alt="Pix" width={16} height={16} unoptimized className="h-4 w-4 shrink-0 object-contain" />
+                  <span className="text-sm font-medium text-stone-700">Pix · à vista</span>
+                </div>
+                <span className="text-lg font-bold tabular-nums text-stone-900">{formatPrice(pixTotal)}</span>
+              </div>
+            </div>
+          )}
+          {paymentMethod === "card" && (
+            <div className="rounded-lg bg-stone-100 px-4 py-3 ring-1 ring-stone-200">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <svg className="h-4 w-4 shrink-0 text-stone-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                  </svg>
+                  <span className="text-sm font-medium text-stone-700">Cartão de crédito</span>
+                </div>
+                <span className="text-lg font-bold tabular-nums text-stone-900">{formatPrice(cardTotal)}</span>
+              </div>
+              <p className="mt-1 text-right text-xs tabular-nums text-stone-500">
+                {maxInstallments}× de {formatPrice(cardInstallmentValue)} s/ juros
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -832,7 +1084,7 @@ function ConfirmStep({
       <div className="hidden lg:flex gap-3 pt-1">
         <button type="button" onClick={onBack}
           className="flex items-center gap-1.5 rounded-xl border border-stone-200 px-5 py-3.5 text-sm font-medium text-stone-600 transition hover:bg-stone-50">
-          ← Voltar
+          Voltar
         </button>
       </div>
 
@@ -881,8 +1133,12 @@ function PixPaymentScreen({ data, onBack }: { data: PixData; onBack: () => void 
   }, [data.orderId, pollingStatus]);
 
   function formatTime(s: number) {
-    const m = Math.floor(s / 60);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
     const sec = s % 60;
+    if (h > 0) {
+      return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+    }
     return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
   }
 
@@ -897,97 +1153,119 @@ function PixPaymentScreen({ data, onBack }: { data: PixData; onBack: () => void 
   if (pollingStatus === "paid") {
     return (
       <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center gap-6 bg-white">
-        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500">
-          <svg className="h-8 w-8 text-white" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+        <div className="flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100">
+          <svg className="h-10 w-10 text-emerald-600" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>
         </div>
         <div className="text-center">
-          <p className="text-lg font-semibold text-stone-900">Pagamento confirmado!</p>
-          <p className="mt-1 text-sm text-stone-500">Redirecionando…</p>
+          <p className="text-xl font-semibold text-stone-900">Pagamento confirmado!</p>
+          <p className="mt-1 text-sm text-stone-500">Preparando seu pedido…</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 z-[9999] overflow-y-auto bg-white">
-      <div className="mx-auto flex min-h-screen max-w-sm flex-col items-center justify-center gap-5 px-6 py-12">
+    <div className="fixed inset-0 z-[9999] overflow-y-auto bg-stone-50">
+      <div className="mx-auto flex min-h-screen max-w-sm flex-col items-center justify-start gap-5 px-6 py-10">
 
-        <div className="text-center">
-          <div className="mb-2 flex items-center justify-center gap-2">
-            <Image src="/pix-icon.svg" alt="Pix" width={22} height={22} unoptimized />
-            <span className="text-lg font-bold text-stone-900">Pague com PIX</span>
-          </div>
-          <p className="text-sm text-stone-500">{formatPrice(data.amount)} · à vista</p>
+        {/* Logo da loja */}
+        <div className="flex flex-col items-center leading-none">
+          <span className="text-base font-semibold uppercase tracking-[0.22em] text-stone-900">
+            Ludimila Reis
+          </span>
+          <span className="text-[10px] font-light uppercase tracking-[0.4em] text-stone-400">
+            Closet
+          </span>
         </div>
 
+        {/* Cabeçalho do Pix */}
+        <div className="w-full rounded-2xl border border-stone-200 bg-white px-5 py-4 text-center shadow-sm">
+          <div className="mb-1 flex items-center justify-center gap-2">
+            <Image src="/pix-icon.svg" alt="Pix" width={20} height={20} unoptimized />
+            <span className="text-sm font-semibold uppercase tracking-wider text-stone-700">Pague com PIX</span>
+          </div>
+          <p className="text-2xl font-bold text-stone-900">{formatPrice(data.amount)}</p>
+          <p className="mt-1 text-xs text-stone-400">Escaneie o QR Code ou use o código copia e cola</p>
+        </div>
+
+        {/* QR Code */}
         {data.pixQrBase64 ? (
-          <div className="overflow-hidden rounded-2xl border border-stone-200 p-3 shadow-sm">
+          <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={`data:image/png;base64,${data.pixQrBase64}`} alt="QR Code PIX" className="h-52 w-52 object-contain" />
           </div>
         ) : (
-          <div className="flex h-52 w-52 items-center justify-center rounded-2xl border border-stone-200 bg-stone-50">
+          <div className="flex h-52 w-52 items-center justify-center rounded-2xl border border-stone-200 bg-white shadow-sm">
             <p className="text-xs text-stone-400">QR Code indisponível</p>
           </div>
         )}
 
+        {/* Status / Countdown */}
         {pollingStatus === "expired" ? (
           <div className="w-full rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-center">
             <p className="text-sm font-semibold text-red-700">PIX expirado</p>
-            <p className="mt-0.5 text-xs text-red-600">O tempo de pagamento esgotou.</p>
+            <p className="mt-0.5 text-xs text-red-600">O tempo de pagamento esgotou. Tente novamente.</p>
           </div>
         ) : (
-          <div className="flex items-center gap-2 rounded-xl bg-stone-50 px-4 py-2.5">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
-            <p className="text-sm text-stone-600">
-              Aguardando pagamento…{" "}
-              <span className={`font-mono font-semibold tabular-nums ${secondsLeft < 60 ? "text-red-600" : "text-stone-900"}`}>
-                {formatTime(secondsLeft)}
-              </span>
-            </p>
+          <div className="flex w-full items-center justify-between rounded-xl border border-stone-200 bg-white px-4 py-3 shadow-sm">
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+              <p className="text-sm text-stone-600">Aguardando pagamento</p>
+            </div>
+            <span className={`font-mono text-sm font-semibold tabular-nums ${secondsLeft < 120 ? "text-red-600" : "text-stone-900"}`}>
+              {formatTime(secondsLeft)}
+            </span>
           </div>
         )}
 
-        <div className="w-full">
-          <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-stone-400">Copia e cola</p>
+        {/* Copia e cola */}
+        <div className="w-full rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-stone-400">Copia e cola</p>
           <div className="flex gap-2">
-            <code className="flex-1 truncate rounded-lg border border-stone-200 bg-stone-50 px-3 py-2.5 text-[11px] text-stone-600">
+            <code className="flex-1 truncate rounded-lg border border-stone-100 bg-stone-50 px-3 py-2.5 text-[11px] text-stone-600">
               {data.pixCode}
             </code>
             <button type="button" onClick={handleCopy}
-              className={`shrink-0 rounded-lg px-3 py-2.5 text-xs font-semibold transition-colors ${copied ? "bg-emerald-600 text-white" : "bg-stone-900 text-white hover:bg-stone-700"}`}>
-              {copied ? "Copiado!" : "Copiar"}
+              className={`shrink-0 rounded-lg px-4 py-2.5 text-xs font-semibold transition-colors ${copied ? "bg-emerald-600 text-white" : "bg-stone-900 text-white hover:bg-stone-700"}`}>
+              {copied ? "✓ Copiado" : "Copiar"}
             </button>
           </div>
         </div>
 
-        <ol className="w-full space-y-1 text-xs text-stone-500">
-          <li>1. Abra o app do seu banco ou carteira digital.</li>
-          <li>2. Escolha pagar via PIX com QR Code ou copia e cola.</li>
-          <li>3. O pagamento é confirmado automaticamente em segundos.</li>
+        {/* Instruções */}
+        <ol className="w-full space-y-2">
+          {[
+            "Abra o app do seu banco ou carteira digital.",
+            "Escolha pagar com QR Code ou use o código copia e cola.",
+            "O pagamento é confirmado automaticamente em segundos.",
+          ].map((step, i) => (
+            <li key={i} className="flex items-start gap-3 text-xs text-stone-500">
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-stone-200 text-[10px] font-bold text-stone-600">
+                {i + 1}
+              </span>
+              {step}
+            </li>
+          ))}
         </ol>
 
-        <div className="flex w-full flex-col gap-2">
-          {pollingStatus === "expired" && (
-            <button type="button" onClick={onBack}
-              className="w-full rounded-xl bg-stone-900 py-3.5 text-sm font-semibold text-white transition-colors hover:bg-stone-700">
-              Tentar novamente
-            </button>
-          )}
-          <button type="button" onClick={() => window.location.assign(`/pedido/${data.orderId}`)}
-            className="w-full rounded-xl border border-stone-200 py-3 text-sm font-medium text-stone-600 transition-colors hover:bg-stone-50">
-            Ver detalhes do pedido
+        {/* Ações */}
+        {pollingStatus === "expired" && (
+          <button type="button" onClick={onBack}
+            className="w-full rounded-xl bg-stone-900 py-3.5 text-sm font-semibold text-white transition-colors hover:bg-stone-700">
+            Tentar novamente
           </button>
-        </div>
+        )}
 
+        {/* Rodapé */}
         <p className="flex items-center gap-1.5 text-xs text-stone-400">
           <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
           </svg>
           Ambiente seguro · Mercado Pago
         </p>
+
       </div>
     </div>
   );
@@ -995,7 +1273,7 @@ function PixPaymentScreen({ data, onBack }: { data: PixData; onBack: () => void 
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export function CheckoutClient({ initialEmail, initialName, initialPhone, loggedIn }: Props) {
+export function CheckoutClient({ initialEmail, initialName, initialPhone, initialCpf, loggedIn }: Props) {
   const { items, hydrated, clear, subtotalPix } = useCart();
   const [step, setStep] = useState(1);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(null);
@@ -1016,8 +1294,15 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, logged
 
   const sanitizedPhone =
     !initialPhone || initialPhone === "-" || initialPhone.replace(/\D/g, "").length < 10 ? "" : initialPhone;
+  const sanitizedCpf =
+    initialCpf.replace(/\D/g, "").length === 11 ? cpfFmt(initialCpf) : "";
 
-  const [contact, setContact] = useState<ContactData>({ name: initialName, email: initialEmail, phone: sanitizedPhone, cpf: "" });
+  const [contact, setContact] = useState<ContactData>({
+    name: initialName,
+    email: initialEmail,
+    phone: sanitizedPhone ? phoneFmt(sanitizedPhone) : "",
+    cpf: sanitizedCpf,
+  });
   const [shipping, setShipping] = useState<ShippingData>({
     cep: "", street: "", number: "", complement: "", neighborhood: "", city: "", state: "",
     optionId: "", optionLabel: "", optionPrice: 0, deliveryLabel: "",
@@ -1114,6 +1399,7 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, logged
   }
 
   const mobileActionLabel = step === 1 ? "Continuar para entrega →" : step === 2 ? "Confirmar endereço →" : "Efetuar pagamento →";
+  const mobileCanPay = step !== 3 || paymentMethod !== null;
 
   return (
     <>
@@ -1127,7 +1413,7 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, logged
       {/* ══════════════════════════════ MOBILE ══════════════════════════════ */}
       <div className="flex flex-col lg:hidden">
         {/* Product summary at top (collapsible) */}
-        <MobileOrderSummary lines={lines} subtotal={subtotal} />
+        <MobileOrderSummary lines={lines} subtotal={subtotal} subtotalPix={subtotalPix} />
 
         {/* Sticky step bar — sticks just below the site header (h-14 = 56px) */}
         <div className="sticky top-14 z-40 border-b border-stone-200 bg-white/95 px-5 py-3 backdrop-blur-sm">
@@ -1141,21 +1427,21 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, logged
             <p className="text-[11px] font-semibold uppercase tracking-widest text-stone-400">
               {["Seus dados de contato", "Para onde enviamos", "Revise e finalize"][step - 1]}
             </p>
-            <h2 className="mt-1 text-2xl font-bold tracking-tight text-stone-900">
+            {/* <h2 className="mt-1 text-2xl font-bold tracking-tight text-stone-900">
               {["Contato", "Endereço de entrega", "Confirmar pedido"][step - 1]}
-            </h2>
+            </h2> */}
           </div>
 
           {/* Animated step */}
           <div key={animKey} className={dir === "fwd" ? "ck-fwd" : "ck-bwd"}>
             {step === 1 && (
-              <ContactStep loggedIn={loggedIn} hadNoPhone={sanitizedPhone === ""}
-                initialEmail={initialEmail} initialName={initialName}
+              <ContactStep loggedIn={loggedIn} initialEmail={initialEmail}
                 data={contact} onChange={setContact} registerSubmit={registerSubmit}
                 onNext={() => { setContactDone(true); navigate(2, "fwd"); }} />
             )}
             {step === 2 && (
               <DeliveryStep lines={shippingLines} data={shipping} onChange={setShipping}
+                subtotal={subtotal}
                 registerSubmit={registerSubmit}
                 onNext={() => { setDeliveryDone(true); navigate(3, "fwd"); }}
                 onBack={() => { setContactDone(false); navigate(1, "bwd"); }} />
@@ -1182,8 +1468,8 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, logged
             <button
               type="button"
               onClick={step === 3 ? handlePay : () => void mobileTriggerRef.current()}
-              disabled={pending}
-              className="flex flex-1 items-center justify-center rounded-xl bg-stone-900 py-3.5 text-sm font-bold text-white shadow-sm transition hover:bg-stone-800 disabled:opacity-60"
+              disabled={pending || !mobileCanPay}
+              className={`flex flex-1 items-center justify-center rounded-xl py-3.5 text-sm font-bold shadow-sm transition disabled:opacity-60 ${mobileCanPay && !pending ? "bg-stone-900 text-white hover:bg-stone-800" : "cursor-not-allowed bg-stone-100 text-stone-400"}`}
             >
               {pending
                 ? <span className="flex items-center gap-2"><span className="h-4 w-4 animate-spin rounded-full border-2 border-stone-400 border-t-white" />Processando…</span>
@@ -1224,13 +1510,13 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, logged
               {/* Animated step */}
               <div key={animKey} className={dir === "fwd" ? "ck-fwd" : "ck-bwd"}>
                 {step === 1 && (
-                  <ContactStep loggedIn={loggedIn} hadNoPhone={sanitizedPhone === ""}
-                    initialEmail={initialEmail} initialName={initialName}
+                  <ContactStep loggedIn={loggedIn} initialEmail={initialEmail}
                     data={contact} onChange={setContact} registerSubmit={registerSubmit}
                     onNext={() => { setContactDone(true); navigate(2, "fwd"); }} />
                 )}
                 {step === 2 && (
                   <DeliveryStep lines={shippingLines} data={shipping} onChange={setShipping}
+                    subtotal={subtotal}
                     registerSubmit={registerSubmit}
                     onNext={() => { setDeliveryDone(true); navigate(3, "fwd"); }}
                     onBack={() => { setContactDone(false); navigate(1, "bwd"); }} />

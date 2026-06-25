@@ -3,11 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { NormalizedShippingOption } from "@/lib/shipping/types";
 import { formatPrice } from "@/lib/format";
+import { useStoreSettings } from "@/lib/hooks/use-store-settings";
+import { checkFreeShipping } from "@/lib/shipping/free-shipping";
 
 type ProductShippingQuoteProps = {
   productId: string;
   /** Unidades para somar o peso (dimensões = uma unidade). */
   quantity?: number;
+  /** Preço unitário do produto — usado para checar elegibilidade ao frete grátis. */
+  productPrice?: number;
 };
 
 function onlyDigits(s: string): string {
@@ -57,6 +61,7 @@ function rankHighlights(options: NormalizedShippingOption[]) {
 export function ProductShippingQuote({
   productId,
   quantity = 1,
+  productPrice,
 }: ProductShippingQuoteProps) {
   const qty = Math.min(9999, Math.max(1, Math.floor(quantity) || 1));
   const [cepDigits, setCepDigits] = useState("");
@@ -67,6 +72,23 @@ export function ProductShippingQuote({
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const { settings } = useStoreSettings();
+
+  // Verifica frete grátis com base no preço do produto × quantidade
+  const orderTotal = (productPrice ?? 0) * qty;
+  const freeShippingResult = settings
+    ? checkFreeShipping(settings, orderTotal)
+    : null;
+  const isFreeShipping = freeShippingResult?.isFree ?? false;
+
+  // Quando frete grátis, ordena do mais barato para o mais caro
+  const displayOptions = useMemo(() => {
+    if (!options) return null;
+    if (isFreeShipping) {
+      return [...options].sort((a, b) => a.price - b.price);
+    }
+    return options;
+  }, [options, isFreeShipping]);
 
   const { cheapestIds, fastestIds } = useMemo(
     () => rankHighlights(options ?? []),
@@ -197,41 +219,70 @@ export function ProductShippingQuote({
         <p className="text-xs text-red-600">{error}</p>
       )}
 
+      {/* Mensagem de frete grátis quando aplicável */}
+      {settings?.freeShippingEnabled && freeShippingResult && !isFreeShipping && freeShippingResult.missingAmount != null && (
+        <div className="space-y-1.5">
+          <p className="text-xs text-stone-600">
+            Falta <span className="font-semibold text-stone-900">{formatPrice(freeShippingResult.missingAmount)}</span> para{" "}
+            <span className="font-semibold text-stone-900">frete grátis</span>
+          </p>
+          {freeShippingResult.minValue != null && (
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-200">
+              <div
+                className="h-full rounded-full bg-stone-900 transition-all duration-500"
+                style={{ width: `${Math.min(100, (orderTotal / freeShippingResult.minValue) * 100)}%` }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+      {isFreeShipping && (
+        <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2">
+          <svg className="h-3.5 w-3.5 shrink-0 text-emerald-600" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+          <p className="text-xs font-medium text-emerald-700">Frete grátis neste pedido!</p>
+        </div>
+      )}
+
       {/* Lista de opções */}
-      {!loading && options && options.length > 0 && (
-        <ul className="overflow-hidden rounded-lg border border-stone-200 divide-y divide-stone-100">
-          {options.map((o, index) => {
-            const isCheap = cheapestIds.has(o.id);
-            const isFast = fastestIds.has(o.id);
+      {!loading && displayOptions && displayOptions.length > 0 && (
+        <ul className="divide-y divide-stone-100 rounded-lg border border-stone-200 overflow-hidden">
+          {displayOptions.map((o, index) => {
+            const isFree = isFreeShipping && index === 0;
             return (
               <li
                 key={`${index}-${o.id}-${o.serviceName}`}
-                className="px-3 py-2.5 bg-white text-sm"
+                className="flex items-center justify-between gap-4 bg-white px-4 py-3.5"
               >
-                {/* Linha 1: transportadora + badges */}
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-stone-900">{o.carrierName}</span>
-                  <div className="flex shrink-0 items-center gap-1">
-                    {isCheap && (
-                      <span className="rounded bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
-                        Menor preço
-                      </span>
-                    )}
-                    {isFast && (
-                      <span className="rounded bg-amber-500 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
-                        Mais rápido
-                      </span>
-                    )}
+                {/* Esquerda: nome + prazo */}
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-stone-900 leading-snug">
+                    {o.carrierName}
+                    {o.serviceName ? ` — ${o.serviceName}` : ""}
+                  </p>
+                  <div className="mt-1 flex items-center gap-1 text-xs text-stone-400">
+                    <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                    </svg>
+                    <span>{deliveryLabel(o)}</span>
                   </div>
                 </div>
-                {/* Linha 2: serviço + prazo · preço */}
-                <div className="mt-0.5 flex items-center justify-between gap-2">
-                  <span className="text-xs text-stone-500">
-                    {o.serviceName} · {deliveryLabel(o)}
-                  </span>
-                  <span className={`shrink-0 text-xs font-semibold tabular-nums ${o.price === 0 ? "text-emerald-600" : "text-stone-900"}`}>
-                    {o.price === 0 ? "Grátis" : formatPrice(o.price)}
-                  </span>
+
+                {/* Direita: preço */}
+                <div className="shrink-0 text-right">
+                  {isFree ? (
+                    <>
+                      <p className="text-base font-bold text-emerald-600">Grátis</p>
+                      {o.price > 0 && (
+                        <p className="text-xs tabular-nums text-stone-400 line-through">{formatPrice(o.price)}</p>
+                      )}
+                    </>
+                  ) : (
+                    <p className={`text-base font-bold tabular-nums ${o.price === 0 ? "text-emerald-600" : "text-stone-900"}`}>
+                      {o.price === 0 ? "Grátis" : formatPrice(o.price)}
+                    </p>
+                  )}
                 </div>
               </li>
             );

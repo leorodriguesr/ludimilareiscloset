@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { formatPrice } from "@/lib/format";
 import { installmentValueEqualParts } from "@/lib/product-pricing";
@@ -28,6 +29,25 @@ interface ProductCardProps {
   colors?: Color[];
 }
 
+function IconCard({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      viewBox="0 0 24 24"
+      aria-hidden
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
+      />
+    </svg>
+  );
+}
+
 export function ProductCard({
   id,
   name,
@@ -38,8 +58,19 @@ export function ProductCard({
   tag,
   colors = [],
 }: ProductCardProps) {
-  const parts = installmentCount ?? 6;
-  const installmentValue = installmentValueEqualParts(price, parts);
+  const showPix =
+    pixPrice != null && Number.isFinite(pixPrice) && pixPrice > 0;
+  const installments =
+    installmentCount != null &&
+    Number.isFinite(installmentCount) &&
+    installmentCount >= 1 &&
+    installmentCount <= 24
+      ? Math.floor(installmentCount)
+      : null;
+  const installmentEach =
+    installments != null
+      ? installmentValueEqualParts(price, installments)
+      : null;
 
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
 
@@ -108,24 +139,41 @@ export function ProductCard({
         </div>
 
         {/* Nome e preços */}
-        <Link href={`/products/${id}`} className=" block space-y-0.5 pt-2">
+        <Link href={`/products/${id}`} className="block space-y-1.5 pt-2">
           <h3 className="text-sm font-light leading-snug text-stone-800 transition-colors group-hover:text-stone-500">
             {name}
           </h3>
 
-          <p className="text-sm font-semibold text-stone-900">
-            {formatPrice(price)}
-          </p>
-
-          {pixPrice != null && pixPrice > 0 && (
-            <p className="text-[11px] font-medium text-emerald-700">
-              No Pix {formatPrice(pixPrice)}
+          <div className="space-y-1.5">
+            <p className="text-sm font-semibold tabular-nums text-stone-900">
+              {formatPrice(price)}
             </p>
-          )}
 
-          <p className="text-[11px] text-stone-500">
-            {parts}× {formatPrice(installmentValue)}
-          </p>
+            {installments != null && installmentEach != null && (
+              <div className="flex items-center gap-1.5">
+                <IconCard className="h-3.5 w-3.5 shrink-0 text-stone-400" />
+                <span className="text-[11px] tabular-nums text-stone-600">
+                  {installments} x {formatPrice(installmentEach)} sem juros
+                </span>
+              </div>
+            )}
+
+            {showPix && (
+              <div className="flex items-center gap-1.5">
+                <Image
+                  src="/pix-icon.svg"
+                  alt=""
+                  width={14}
+                  height={14}
+                  unoptimized
+                  className="h-3.5 w-3.5 shrink-0 object-contain"
+                />
+                <span className="text-[11px] font-semibold tabular-nums text-emerald-700">
+                  {formatPrice(pixPrice!)}
+                </span>
+              </div>
+            )}
+          </div>
         </Link>
       </div>
     </div>

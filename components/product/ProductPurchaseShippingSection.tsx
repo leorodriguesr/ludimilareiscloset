@@ -69,6 +69,7 @@ export function ProductPurchaseShippingSection(props: Props) {
       <ProductShippingQuote
         productId={productId}
         quantity={available ? safeQty : 1}
+        productPrice={props.price}
       />
     </div>
   );

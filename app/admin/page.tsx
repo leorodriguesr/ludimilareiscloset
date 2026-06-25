@@ -8,6 +8,7 @@ import { CategoryManager } from "@/components/admin/CategoryManager";
 import { SectionManager } from "@/components/admin/SectionManager";
 import { SalesManager } from "@/components/admin/SalesManager";
 import { ShippingManager } from "@/components/admin/ShippingManager";
+import { StoreSettingsManager } from "@/components/admin/StoreSettingsManager";
 import { LogoutButton } from "@/components/auth/LogoutButton";
 import type { Product } from "@/lib/types";
 
@@ -15,7 +16,7 @@ export default function AdminPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [bannerUrl, setBannerUrl] = useState("");
   const [activeSection, setActiveSection] = useState<
-    "products" | "sections" | "categories" | "banner" | "sales" | "shipping"
+    "products" | "sections" | "categories" | "banner" | "sales" | "shipping" | "settings"
   >("products");
   const [showProductForm, setShowProductForm] = useState(false);
 
@@ -52,6 +53,7 @@ export default function AdminPage() {
     { id: "sections" as const, label: "Seções" },
     { id: "categories" as const, label: "Categorias" },
     { id: "banner" as const, label: "Banner" },
+    { id: "settings" as const, label: "Configurações" },
   ];
 
   return (
@@ -179,6 +181,18 @@ export default function AdminPage() {
               <div className="rounded-xl border border-stone-200 bg-white p-6">
                 <BannerForm currentUrl={bannerUrl} onSuccess={fetchSettings} />
               </div>
+            </section>
+          )}
+
+          {activeSection === "settings" && (
+            <section>
+              <h2 className="text-lg font-medium text-stone-900 mb-2">
+                Configurações da loja
+              </h2>
+              <p className="text-sm text-stone-500 mb-6">
+                Defina regras de frete grátis e outras preferências gerais da loja.
+              </p>
+              <StoreSettingsManager />
             </section>
           )}
       </main>
