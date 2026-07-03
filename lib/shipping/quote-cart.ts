@@ -3,6 +3,7 @@ import {
   normalizePostalCode,
 } from "@/lib/shipping/superfrete";
 import { buildCartShippingPackage, type CartShippingLine } from "@/lib/shipping/cart-package";
+import { applyPackagingDays, getPackagingDays } from "@/lib/shipping/packaging-days";
 import type { ShippingQuoteResult } from "@/lib/shipping/types";
 
 export async function quoteShippingForCartLines(
@@ -14,10 +15,16 @@ export async function quoteShippingForCartLines(
 
   const pkg = await buildCartShippingPackage(lines);
 
-  return calculateShippingSuperFreteWithStoreOrigin({
+  const result = await calculateShippingSuperFreteWithStoreOrigin({
     destinationPostalCode: dest,
     products: pkg.products,
     insuranceValue: pkg.insuranceDeclared,
     useInsurance: pkg.useInsurance,
   });
+
+  const packagingDays = await getPackagingDays();
+  return {
+    ...result,
+    options: applyPackagingDays(result.options, packagingDays),
+  };
 }

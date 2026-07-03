@@ -190,7 +190,7 @@ export default function AdminPage() {
                 Configurações da loja
               </h2>
               <p className="text-sm text-stone-500 mb-6">
-                Defina regras de frete grátis e outras preferências gerais da loja.
+                Defina regras de frete grátis, prazo de embalagem e outras preferências gerais da loja.
               </p>
               <StoreSettingsManager />
             </section>

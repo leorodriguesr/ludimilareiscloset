@@ -9,6 +9,7 @@ interface StoreSettings {
   freeShippingEnabled: boolean;
   freeShippingType: string;
   freeShippingMinValue: number;
+  packagingDays: number;
 }
 
 export function StoreSettingsManager() {
@@ -21,6 +22,7 @@ export function StoreSettingsManager() {
   const [freeShippingEnabled, setFreeShippingEnabled] = useState(false);
   const [freeShippingType, setFreeShippingType] = useState<"always" | "minimum_value">("minimum_value");
   const [freeShippingMinValue, setFreeShippingMinValue] = useState("0");
+  const [packagingDays, setPackagingDays] = useState("0");
 
   const fetchSettings = useCallback(async () => {
     try {
@@ -30,6 +32,7 @@ export function StoreSettingsManager() {
       setFreeShippingEnabled(data.freeShippingEnabled);
       setFreeShippingType((data.freeShippingType as "always" | "minimum_value") ?? "minimum_value");
       setFreeShippingMinValue(String(data.freeShippingMinValue ?? 0));
+      setPackagingDays(String(data.packagingDays ?? 0));
     } catch {
       setError("Não foi possível carregar as configurações.");
     } finally {
@@ -53,6 +56,7 @@ export function StoreSettingsManager() {
           freeShippingEnabled,
           freeShippingType,
           freeShippingMinValue: parseFloat(freeShippingMinValue.replace(",", ".")) || 0,
+          packagingDays: Math.max(0, Math.floor(Number(packagingDays) || 0)),
         }),
       });
       if (!res.ok) throw new Error("Erro ao salvar.");
@@ -73,6 +77,7 @@ export function StoreSettingsManager() {
   }
 
   const minVal = parseFloat(freeShippingMinValue.replace(",", ".")) || 0;
+  const packagingDaysVal = Math.max(0, Math.floor(Number(packagingDays) || 0));
 
   return (
     <div className="space-y-8">
@@ -192,6 +197,38 @@ export function StoreSettingsManager() {
             </p>
           </div>
         )}
+      </section>
+
+      {/* Dias para embalar */}
+      <section className="rounded-xl border border-stone-200 bg-white p-6">
+        <h3 className="text-base font-semibold text-stone-900">Prazo de embalagem</h3>
+        <p className="mt-1 text-sm text-stone-500">
+          Dias úteis para preparar o pedido antes do envio. Esse prazo é somado automaticamente
+          ao prazo de cada opção de frete exibida no checkout e na página do produto.
+        </p>
+        <div className="mt-5 max-w-xs">
+          <label htmlFor="packagingDays" className="mb-1.5 block text-sm font-medium text-stone-700">
+            Dias para embalar
+          </label>
+          <input
+            id="packagingDays"
+            type="number"
+            min="0"
+            max="30"
+            step="1"
+            value={packagingDays}
+            onChange={(e) => setPackagingDays(e.target.value)}
+            className="w-full rounded-lg border border-stone-200 bg-white px-4 py-3 text-sm text-stone-900 shadow-sm placeholder:text-stone-300 transition-colors focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900"
+            placeholder="0"
+          />
+          <p className="mt-2 text-xs text-stone-500">
+            {packagingDaysVal === 0
+              ? "Nenhum dia extra será adicionado aos prazos de frete."
+              : packagingDaysVal === 1
+              ? "Será adicionado 1 dia útil ao prazo de todas as opções de frete."
+              : `Serão adicionados ${packagingDaysVal} dias úteis ao prazo de todas as opções de frete.`}
+          </p>
+        </div>
       </section>
 
       {/* Ações */}

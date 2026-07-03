@@ -31,6 +31,8 @@ type ShippingData = {
   cep: string; street: string; number: string; complement: string;
   neighborhood: string; city: string; state: string;
   optionId: string; optionLabel: string; optionPrice: number; deliveryLabel: string;
+  /** True quando a opção selecionada é a mais barata e o carrinho tem frete grátis. */
+  optionIsFree?: boolean;
 };
 type PaymentMethod = "pix" | "card" | null;
 type PixData = {
@@ -82,6 +84,33 @@ function rankHighlights(opts: NormalizedShippingOption[]) {
 }
 
 const inputCls = "w-full rounded-lg border border-stone-200 bg-white px-4 py-3 text-sm text-stone-900 shadow-sm placeholder:text-stone-300 transition-colors focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900";
+
+function ShippingPriceSummary({
+  price,
+  qualifiesForFreeShipping,
+  size = "sm",
+}: {
+  price: number;
+  qualifiesForFreeShipping: boolean;
+  size?: "sm" | "base";
+}) {
+  const priceCls = size === "base" ? "text-base font-bold" : "text-sm font-semibold";
+  if (qualifiesForFreeShipping) {
+    return (
+      <div className="flex shrink-0 flex-col items-end gap-0.5">
+        {price > 0 && (
+          <span className="text-xs tabular-nums text-stone-400 line-through">{formatPrice(price)}</span>
+        )}
+        <span className={`${priceCls} text-emerald-600`}>Grátis</span>
+      </div>
+    );
+  }
+  return (
+    <span className={`shrink-0 tabular-nums ${priceCls} ${price === 0 ? "text-emerald-600" : "text-stone-900"}`}>
+      {price === 0 ? "Grátis" : formatPrice(price)}
+    </span>
+  );
+}
 
 // ─── Step progress bar ────────────────────────────────────────────────────────
 
@@ -250,6 +279,10 @@ function DesktopSummary({
 }) {
   const canPay = step === 3 && paymentMethod !== null;
   const { settings } = useStoreSettings();
+  const qualifiesForFreeShipping = settings
+    ? checkFreeShipping(settings, subtotal).isFree
+    : false;
+  const showShippingAsFree = Boolean(shipping.optionIsFree);
 
   // Frete não é cobrado no pagamento — R$0 sempre para totais
   const effectiveShipping = 0;
@@ -327,29 +360,23 @@ function DesktopSummary({
         {deliveryDone && shipping.optionLabel ? (
           <div className="flex items-start justify-between gap-2">
             <p className="text-sm text-stone-600">{shipping.optionLabel}</p>
-            <div className="flex shrink-0 flex-col items-end gap-0.5">
-              {shipping.optionPrice > 0 && (
-                <span className="text-xs tabular-nums text-stone-400 line-through">{formatPrice(shipping.optionPrice)}</span>
-              )}
-              <span className="text-sm font-semibold text-emerald-600">Grátis</span>
-            </div>
+            <ShippingPriceSummary
+              price={shipping.optionPrice}
+              qualifiesForFreeShipping={showShippingAsFree}
+            />
           </div>
         ) : (
           <p className="text-sm text-stone-400">Calculado na etapa de entrega</p>
         )}
-        {/* Mensagem de falta para frete grátis */}
-        {/* {settings && (() => {
+        {settings && !qualifiesForFreeShipping && settings.freeShippingEnabled && (() => {
           const fs = checkFreeShipping(settings, subtotal);
-          if (!settings.freeShippingEnabled || fs.isFree) return null;
-          if (fs.missingAmount != null) {
-            return (
-              <p className="mt-2 text-xs text-stone-500">
-                Falta <span className="font-semibold text-stone-700">{formatPrice(fs.missingAmount)}</span> para frete grátis
-              </p>
-            );
-          }
-          return null;
-        })()} */}
+          if (fs.missingAmount == null) return null;
+          return (
+            <p className="mt-2 text-xs text-stone-500">
+              Falta <span className="font-semibold text-stone-700">{formatPrice(fs.missingAmount)}</span> para frete grátis
+            </p>
+          );
+        })()}
       </div>
 
       {/* Total by payment method — only on step 3 */}
@@ -625,9 +652,20 @@ function DeliveryStep({
   useEffect(() => {
     if (!selectedId || !options?.length) return;
     const o = options.find((x) => x.id === selectedId); if (!o) return;
-    onChange({ ...data, optionId: o.id, optionLabel: `${o.carrierName} — ${o.serviceName}`, optionPrice: o.price, deliveryLabel: daysLabel(o) });
+    const cheapestId = isFreeShipping
+      ? [...options].sort((a, b) => a.price - b.price)[0]?.id
+      : null;
+    const optionIsFree = isFreeShipping && o.id === cheapestId;
+    onChange({
+      ...data,
+      optionId: o.id,
+      optionLabel: `${o.carrierName} — ${o.serviceName}`,
+      optionPrice: o.price,
+      deliveryLabel: daysLabel(o),
+      optionIsFree,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, options]);
+  }, [selectedId, options, isFreeShipping]);
 
   const handleNext = useCallback(async () => {
     if (cepDigits.length !== 8) { setFormError("Informe um CEP válido."); return; }
@@ -819,12 +857,16 @@ function ConfirmStep({
 
   // Preço real do frete (para exibição informativa)
   const displayShippingPrice = shipping.optionPrice;
+  const { settings } = useStoreSettings();
+  const qualifiesForFreeShipping = settings
+    ? checkFreeShipping(settings, subtotal).isFree
+    : false;
+  const showShippingAsFree = Boolean(shipping.optionIsFree);
   // Frete não é cobrado no pagamento
   const effectiveShipping = 0;
   const pixTotal = subtotalPix + effectiveShipping;
   const cardTotal = subtotal + effectiveShipping;
   const cardInstallmentValue = installmentValueEqualParts(cardTotal, maxInstallments);
-  const { settings } = useStoreSettings();
 
   const ReviewCard = ({ title, onEdit, children }: { title: string; onEdit: () => void; children: React.ReactNode }) => (
     <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
@@ -857,12 +899,11 @@ function ConfirmStep({
               <p className="text-xs font-medium text-stone-800">{shipping.optionLabel}</p>
               <p className="text-[11px] text-stone-400">{shipping.deliveryLabel}</p>
             </div>
-            <div className="flex flex-col items-end gap-0.5">
-              {displayShippingPrice > 0 && (
-                <span className="text-xs tabular-nums text-stone-400 line-through">{formatPrice(displayShippingPrice)}</span>
-              )}
-              <span className="text-sm font-bold text-emerald-600">Grátis</span>
-            </div>
+            <ShippingPriceSummary
+              price={displayShippingPrice}
+              qualifiesForFreeShipping={showShippingAsFree}
+              size="base"
+            />
           </div>
         )}
       </ReviewCard>
@@ -937,7 +978,9 @@ function ConfirmStep({
             <div>
               <p className="text-base font-bold tabular-nums text-stone-900">{formatPrice(pixTotal)}</p>
               <p className="text-[11px] text-stone-400">à vista</p>
-              <p className="text-[11px] text-emerald-600 font-medium">Frete grátis</p>
+              {showShippingAsFree && (
+                <p className="text-[11px] text-emerald-600 font-medium">Frete grátis</p>
+              )}
             </div>
           </button>
 
@@ -965,7 +1008,9 @@ function ConfirmStep({
             <div>
               <p className="text-base font-bold tabular-nums text-stone-900">{formatPrice(cardTotal)}</p>
               <p className="text-[11px] text-stone-400">{maxInstallments}× {formatPrice(cardInstallmentValue)} s/ juros</p>
-              <p className="text-[11px] text-emerald-600 font-medium">Frete grátis</p>
+              {showShippingAsFree && (
+                <p className="text-[11px] text-emerald-600 font-medium">Frete grátis</p>
+              )}
             </div>
           </button>
         </div>
@@ -1028,12 +1073,10 @@ function ConfirmStep({
           {shipping.optionLabel ? (
             <div className="flex items-start justify-between gap-2">
               <p className="text-sm text-stone-600">{shipping.optionLabel}</p>
-              <div className="flex shrink-0 flex-col items-end gap-0.5">
-                {displayShippingPrice > 0 && (
-                  <span className="text-xs tabular-nums text-stone-400 line-through">{formatPrice(displayShippingPrice)}</span>
-                )}
-                <span className="text-sm font-semibold text-emerald-600">Grátis</span>
-              </div>
+              <ShippingPriceSummary
+                price={displayShippingPrice}
+                qualifiesForFreeShipping={showShippingAsFree}
+              />
             </div>
           ) : (
             <p className="text-sm text-stone-400">Calculado na etapa de entrega</p>

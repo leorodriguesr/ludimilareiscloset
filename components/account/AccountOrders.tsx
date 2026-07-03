@@ -74,18 +74,29 @@ function getCarrierTrackingUrl(serviceId: number | null, code: string) {
 
 function shippingStep(shippingStatus: string, paymentStatus: string): number {
   if (paymentStatus !== "paid") return -1;
+  if (shippingStatus === "cancelled") return -1;
   if (shippingStatus === "delivered") return 3;
   if (shippingStatus === "shipped") return 2;
-  if (shippingStatus === "packed") return 1;
-  return 0;
+  if (shippingStatus === "packed" || shippingStatus === "to_pack") return 1;
+  // Pedido pago entra direto em preparação
+  return 1;
 }
 
 function shippingStatusLabel(shippingStatus: string, paymentStatus: string): string {
   if (paymentStatus !== "paid") return "Aguardando pagamento";
   if (shippingStatus === "delivered") return "Entregue";
   if (shippingStatus === "shipped") return "A caminho";
-  if (shippingStatus === "packed") return "Em preparação";
+  if (shippingStatus === "packed" || shippingStatus === "to_pack") return "Em preparação";
+  if (shippingStatus === "cancelled") return "Cancelado";
   return "Em preparação";
+}
+
+function orderStatusBadgeClass(isPaid: boolean, shippingStatus: string): string {
+  if (!isPaid) return "bg-amber-100 text-amber-800";
+  if (shippingStatus === "delivered") return "bg-emerald-100 text-emerald-800";
+  if (shippingStatus === "shipped") return "bg-sky-100 text-sky-800";
+  if (shippingStatus === "cancelled") return "bg-red-100 text-red-800";
+  return "bg-stone-100 text-stone-800";
 }
 
 function paymentMethodLabel(method: string | null) {
@@ -289,13 +300,10 @@ function OrderCard({ order }: { order: AccountOrderListItem }) {
           </div>
           <div className="text-right">
             <span
-              className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                isPaid ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
-              }`}
+              className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${orderStatusBadgeClass(isPaid, order.shippingStatus)}`}
             >
-              {isPaid ? "Pago" : "Aguardando pagamento"}
+              {statusLabel}
             </span>
-            <p className="mt-1.5 text-xs font-medium text-stone-600">{statusLabel}</p>
           </div>
         </div>
 

@@ -246,4 +246,6 @@ model StoreSettings {
   freeShippingType     String  @default("minimum_value")
   /** Valor mínimo do carrinho (R$) para frete grátis (usado quando type = minimum_value) */
   freeShippingMinValue Float   @default(0)
+  /** Dias úteis para embalar o pedido antes do envio (somados ao prazo do frete). */
+  packagingDays        Int     @default(0)
 }
