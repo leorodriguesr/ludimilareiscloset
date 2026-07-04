@@ -17,7 +17,7 @@ import { requireAdminApi } from "@/lib/require-admin-api";
  *  - packed      → etiqueta gerada, aguardando postagem
  *  - shipped     → postado
  *  - delivered   → entregue
- *  - cancelled   → cancelado
+ *  - cancelled   → etiqueta cancelada (venda ativa)
  *  - (omitido)   → todos pagos
  */
 export async function GET(request: NextRequest) {
@@ -29,11 +29,14 @@ export async function GET(request: NextRequest) {
   const page = Math.max(1, Number(searchParams.get("page") ?? 1));
   const limit = 100;
 
-  const baseWhere = { paidAt: { not: null as null } };
+  const baseWhere = {
+    paidAt: { not: null as null },
+    status: { not: "cancelled" },
+  };
 
   const where =
     filter === "needs_label"
-      ? { ...baseWhere, labelUrl: null, shippingStatus: { not: "cancelled" } }
+      ? { ...baseWhere, labelUrl: null }
       : filter === "packed"
         ? { ...baseWhere, shippingStatus: "packed" }
         : filter === "shipped"
@@ -54,6 +57,7 @@ export async function GET(request: NextRequest) {
         select: {
           id: true,
           orderNumber: true,
+          status: true,
           email: true,
           shippingServiceName: true,
           shippingStatus: true,

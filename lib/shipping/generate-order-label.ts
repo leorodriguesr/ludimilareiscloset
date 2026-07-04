@@ -5,6 +5,7 @@ import {
   cancelSuperfreteOrder,
   createSuperfreteLabelForOrder,
   fetchSuperfreteOrderInfo,
+  fetchSuperfreteOrderInfoWithTrackingPoll,
   printSuperfreteLabel,
   type LabelInput,
 } from "@/lib/shipping/superfrete-label";
@@ -35,6 +36,7 @@ async function loadOrderForLabel(orderId: string) {
     select: {
       id: true,
       orderNumber: true,
+      status: true,
       email: true,
       phone: true,
       cpf: true,
@@ -56,6 +58,7 @@ async function loadOrderForLabel(orderId: string) {
       superfreteShipmentId: true,
       labelUrl: true,
       superfreteStatus: true,
+      shippingStatus: true,
       items: {
         include: {
           product: {
@@ -236,74 +239,99 @@ export async function generateOrderLabel(orderId: string) {
     throw new ShippingQuoteError("VALIDATION", "Pedido não encontrado.", 404);
   }
 
-  // Etiqueta já gerada e URL salva — retorna direto
+  if (order.status === "cancelled") {
+    throw new ShippingQuoteError(
+      "VALIDATION",
+      "Não é possível gerar etiqueta para venda cancelada.",
+      400
+    );
+  }
+
+  const labelCancelled =
+    order.shippingStatus === "cancelled" || order.superfreteStatus === "cancelled";
+
+  if (labelCancelled) {
+    await prisma.order.update({
+      where: { id: orderId },
+      data: {
+        superfreteShipmentId: null,
+        labelUrl: null,
+        trackingCode: null,
+        labelGeneratedAt: null,
+        superfreteStatus: null,
+      },
+    });
+    order.superfreteShipmentId = null;
+    order.labelUrl = null;
+    order.superfreteStatus = null;
+  }
+
+  let alreadyExists = false;
+
   if (order.superfreteShipmentId && order.labelUrl) {
+    alreadyExists = true;
     return {
       shipmentId: order.superfreteShipmentId,
       labelUrl: order.labelUrl,
       superfreteStatus: order.superfreteStatus ?? "released",
+      tracking: null,
       alreadyExists: true,
     };
-  }
+  } else if (order.superfreteShipmentId && !order.labelUrl) {
+    alreadyExists = true;
+  } else {
+    const input = buildLabelInput(order);
+    const result = await createSuperfreteLabelForOrder(input);
 
-  // Shipment já existe (pago), mas a URL da etiqueta não foi salva — tenta buscar sem recriar
-  if (order.superfreteShipmentId && !order.labelUrl) {
-    let labelUrl: string | null = null;
-    try {
-      labelUrl = await printSuperfreteLabel(order.superfreteShipmentId);
-    } catch (e) {
-      console.warn("[generateOrderLabel] printSuperfreteLabel falhou para shipmentId existente:", e instanceof Error ? e.message : e);
-    }
-    if (labelUrl) {
-      await prisma.order.update({
-        where: { id: orderId },
-        data: { labelUrl, superfreteStatus: "released" },
-      });
-    }
-    return {
-      shipmentId: order.superfreteShipmentId,
-      labelUrl: labelUrl ?? "",
-      superfreteStatus: order.superfreteStatus ?? "released",
-      alreadyExists: true,
-    };
-  }
-
-  const input = buildLabelInput(order);
-  const result = await createSuperfreteLabelForOrder(input);
-
-  // Salva no banco e busca metadados em paralelo
-  const [, infoResult] = await Promise.allSettled([
-    prisma.order.update({
+    await prisma.order.update({
       where: { id: orderId },
       data: {
         superfreteShipmentId: result.shipmentId,
-        labelUrl: result.labelUrl || null,
+        labelUrl: null,
         superfreteStatus: result.superfreteStatus,
         shippingStatus: "packed",
         labelGeneratedAt: new Date(),
         shippingServiceId: input.serviceId,
       },
-    }),
-    fetchSuperfreteOrderInfo(result.shipmentId),
-  ]);
-
-  // Persiste metadados opcionais (preço, prazo) e corrige labelUrl se necessário
-  if (infoResult.status === "fulfilled") {
-    const info = infoResult.value;
-    await persistSuperfreteOrderMeta(orderId, info).catch(() => null);
-    if (!result.labelUrl && info.labelUrl) {
-      await prisma.order.update({
-        where: { id: orderId },
-        data: { labelUrl: info.labelUrl },
-      }).catch(() => null);
-      result.labelUrl = info.labelUrl;
-    }
+    });
   }
 
-  return { ...result, alreadyExists: false };
+  let info: Awaited<ReturnType<typeof syncOrderShipmentFromSuperfrete>> | null = null;
+  try {
+    info = await syncOrderShipmentFromSuperfrete(orderId, {
+      pollTracking: true,
+      maxWaitMs: 12_000,
+    });
+  } catch (e) {
+    console.warn(
+      "[generateOrderLabel] syncOrderShipmentFromSuperfrete falhou:",
+      e instanceof Error ? e.message : e
+    );
+  }
+
+  const updated = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: {
+      superfreteShipmentId: true,
+      labelUrl: true,
+      superfreteStatus: true,
+      trackingCode: true,
+    },
+  });
+
+  return {
+    shipmentId: updated?.superfreteShipmentId ?? "",
+    labelUrl: updated?.labelUrl ?? info?.labelUrl ?? "",
+    superfreteStatus: info?.status ?? updated?.superfreteStatus ?? "released",
+    tracking: info?.tracking ?? updated?.trackingCode ?? null,
+    alreadyExists,
+  };
 }
 
-export async function syncOrderShipmentFromSuperfrete(orderId: string) {
+export async function syncOrderShipmentFromSuperfrete(
+  orderId: string,
+  options?: { pollTracking?: boolean; maxWaitMs?: number }
+) {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
     select: { superfreteShipmentId: true, labelUrl: true },
@@ -316,25 +344,21 @@ export async function syncOrderShipmentFromSuperfrete(orderId: string) {
     );
   }
 
-  const info = await fetchSuperfreteOrderInfo(order.superfreteShipmentId);
+  const info = options?.pollTracking
+    ? await fetchSuperfreteOrderInfoWithTrackingPoll(order.superfreteShipmentId, {
+        maxWaitMs: options.maxWaitMs ?? 12_000,
+        intervalMs: 1500,
+      })
+    : await fetchSuperfreteOrderInfo(order.superfreteShipmentId);
   const mappedStatus = mapSuperfreteStatusToShippingStatus(info.status);
 
-  let labelUrl = order.labelUrl;
-  if (!labelUrl && info.status === "released") {
-    try {
-      labelUrl = await printSuperfreteLabel(order.superfreteShipmentId);
-    } catch {
-      labelUrl = info.labelUrl;
-    }
-  } else if (info.labelUrl) {
-    labelUrl = info.labelUrl;
-  }
+  const labelUrl = order.labelUrl || info.labelUrl || null;
 
   await prisma.order.update({
     where: { id: orderId },
     data: {
       superfreteStatus: info.status,
-      trackingCode: info.tracking ?? undefined,
+      ...(info.tracking ? { trackingCode: info.tracking } : {}),
       ...(labelUrl ? { labelUrl } : {}),
       ...(mappedStatus ? { shippingStatus: mappedStatus } : {}),
     },

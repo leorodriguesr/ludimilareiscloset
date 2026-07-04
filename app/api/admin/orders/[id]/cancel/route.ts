@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { syncOrderShipmentFromSuperfrete } from "@/lib/shipping/generate-order-label";
+import { cancelOrder } from "@/lib/orders/cancel-order";
 import { ShippingQuoteError } from "@/lib/shipping/types";
 import { requireAdminApi } from "@/lib/require-admin-api";
 
@@ -12,25 +12,22 @@ export async function POST(
 
   const { id } = await params;
 
-  let quick = false;
+  let reason = "";
   try {
-    const body = (await request.json()) as { quick?: boolean };
-    quick = body.quick === true;
+    const body = (await request.json()) as { reason?: string };
+    reason = body.reason?.trim() ?? "";
   } catch {
-    /* corpo opcional */
+    return NextResponse.json({ error: "JSON inválido." }, { status: 400 });
   }
 
   try {
-    const info = await syncOrderShipmentFromSuperfrete(id, {
-      pollTracking: !quick,
-      maxWaitMs: quick ? 0 : 12_000,
-    });
-    return NextResponse.json(info);
+    const result = await cancelOrder(id, reason);
+    return NextResponse.json(result);
   } catch (e) {
     if (e instanceof ShippingQuoteError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
-    console.error("[POST /api/admin/orders/:id/shipment/sync]", e);
-    return NextResponse.json({ error: "Erro ao sincronizar envio." }, { status: 500 });
+    console.error("[POST /api/admin/orders/:id/cancel]", e);
+    return NextResponse.json({ error: "Erro ao cancelar venda." }, { status: 500 });
   }
 }

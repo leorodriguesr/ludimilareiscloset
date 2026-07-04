@@ -103,6 +103,9 @@ model Order {
   /** URL da etiqueta de envio (gerada pela SuperFrete). */
   labelUrl                  String?
   labelGeneratedAt          DateTime?
+  /** Motivo informado pelo admin ao cancelar a venda. */
+  cancellationReason        String?
+  cancelledAt               DateTime?
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
   items     OrderItem[]

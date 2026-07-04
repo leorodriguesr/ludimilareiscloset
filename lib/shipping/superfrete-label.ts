@@ -156,20 +156,20 @@ export async function createSuperfreteLabelForOrder(input: LabelInput): Promise<
   console.debug("[SuperFrete label] POST /api/v0/checkout", { orders: [shipmentId] });
   await superfreteRequest("POST", "/api/v0/checkout", { orders: [shipmentId] });
 
-  // Após o checkout o saldo já foi debitado. Obtemos a URL do PDF mas não
-  // verificamos sua disponibilidade aqui — o proxy /label/pdf faz retry sob demanda.
-  let labelUrl = "";
-  try {
-    labelUrl = await printSuperfreteLabel(shipmentId);
-  } catch (e) {
-    console.error("[SuperFrete label] Não foi possível obter URL da etiqueta (shipmentId salvo no banco):", e instanceof Error ? e.message : e);
-  }
-
+  // PDF via /api/admin/orders/:id/label/pdf (tag/print sob demanda).
   return {
     shipmentId,
-    labelUrl,
+    labelUrl: "",
     superfreteStatus: "released",
   };
+}
+
+function extractTracking(obj: Record<string, unknown>): string | null {
+  for (const key of ["tracking", "tracking_code", "trackingCode", "code"] as const) {
+    const v = obj[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return null;
 }
 
 export async function fetchSuperfreteOrderInfo(
@@ -193,7 +193,7 @@ export async function fetchSuperfreteOrderInfo(
   return {
     id: String(obj.id ?? shipmentId),
     status: String(obj.status ?? "unknown"),
-    tracking: typeof obj.tracking === "string" && obj.tracking ? obj.tracking : null,
+    tracking: extractTracking(obj),
     price: typeof obj.price === "number" ? obj.price : null,
     serviceId: Number.isFinite(serviceId) ? serviceId : null,
     deliveryMin: typeof obj.delivery_min === "number" ? obj.delivery_min : null,
@@ -202,11 +202,37 @@ export async function fetchSuperfreteOrderInfo(
   };
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** SuperFrete pode demorar alguns segundos após checkout para liberar o rastreio. */
+export async function fetchSuperfreteOrderInfoWithTrackingPoll(
+  shipmentId: string,
+  options?: { attempts?: number; intervalMs?: number; maxWaitMs?: number }
+): Promise<SuperfreteOrderInfo> {
+  const intervalMs = options?.intervalMs ?? 1500;
+  const maxWaitMs = options?.maxWaitMs ?? 12_000;
+  const deadline = Date.now() + maxWaitMs;
+  const maxAttempts = options?.attempts ?? 10;
+
+  let info = await fetchSuperfreteOrderInfo(shipmentId);
+  let attempt = 1;
+
+  while (!info.tracking && attempt < maxAttempts && Date.now() < deadline) {
+    await sleep(intervalMs);
+    info = await fetchSuperfreteOrderInfo(shipmentId);
+    attempt++;
+  }
+
+  return info;
+}
+
 export async function cancelSuperfreteOrder(
   shipmentId: string,
   reason = "Cancelado pelo administrador"
 ): Promise<void> {
   await superfreteRequest("POST", "/api/v0/order/cancel", {
-    order: { id: shipmentId, reason },
+    order: { id: shipmentId, description: reason },
   });
 }

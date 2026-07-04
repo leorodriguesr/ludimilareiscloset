@@ -46,6 +46,8 @@ type AdminOrder = {
   trackingCode: string | null;
   superfreteShipmentId: string | null;
   labelUrl: string | null;
+  cancellationReason: string | null;
+  cancelledAt: string | null;
   createdAt: string;
   user: { name: string; email: string; phone: string } | null;
   items: OrderItem[];
@@ -130,9 +132,8 @@ const SHIPPING_STATUS = [
 function sInfo(v: string) { return SHIPPING_STATUS.find((s) => s.value === v) ?? SHIPPING_STATUS[0]; }
 
 function payBadge(order: AdminOrder) {
-  if (order.paidAt)              return { label: "Pago",      cls: "bg-emerald-50 text-emerald-700 ring-emerald-200" };
-  if (order.status === "cancelled") return { label: "Cancelado", cls: "bg-red-50 text-red-700 ring-red-200" };
-  return                                  { label: "Aguardando", cls: "bg-amber-50 text-amber-700 ring-amber-200"   };
+  if (order.paidAt) return { label: "Pago", cls: "bg-emerald-50 text-emerald-700 ring-emerald-200" };
+  return { label: "Aguardando", cls: "bg-amber-50 text-amber-700 ring-amber-200" };
 }
 
 function Chip({ label, cls }: { label: string; cls: string }) {
@@ -141,10 +142,27 @@ function Chip({ label, cls }: { label: string; cls: string }) {
 
 /* ─── Linha expandida ─────────────────────────────────────────────── */
 
-function ExpandedRow({ order, colSpan, onRefresh }: { order: AdminOrder; colSpan: number; onRefresh: () => void }) {
+function ExpandedRow({
+  order,
+  colSpan,
+  onRefresh,
+  muted = false,
+}: {
+  order: AdminOrder;
+  colSpan: number;
+  onRefresh: () => void;
+  muted?: boolean;
+}) {
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [generatingLabel, setGeneratingLabel] = useState(false);
   const [labelError, setLabelError] = useState<string | null>(null);
+  const [showCancelForm, setShowCancelForm] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
+  const isCancelled = order.status === "cancelled";
+  const hasActiveLabel = Boolean(order.labelUrl || order.superfreteShipmentId);
 
   async function updateShippingStatus(v: string) {
     setUpdatingStatus(true);
@@ -173,6 +191,36 @@ function ExpandedRow({ order, colSpan, onRefresh }: { order: AdminOrder; colSpan
     finally { setGeneratingLabel(false); }
   }
 
+  async function cancelSale() {
+    const reason = cancelReason.trim();
+    if (!reason) {
+      setCancelError("Informe o motivo do cancelamento.");
+      return;
+    }
+
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      });
+      const data = (await res.json()) as { error?: string; labelCancelled?: boolean };
+      if (!res.ok) {
+        setCancelError(data.error ?? "Erro ao cancelar venda.");
+        return;
+      }
+      setShowCancelForm(false);
+      setCancelReason("");
+      onRefresh();
+    } catch {
+      setCancelError("Erro de conexão.");
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   const customerName = order.recipientName || order.user?.name || order.email.split("@")[0];
   const customerPhone = order.phone || order.user?.phone || null;
   const customerEmail = order.email;
@@ -181,7 +229,7 @@ function ExpandedRow({ order, colSpan, onRefresh }: { order: AdminOrder; colSpan
   const pb = payBadge(order);
 
   return (
-    <tr>
+    <tr className={muted ? "opacity-45" : undefined}>
       <td colSpan={colSpan} className="border-b border-stone-200 bg-stone-50/80 px-5 pb-6 pt-1">
         <div className="grid gap-5 pt-4 lg:grid-cols-[1fr_340px]">
 
@@ -282,15 +330,28 @@ function ExpandedRow({ order, colSpan, onRefresh }: { order: AdminOrder; colSpan
               <dl className="space-y-2 text-sm">
                 <div className="flex items-center justify-between gap-2">
                   <dt className="text-stone-500">Status</dt>
-                  <dd><Chip label={pb.label} cls={pb.cls} /></dd>
+                  <dd className="flex flex-col items-end gap-1">
+                    <Chip label={pb.label} cls={pb.cls} />
+                    {isCancelled && (
+                      <span className="text-[11px] font-medium text-red-600">Venda cancelada</span>
+                    )}
+                  </dd>
                 </div>
                 {order.paidAt && <DetailRow label="Pago em" value={fmtFull(order.paidAt)} />}
                 <DetailRow label="Método" value={paymentMethodLabel(order.paymentCaptureMethod)} />
+                {isCancelled && order.cancelledAt && (
+                  <DetailRow label="Cancelado em" value={fmtFull(order.cancelledAt)} />
+                )}
+                {isCancelled && order.cancellationReason && (
+                  <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-800">
+                    <span className="font-medium">Motivo:</span> {order.cancellationReason}
+                  </div>
+                )}
               </dl>
             </div>
 
-            {/* Ações de envio (só pedidos pagos) */}
-            {order.paidAt && (
+            {/* Ações de envio (só pedidos pagos e não cancelados) */}
+            {order.paidAt && !isCancelled && (
               <div className="rounded-xl border border-stone-200 bg-white p-4 space-y-3">
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-stone-400">Status de envio</p>
                 <select
@@ -329,6 +390,77 @@ function ExpandedRow({ order, colSpan, onRefresh }: { order: AdminOrder; colSpan
                 )}
                 {labelError && (
                   <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{labelError}</p>
+                )}
+              </div>
+            )}
+
+            {!isCancelled && (
+              <div className="rounded-xl border border-red-200 bg-red-50/40 p-4 space-y-3">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-red-700">
+                  Cancelar venda
+                </p>
+                {!showCancelForm ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowCancelForm(true);
+                      setCancelError(null);
+                    }}
+                    className="flex w-full items-center justify-center rounded-lg border border-red-200 bg-white py-2 text-sm font-medium text-red-700 hover:bg-red-50 transition-colors"
+                  >
+                    Cancelar venda
+                  </button>
+                ) : (
+                  <div className="space-y-3">
+                    <div>
+                      <label
+                        htmlFor={`cancel-reason-${order.id}`}
+                        className="mb-1.5 block text-xs font-medium text-stone-700"
+                      >
+                        Motivo do cancelamento
+                      </label>
+                      <textarea
+                        id={`cancel-reason-${order.id}`}
+                        rows={3}
+                        value={cancelReason}
+                        onChange={(e) => setCancelReason(e.target.value)}
+                        placeholder="Ex.: cliente desistiu, pagamento duplicado, endereço inválido…"
+                        className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-red-300"
+                      />
+                    </div>
+                    {hasActiveLabel && (
+                      <p className="text-xs text-red-700">
+                        Este pedido possui etiqueta gerada. Ela será cancelada na SuperFrete também.
+                      </p>
+                    )}
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={cancelling}
+                        onClick={() => void cancelSale()}
+                        className="flex-1 rounded-lg bg-red-700 py-2 text-sm font-medium text-white hover:bg-red-800 transition-colors disabled:opacity-50"
+                      >
+                        {cancelling ? "Cancelando…" : "Confirmar cancelamento"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={cancelling}
+                        onClick={() => {
+                          setShowCancelForm(false);
+                          setCancelReason("");
+                          setCancelError(null);
+                        }}
+                        className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 transition-colors disabled:opacity-50"
+                      >
+                        Voltar
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {cancelError && (
+                  <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                    {cancelError}
+                  </p>
                 )}
               </div>
             )}
@@ -518,15 +650,25 @@ export function SalesManager() {
               {orders.map((order) => {
                 const isExpanded = expandedIds.has(order.id);
                 const isSelected = selectedIds.has(order.id);
+                const isSaleCancelled = order.status === "cancelled";
                 const pb = payBadge(order);
                 const ss = sInfo(order.shippingStatus);
                 const totalUnits = order.items.reduce((s, i) => s + i.quantity, 0);
                 const customerName = order.recipientName || order.user?.name || order.email.split("@")[0];
+                const rowMuted = isSaleCancelled
+                  ? "opacity-45 pointer-events-auto"
+                  : "";
 
                 return (
                   <Fragment key={order.id}>
                     <tr
-                      className={`border-b border-stone-100 transition-colors ${isExpanded ? "bg-stone-50" : "hover:bg-stone-50/60"} ${isSelected ? "bg-stone-100" : ""}`}>
+                      className={`border-b border-stone-100 transition-colors ${rowMuted} ${
+                        isSaleCancelled
+                          ? "bg-stone-50/60"
+                          : isExpanded
+                            ? "bg-stone-50"
+                            : "hover:bg-stone-50/60"
+                      } ${isSelected && !isSaleCancelled ? "bg-stone-100" : ""}`}>
 
                       {/* Checkbox */}
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
@@ -556,8 +698,11 @@ export function SalesManager() {
                       <td className="cursor-pointer px-3 py-3" onClick={() => toggleExpand(order.id)}>
                         <div className="flex flex-col gap-1">
                           <Chip label={pb.label} cls={pb.cls} />
+                          {isSaleCancelled && (
+                            <span className="text-[11px] font-medium text-red-600">Venda cancelada</span>
+                          )}
                           <span className="text-xs text-stone-400">{paymentMethodLabel(order.paymentCaptureMethod)}</span>
-                          {!order.paidAt && (
+                          {!order.paidAt && !isSaleCancelled && (
                             <span className="text-[11px] text-stone-400 italic">{elapsed(order.createdAt)}</span>
                           )}
                         </div>
@@ -576,7 +721,9 @@ export function SalesManager() {
 
                       {/* Envio */}
                       <td className="cursor-pointer px-3 py-3" onClick={() => toggleExpand(order.id)}>
-                        {order.paidAt ? (
+                        {isSaleCancelled ? (
+                          <span className="text-xs text-stone-400">—</span>
+                        ) : order.paidAt ? (
                           <div className="flex flex-col gap-1">
                             <div className="flex items-center gap-1.5">
                               <span className={`h-2 w-2 rounded-full ${ss.dot}`} />
@@ -586,7 +733,9 @@ export function SalesManager() {
                               <span className="text-xs text-stone-400 truncate max-w-[130px]">{order.shippingServiceName}</span>
                             )}
                           </div>
-                        ) : <span className="text-stone-300">—</span>}
+                        ) : (
+                          <span className="text-stone-300">—</span>
+                        )}
                       </td>
 
                       {/* Chevron */}
@@ -599,7 +748,12 @@ export function SalesManager() {
                     </tr>
 
                     {isExpanded && (
-                      <ExpandedRow order={order} colSpan={COL_COUNT + 1} onRefresh={fetchOrders} />
+                      <ExpandedRow
+                        order={order}
+                        colSpan={COL_COUNT + 1}
+                        onRefresh={fetchOrders}
+                        muted={isSaleCancelled}
+                      />
                     )}
                   </Fragment>
                 );

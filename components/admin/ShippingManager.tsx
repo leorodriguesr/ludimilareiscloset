@@ -1,15 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { formatPrice } from "@/lib/format";
 import { formatDeliveryDaysLabel } from "@/lib/shipping/delivery-days-label";
 import { SUPERFRETE_STATUS_LABELS } from "@/lib/shipping/service-id";
+import type { NormalizedShippingOption } from "@/lib/shipping/types";
 
 type ShipmentOrder = {
   id: string;
   orderNumber: number | null;
+  status: string;
   email: string;
   shippingServiceName: string | null;
+  shippingServiceId: number | null;
   shippingStatus: string;
   superfreteStatus: string | null;
   trackingCode: string | null;
@@ -25,7 +28,7 @@ type ShipmentOrder = {
   superfreteShippingPrice: number | null;
 };
 
-const COL_COUNT = 7;
+const COL_COUNT = 8;
 
 type FilterKey = "all" | "needs_label" | "packed" | "shipped" | "delivered" | "cancelled";
 
@@ -35,7 +38,7 @@ const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "packed", label: "Aguardando postagem" },
   { key: "shipped", label: "Postados" },
   { key: "delivered", label: "Entregues" },
-  { key: "cancelled", label: "Cancelados" },
+  { key: "cancelled", label: "Etiqueta cancelada" },
 ];
 
 const SHIPPING_LABELS: Record<string, string> = {
@@ -84,6 +87,187 @@ function trackingUrl(code: string) {
   return `https://rastreamento.correios.com.br/app/index.php?objeto=${encodeURIComponent(code)}`;
 }
 
+type QuoteResponse = {
+  current?: {
+    shippingServiceId: number | null;
+    shippingServiceName: string | null;
+    shippingQuotedPrice: number | null;
+    destinationCep: string | null;
+  };
+  options: NormalizedShippingOption[];
+  error?: string;
+};
+
+function ChangeShippingModal({
+  order,
+  onClose,
+  onSaved,
+}: {
+  order: ShipmentOrder;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [options, setOptions] = useState<NormalizedShippingOption[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [currentServiceId, setCurrentServiceId] = useState<number | null>(
+    order.shippingServiceId
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/admin/orders/${order.id}/shipping/quote`);
+        const data = (await res.json()) as QuoteResponse;
+        if (!res.ok) {
+          if (!cancelled) setError(data.error ?? "Erro ao cotar frete.");
+          return;
+        }
+        if (cancelled) return;
+        setOptions(data.options ?? []);
+        setCurrentServiceId(data.current?.shippingServiceId ?? order.shippingServiceId);
+        const current = data.options?.find(
+          (o) => o.serviceId === (data.current?.shippingServiceId ?? order.shippingServiceId)
+        );
+        setSelectedId(current?.id ?? data.options?.[0]?.id ?? null);
+      } catch {
+        if (!cancelled) setError("Erro de conexão.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [order.id, order.shippingServiceId]);
+
+  async function save() {
+    if (!selectedId) {
+      setError("Selecione uma modalidade de frete.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}/shipping`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ optionId: selectedId }),
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        setError(data.error ?? "Erro ao alterar frete.");
+        return;
+      }
+      onSaved();
+      onClose();
+    } catch {
+      setError("Erro de conexão.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const recipient = order.recipientName?.trim() || order.email.split("@")[0] || "—";
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg rounded-xl border border-stone-200 bg-white shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-b border-stone-100 px-5 py-4">
+          <h3 className="text-base font-semibold text-stone-900">Alterar modalidade de frete</h3>
+          <p className="mt-1 text-sm text-stone-500">
+            Pedido {orderNumberLabel(order)} · {recipient}
+          </p>
+        </div>
+
+        <div className="max-h-[min(60vh,420px)] overflow-y-auto px-5 py-4">
+          {loading ? (
+            <p className="py-8 text-center text-sm text-stone-400">Consultando opções…</p>
+          ) : options.length === 0 ? (
+            <p className="py-8 text-center text-sm text-stone-500">Nenhuma opção de frete disponível.</p>
+          ) : (
+            <ul className="space-y-2">
+              {options.map((opt) => {
+                const isCurrent = opt.serviceId === currentServiceId;
+                const isSelected = selectedId === opt.id;
+                return (
+                  <li key={opt.id}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedId(opt.id)}
+                      className={`w-full rounded-lg border px-4 py-3 text-left transition-colors ${
+                        isSelected
+                          ? "border-stone-900 bg-stone-50 ring-1 ring-stone-900"
+                          : "border-stone-200 hover:border-stone-300 hover:bg-stone-50/50"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-medium text-stone-900">
+                            {opt.carrierName} — {opt.serviceName}
+                          </p>
+                          <p className="mt-0.5 text-xs text-stone-500">
+                            {formatDeliveryDaysLabel(opt.deliveryDaysMin, opt.deliveryDaysMax)}
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="font-semibold tabular-nums text-stone-900">
+                            {formatPrice(opt.price)}
+                          </p>
+                          {isCurrent && (
+                            <p className="mt-0.5 text-[10px] font-medium uppercase tracking-wide text-stone-400">
+                              Atual
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {error && (
+            <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {error}
+            </p>
+          )}
+        </div>
+
+        <div className="flex gap-2 border-t border-stone-100 px-5 py-4">
+          <button
+            type="button"
+            disabled={saving || loading || !options.length}
+            onClick={() => void save()}
+            className="flex-1 rounded-lg bg-stone-900 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50"
+          >
+            {saving ? "Salvando…" : "Confirmar frete"}
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={onClose}
+            className="rounded-lg border border-stone-200 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-50"
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ActionButton({
   children,
   onClick,
@@ -114,18 +298,57 @@ function ActionButton({
 function ShipmentRow({
   order,
   onRefresh,
+  selected,
+  onToggleSelect,
+  onChangeShipping,
 }: {
   order: ShipmentOrder;
   onRefresh: () => void;
+  selected: boolean;
+  onToggleSelect: () => void;
+  onChangeShipping: () => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [localTracking, setLocalTracking] = useState<string | null>(null);
+  const [awaitingTracking, setAwaitingTracking] = useState(false);
+  const isSaleCancelled = order.status === "cancelled";
+  const canSelectForBulk = !order.labelUrl && !isSaleCancelled;
+  const canChangeShipping = !order.labelUrl && !order.superfreteShipmentId && !isSaleCancelled;
+  const canGenerateLabel = !order.labelUrl && !isSaleCancelled;
+
+  async function pollTrackingUntilReady(attemptsLeft = 8) {
+    if (attemptsLeft <= 0) {
+      setAwaitingTracking(false);
+      return;
+    }
+    try {
+      const syncRes = await fetch(`/api/admin/orders/${order.id}/shipment/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quick: true }),
+      });
+      if (syncRes.ok) {
+        const syncData = (await syncRes.json()) as { tracking?: string | null };
+        if (syncData.tracking) {
+          setLocalTracking(syncData.tracking);
+          setAwaitingTracking(false);
+          onRefresh();
+          return;
+        }
+      }
+    } catch {
+      /* retry */
+    }
+    window.setTimeout(() => void pollTrackingUntilReady(attemptsLeft - 1), 2000);
+  }
 
   async function runAction(
     key: string,
     url: string,
     method = "POST",
-    body?: unknown
+    body?: unknown,
+    opts?: { openPdf?: boolean }
   ) {
     setBusy(key);
     setError(null);
@@ -135,15 +358,28 @@ function ShipmentRow({
         headers: body ? { "Content-Type": "application/json" } : undefined,
         body: body ? JSON.stringify(body) : undefined,
       });
-      const data = (await res.json()) as { error?: string; labelUrl?: string; shipmentId?: string };
+      const data = (await res.json()) as {
+        error?: string;
+        labelUrl?: string;
+        shipmentId?: string;
+        tracking?: string | null;
+      };
       if (!res.ok) {
         setError(data.error ?? "Erro na operação.");
         return;
       }
-      if (data.labelUrl || data.shipmentId) {
+      if (opts?.openPdf !== false && data.shipmentId) {
         window.open(`/api/admin/orders/${order.id}/label/pdf`, "_blank");
       }
+      if (data.tracking) {
+        setLocalTracking(data.tracking);
+        setAwaitingTracking(false);
+      }
       onRefresh();
+      if (key === "label" && !data.tracking) {
+        setAwaitingTracking(true);
+        void pollTrackingUntilReady();
+      }
     } catch {
       setError("Erro de conexão.");
     } finally {
@@ -161,10 +397,21 @@ function ShipmentRow({
     order.shippingDeliveryDaysMax
   );
   const recipient = order.recipientName?.trim() || order.email.split("@")[0] || "—";
+  const trackingCode = localTracking ?? order.trackingCode;
 
   return (
     <tr className="border-b border-stone-100 align-top">
-      <td className="py-3 pl-4 pr-2">
+      <td className="py-3 pl-4 pr-1">
+        <input
+          type="checkbox"
+          checked={selected}
+          disabled={!canSelectForBulk}
+          title={canSelectForBulk ? "Selecionar para gerar etiqueta" : "Etiqueta já gerada"}
+          onChange={onToggleSelect}
+          className="h-4 w-4 rounded border-stone-300 accent-stone-900 disabled:opacity-30"
+        />
+      </td>
+      <td className="py-3 pr-2">
         <p className="font-mono font-semibold text-stone-900">{orderNumberLabel(order)}</p>
         <p className="mt-0.5 text-[10px] text-stone-400">
           {SHIPPING_LABELS[order.shippingStatus] ?? order.shippingStatus}
@@ -190,15 +437,17 @@ function ShipmentRow({
         </p>
       </td>
       <td className="px-2 py-3 text-sm font-mono text-stone-700">
-        {order.trackingCode ? (
+        {trackingCode ? (
           <a
-            href={trackingUrl(order.trackingCode)}
+            href={trackingUrl(trackingCode)}
             target="_blank"
             rel="noopener noreferrer"
             className="text-stone-800 underline decoration-stone-300 underline-offset-2 hover:text-stone-950"
           >
-            {order.trackingCode}
+            {trackingCode}
           </a>
+        ) : order.labelUrl || order.superfreteShipmentId || awaitingTracking ? (
+          <span className="text-stone-400">Aguardando…</span>
         ) : (
           "—"
         )}
@@ -208,12 +457,28 @@ function ShipmentRow({
       </td>
       <td className="py-3 pl-2 pr-4">
         <div className="flex flex-wrap gap-1.5 justify-end">
-          {!order.labelUrl && order.shippingStatus !== "cancelled" && (
+          {canChangeShipping && (
+            <ActionButton disabled={!!busy} onClick={onChangeShipping}>
+              Alterar frete
+            </ActionButton>
+          )}
+          {!canGenerateLabel && isSaleCancelled && !order.labelUrl && (
+            <span className="text-[11px] text-stone-400">Venda cancelada</span>
+          )}
+          {canGenerateLabel && (
             <ActionButton
               disabled={!!busy}
-              onClick={() => runAction("label", `/api/admin/orders/${order.id}/label`)}
+              onClick={() =>
+                runAction("label", `/api/admin/orders/${order.id}/label`, "POST", undefined, {
+                  openPdf: true,
+                })
+              }
             >
-              {busy === "label" ? "Gerando…" : "Gerar etiqueta"}
+              {busy === "label"
+                ? "Gerando…"
+                : order.shippingStatus === "cancelled"
+                  ? "Gerar nova etiqueta"
+                  : "Gerar etiqueta"}
             </ActionButton>
           )}
           {order.labelUrl && (
@@ -290,10 +555,15 @@ export function ShippingManager() {
   const [orders, setOrders] = useState<ShipmentOrder[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<FilterKey>("needs_label");
+  const [filter, setFilter] = useState<FilterKey>("all");
   const [wallet, setWallet] = useState<WalletInfo | null>(null);
   const [walletLoading, setWalletLoading] = useState(true);
   const [walletError, setWalletError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
+  const [shippingModalOrder, setShippingModalOrder] = useState<ShipmentOrder | null>(null);
+  const allRef = useRef<HTMLInputElement>(null);
 
   const fetchWallet = useCallback(async () => {
     setWalletLoading(true);
@@ -317,6 +587,8 @@ export function ShippingManager() {
 
   const fetchShipments = useCallback(async () => {
     setLoading(true);
+    setSelectedIds(new Set());
+    setBulkMsg(null);
     try {
       const qs = filter === "all" ? "" : `?filter=${filter}`;
       const res = await fetch(`/api/admin/shipments${qs}`);
@@ -346,12 +618,65 @@ export function ShippingManager() {
     void fetchWallet();
   }, [fetchWallet]);
 
+  useEffect(() => {
+    if (!allRef.current) return;
+    const selectable = orders.filter((o) => !o.labelUrl && o.status !== "cancelled");
+    const n = selectedIds.size;
+    allRef.current.indeterminate = n > 0 && n < selectable.length;
+    allRef.current.checked = n === selectable.length && selectable.length > 0;
+  }, [selectedIds, orders]);
+
   const refreshAll = () => {
     void fetchShipments();
     void fetchWallet();
   };
 
-  const needsLabel = orders.filter((o) => !o.labelUrl && o.shippingStatus !== "cancelled").length;
+  const selectableOrders = orders.filter((o) => !o.labelUrl && o.status !== "cancelled");
+  const toggleSelect = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleAll = () => {
+    const ids = selectableOrders.map((o) => o.id);
+    setSelectedIds(selectedIds.size === ids.length ? new Set() : new Set(ids));
+  };
+
+  async function bulkGenerateLabels() {
+    const ids = [...selectedIds];
+    if (!ids.length) return;
+    setBulkLoading(true);
+    setBulkMsg(null);
+    try {
+      const res = await fetch("/api/admin/shipments/labels/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderIds: ids }),
+      });
+      const data = (await res.json()) as {
+        okCount?: number;
+        failCount?: number;
+        error?: string;
+      };
+      if (!res.ok) {
+        setBulkMsg(data.error ?? "Erro ao gerar etiquetas.");
+        return;
+      }
+      setBulkMsg(
+        `${data.okCount ?? 0} etiqueta(s) gerada(s)` +
+          (data.failCount ? ` · ${data.failCount} falha(s)` : "")
+      );
+      refreshAll();
+    } catch {
+      setBulkMsg("Erro de conexão.");
+    } finally {
+      setBulkLoading(false);
+    }
+  }
+
+  const needsLabel = orders.filter((o) => !o.labelUrl).length;
   const lowBalance = wallet != null && wallet.balance < 20;
 
   return (
@@ -490,11 +815,40 @@ export function ShippingManager() {
         ))}
       </div>
 
+      {selectedIds.size > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-3">
+          <span className="text-sm font-medium text-stone-700">
+            {selectedIds.size} selecionado{selectedIds.size !== 1 ? "s" : ""}
+          </span>
+          <button
+            type="button"
+            disabled={bulkLoading}
+            onClick={() => void bulkGenerateLabels()}
+            className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50"
+          >
+            {bulkLoading ? "Gerando etiquetas…" : "Gerar etiquetas selecionadas"}
+          </button>
+          {bulkLoading && (
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-stone-300 border-t-stone-700" />
+          )}
+          {bulkMsg && <span className="text-xs text-stone-500">{bulkMsg}</span>}
+        </div>
+      )}
+
       <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white">
         <table className="w-full min-w-[960px] text-sm">
           <thead>
             <tr className="border-b border-stone-200 bg-stone-50 text-[11px] font-semibold uppercase tracking-wider text-stone-400">
-              <th className="py-3 pl-4 pr-2 text-left">Pedido</th>
+              <th className="w-10 py-3 pl-4 pr-1">
+                <input
+                  ref={allRef}
+                  type="checkbox"
+                  aria-label="Selecionar todos sem etiqueta"
+                  onChange={toggleAll}
+                  className="h-4 w-4 rounded border-stone-300 accent-stone-900"
+                />
+              </th>
+              <th className="py-3 pr-2 text-left">Pedido</th>
               <th className="px-2 py-3 text-left">Data</th>
               <th className="px-2 py-3 text-left">Prazo</th>
               <th className="px-2 py-3 text-left">Destinatário</th>
@@ -518,12 +872,27 @@ export function ShippingManager() {
               </tr>
             ) : (
               orders.map((order) => (
-                <ShipmentRow key={order.id} order={order} onRefresh={refreshAll} />
+                <ShipmentRow
+                  key={order.id}
+                  order={order}
+                  onRefresh={refreshAll}
+                  selected={selectedIds.has(order.id)}
+                  onToggleSelect={() => toggleSelect(order.id)}
+                  onChangeShipping={() => setShippingModalOrder(order)}
+                />
               ))
             )}
           </tbody>
         </table>
       </div>
+
+      {shippingModalOrder && (
+        <ChangeShippingModal
+          order={shippingModalOrder}
+          onClose={() => setShippingModalOrder(null)}
+          onSaved={refreshAll}
+        />
+      )}
     </div>
   );
 }
