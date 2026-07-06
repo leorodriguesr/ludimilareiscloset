@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { quoteShippingForCartLines } from "@/lib/shipping/quote-cart";
 import { normalizePostalCode } from "@/lib/shipping/superfrete";
 import { ShippingQuoteError } from "@/lib/shipping/types";
-
+//função para tratar erros de frete
 function userFacingShippingError(error: ShippingQuoteError): string {
   const msg = error.message.toLowerCase();
   if (
