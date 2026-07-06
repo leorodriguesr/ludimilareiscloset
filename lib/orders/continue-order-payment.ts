@@ -41,6 +41,11 @@ export type ContinueOrderPaymentSuccess =
       type: "card";
       orderId: string;
       checkoutUrl: string;
+    }
+  | {
+      ok: true;
+      type: "paid";
+      orderId: string;
     };
 
 export type ContinueOrderPaymentResult =
@@ -375,27 +380,24 @@ export async function continueOrderPayment(input: {
             payload: { orderId: fresh.id, continuePayment: true },
           });
           return {
-            ok: false,
-            error: "Pagamento já confirmado. Atualize a página.",
-            code: "not_pending",
+            ok: true,
+            type: "paid",
+            orderId: fresh.id,
           };
         }
 
-        const attemptPixValid =
-          activeAttempt.expiresAt &&
-          activeAttempt.expiresAt > now &&
-          mp.pixCode;
-
-        if (attemptPixValid) {
+        /** Reutiliza o PIX enquanto o MP ainda expõe qr_code (não depende só de expiresAt local). */
+        if (mp.pixCode) {
           return {
             ok: true,
             type: "pix",
             orderId: fresh.id,
-            pixCode: mp.pixCode!,
+            pixCode: mp.pixCode,
             pixQrBase64: mp.pixQrBase64,
             expiresAt:
               mp.expiresAt ??
-              activeAttempt.expiresAt!.toISOString(),
+              activeAttempt.expiresAt?.toISOString() ??
+              new Date(Date.now() + 30 * 60 * 1000).toISOString(),
             amount: fresh.total,
           };
         }

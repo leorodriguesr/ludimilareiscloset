@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { formatPrice } from "@/lib/format";
 import { describeCartPieceSelection } from "@/lib/cart/format-piece-selections";
@@ -117,19 +118,43 @@ function isPendingPayment(order: AccountOrderListItem): boolean {
 }
 
 function ContinuePaymentActions({ order }: { order: AccountOrderListItem }) {
+  const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pixData, setPixData] = useState<{
     pixCode: string;
     pixQrBase64: string | null;
     amount: number;
+    expiresAt: string;
   } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [pollingStatus, setPollingStatus] = useState<
+    "idle" | "waiting" | "paid"
+  >("idle");
+
+  useEffect(() => {
+    if (pollingStatus !== "waiting" || !order.id) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/checkout/pix-status/${order.id}`);
+        if (!res.ok) return;
+        const json = (await res.json()) as { status: string };
+        if (json.status === "paid") {
+          setPollingStatus("paid");
+          router.refresh();
+        }
+      } catch {
+        /* ignore */
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [order.id, pollingStatus, router]);
 
   async function handleContinue() {
     setBusy(true);
     setError(null);
     setPixData(null);
+    setPollingStatus("idle");
     try {
       const res = await fetch(
         `/api/account/orders/${order.id}/continue-payment`,
@@ -142,10 +167,17 @@ function ContinuePaymentActions({ order }: { order: AccountOrderListItem }) {
         pixCode?: string;
         pixQrBase64?: string | null;
         amount?: number;
+        expiresAt?: string;
       };
 
       if (!res.ok) {
         setError(data.error ?? "Não foi possível continuar o pagamento.");
+        return;
+      }
+
+      if (data.type === "paid") {
+        setPollingStatus("paid");
+        router.refresh();
         return;
       }
 
@@ -159,7 +191,11 @@ function ContinuePaymentActions({ order }: { order: AccountOrderListItem }) {
           pixCode: data.pixCode,
           pixQrBase64: data.pixQrBase64 ?? null,
           amount: data.amount ?? order.total,
+          expiresAt:
+            data.expiresAt ??
+            new Date(Date.now() + 30 * 60 * 1000).toISOString(),
         });
+        setPollingStatus("waiting");
         return;
       }
 
@@ -190,10 +226,24 @@ function ContinuePaymentActions({ order }: { order: AccountOrderListItem }) {
 
       {pixData ? (
         <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm font-semibold text-amber-900">
-            Pague {formatPrice(pixData.amount)} via Pix
-          </p>
-          {pixData.pixQrBase64 ? (
+          {pollingStatus === "paid" ? (
+            <div className="flex items-center gap-2 text-sm font-semibold text-emerald-800">
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+              Pagamento confirmado!
+            </div>
+          ) : (
+            <>
+              <p className="text-sm font-semibold text-amber-900">
+                Pague {formatPrice(pixData.amount)} via Pix
+              </p>
+              <p className="text-xs text-amber-800">
+                Aguardando confirmação do banco… a página atualiza sozinha após o pagamento.
+              </p>
+            </>
+          )}
+          {pollingStatus !== "paid" && pixData.pixQrBase64 ? (
             <div className="flex justify-center">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -203,13 +253,15 @@ function ContinuePaymentActions({ order }: { order: AccountOrderListItem }) {
               />
             </div>
           ) : null}
-          <button
-            type="button"
-            onClick={copyPixCode}
-            className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-left text-xs font-mono text-stone-700 break-all hover:bg-amber-100/50"
-          >
-            {copied ? "Código copiado!" : pixData.pixCode}
-          </button>
+          {pollingStatus !== "paid" ? (
+            <button
+              type="button"
+              onClick={copyPixCode}
+              className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-left text-xs font-mono text-stone-700 break-all hover:bg-amber-100/50"
+            >
+              {copied ? "Código copiado!" : pixData.pixCode}
+            </button>
+          ) : null}
           <Link
             href={`/pedido/${order.id}`}
             className="block text-center text-xs font-medium text-amber-900 underline-offset-2 hover:underline"
@@ -217,6 +269,10 @@ function ContinuePaymentActions({ order }: { order: AccountOrderListItem }) {
             Ver detalhes do pedido
           </Link>
         </div>
+      ) : pollingStatus === "paid" ? (
+        <p className="text-sm font-medium text-emerald-800">
+          Pagamento confirmado! Atualizando…
+        </p>
       ) : (
         <button
           type="button"

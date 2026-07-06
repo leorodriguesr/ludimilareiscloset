@@ -99,16 +99,23 @@ async function validateAttemptForConfirmation(input: {
   const { attempt } = input;
   const now = new Date();
 
+  const allowSupersededPixRecovery =
+    attempt.status === PAYMENT_ATTEMPT_STATUS.SUPERSEDED &&
+    attempt.gateway === PAYMENT_GATEWAY.MERCADOPAGO &&
+    attempt.order.status === ORDER_STATUS.PENDING_PAYMENT;
+
   if (attempt.status === PAYMENT_ATTEMPT_STATUS.SUPERSEDED) {
-    return rejectConfirmation({
-      gateway: input.gateway,
-      source: input.source,
-      outcome: WEBHOOK_AUDIT_OUTCOME.REJECTED_SUPERSEDED,
-      reason: "Pagamento referente a tentativa superseded.",
-      attempt,
-      gatewayReference: input.gatewayReference,
-      payload: input.payload,
-    });
+    if (!allowSupersededPixRecovery) {
+      return rejectConfirmation({
+        gateway: input.gateway,
+        source: input.source,
+        outcome: WEBHOOK_AUDIT_OUTCOME.REJECTED_SUPERSEDED,
+        reason: "Pagamento referente a tentativa superseded.",
+        attempt,
+        gatewayReference: input.gatewayReference,
+        payload: input.payload,
+      });
+    }
   }
 
   if (attempt.status === PAYMENT_ATTEMPT_STATUS.EXPIRED) {
@@ -138,7 +145,10 @@ async function validateAttemptForConfirmation(input: {
     });
   }
 
-  if (attempt.status !== PAYMENT_ATTEMPT_STATUS.ACTIVE) {
+  if (
+    attempt.status !== PAYMENT_ATTEMPT_STATUS.ACTIVE &&
+    !allowSupersededPixRecovery
+  ) {
     return rejectConfirmation({
       gateway: input.gateway,
       source: input.source,
