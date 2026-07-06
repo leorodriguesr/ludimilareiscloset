@@ -3,6 +3,10 @@ import {
   normalizePostalCode,
 } from "@/lib/shipping/superfrete";
 import { buildCartShippingPackage, type CartShippingLine } from "@/lib/shipping/cart-package";
+import {
+  isShippingMockEnabled,
+  mockShippingQuote,
+} from "@/lib/shipping/dev-mock-shipping";
 import { applyPackagingDays, getPackagingDays } from "@/lib/shipping/packaging-days";
 import type { ShippingQuoteResult } from "@/lib/shipping/types";
 
@@ -12,6 +16,15 @@ export async function quoteShippingForCartLines(
 ): Promise<ShippingQuoteResult> {
   const dest = normalizePostalCode(destinationCep);
   if (!dest) throw new Error("INVALID_CEP");
+
+  if (isShippingMockEnabled()) {
+    const packagingDays = await getPackagingDays();
+    const mock = mockShippingQuote();
+    return {
+      ...mock,
+      options: applyPackagingDays(mock.options, packagingDays),
+    };
+  }
 
   const pkg = await buildCartShippingPackage(lines);
 

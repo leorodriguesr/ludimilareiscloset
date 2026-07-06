@@ -16,6 +16,7 @@ import { normalizeSuperfreteInsurance } from "@/lib/shipping/insurance";
 
 const CALCULATOR_PATH = "/api/v0/calculator";
 const DEFAULT_SERVICES = "1,2,3,17,31";
+const CORREIOS_SERVICE_IDS = new Set(["1", "2", "17"]);
 
 const SERVICE_ID_LABELS: Record<number, { carrier: string; service: string }> = {
   1: { carrier: "Correios", service: "PAC" },
@@ -78,13 +79,40 @@ export function packageToSuperFreteKgCm(pkg: {
   };
 }
 
-function readServices(): string {
-  return process.env.SUPERFRETE_SERVICES?.trim() || DEFAULT_SERVICES;
+function readServices(override?: string): string {
+  return override?.trim() || process.env.SUPERFRETE_SERVICES?.trim() || DEFAULT_SERVICES;
+}
+
+function buildServiceFallbackPlans(primary: string): string[] {
+  const parts = primary
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const plans: string[] = [];
+  const withoutCorreios = parts.filter((s) => !CORREIOS_SERVICE_IDS.has(s));
+
+  if (withoutCorreios.length > 0 && withoutCorreios.length < parts.length) {
+    plans.push(withoutCorreios.join(","));
+  }
+
+  const individual = withoutCorreios.length > 0 ? withoutCorreios : parts;
+  for (const id of individual) {
+    plans.push(id);
+  }
+
+  const seen = new Set<string>();
+  return plans.filter((plan) => {
+    if (!plan || plan === primary || seen.has(plan)) return false;
+    seen.add(plan);
+    return true;
+  });
 }
 
 function buildRequestBody(
   cfg: ReturnType<typeof readSuperFreteClientConfig>,
-  input: SuperFreteQuoteInput
+  input: SuperFreteQuoteInput,
+  services?: string
 ): Record<string, unknown> {
   const insuranceRaw =
     input.insuranceValue != null && Number.isFinite(Number(input.insuranceValue))
@@ -98,7 +126,7 @@ function buildRequestBody(
   const body: Record<string, unknown> = {
     from: { postal_code: normalizePostalCode(input.originPostalCode) },
     to: { postal_code: normalizePostalCode(input.destinationPostalCode) },
-    services: readServices(),
+    services: readServices(services),
     options: {
       own_hand: false,
       receipt: false,
@@ -278,11 +306,11 @@ function normalizeRows(rows: Record<string, unknown>[]): NormalizedShippingOptio
   return out.sort((a, b) => a.price - b.price);
 }
 
-export async function calculateShippingSuperFrete(
-  input: SuperFreteQuoteInput
+async function fetchCalculatorQuote(
+  cfg: ReturnType<typeof readSuperFreteClientConfig>,
+  input: SuperFreteQuoteInput,
+  services: string
 ): Promise<ShippingQuoteResult> {
-  const cfg = readSuperFreteClientConfig();
-
   const origin = normalizePostalCode(input.originPostalCode);
   const dest = normalizePostalCode(input.destinationPostalCode);
   if (!origin || !dest) {
@@ -293,13 +321,21 @@ export async function calculateShippingSuperFrete(
     );
   }
 
-  const body = buildRequestBody(cfg, {
-    ...input,
-    originPostalCode: origin,
-    destinationPostalCode: dest,
-  });
+  const body = buildRequestBody(
+    cfg,
+    {
+      ...input,
+      originPostalCode: origin,
+      destinationPostalCode: dest,
+    },
+    services
+  );
 
-  console.debug("[SuperFrete] POST", `${cfg.apiOrigin}${CALCULATOR_PATH}`, JSON.stringify(body));
+  console.debug(
+    "[SuperFrete] POST",
+    `${cfg.apiOrigin}${CALCULATOR_PATH}`,
+    JSON.stringify(body)
+  );
 
   let raw: unknown;
   try {
@@ -339,6 +375,44 @@ export async function calculateShippingSuperFrete(
   }
 
   return { options, idealPackage };
+}
+
+export async function calculateShippingSuperFrete(
+  input: SuperFreteQuoteInput
+): Promise<ShippingQuoteResult> {
+  const cfg = readSuperFreteClientConfig();
+  const primaryServices = readServices();
+  const attempts = [primaryServices, ...buildServiceFallbackPlans(primaryServices)];
+
+  let lastError: ShippingQuoteError | null = null;
+
+  for (const services of attempts) {
+    try {
+      const result = await fetchCalculatorQuote(cfg, input, services);
+      if (services !== primaryServices) {
+        console.warn(
+          "[SuperFrete] cotação com transportadoras alternativas:",
+          services
+        );
+      }
+      return result;
+    } catch (e) {
+      if (e instanceof ShippingQuoteError && e.status === 400) {
+        lastError = e;
+        continue;
+      }
+      throw e;
+    }
+  }
+
+  throw (
+    lastError ??
+    new ShippingQuoteError(
+      "UPSTREAM",
+      "Não foi possível calcular o frete. Tente novamente em alguns minutos.",
+      502
+    )
+  );
 }
 
 export async function calculateShippingSuperFreteWithStoreOrigin(

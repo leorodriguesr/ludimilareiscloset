@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { cancelOrderLabel } from "@/lib/shipping/generate-order-label";
 import { ShippingQuoteError } from "@/lib/shipping/types";
+import { releaseStockReservations } from "@/lib/orders/stock/reservation";
 
 export type CancelOrderResult = {
   orderId: string;
@@ -57,12 +58,16 @@ export async function cancelOrder(
     labelCancelled = true;
   }
 
-  await prisma.order.update({
-    where: { id: orderId },
-    data: {
-      status: "cancelled",
-      shippingStatus: "cancelled",
-    },
+  await prisma.$transaction(async (tx) => {
+    await releaseStockReservations(tx, orderId);
+
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        status: "cancelled",
+        shippingStatus: "cancelled",
+      },
+    });
   });
 
   await prisma.$executeRawUnsafe(

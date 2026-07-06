@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AccountOrders } from "@/components/account/AccountOrders";
 import { getAppSession } from "@/lib/auth-session";
+import { expirePendingOrdersForCustomer } from "@/lib/orders/expire-orders";
 import { prisma } from "@/lib/prisma";
 import { LogoutButton } from "@/components/auth/LogoutButton";
 import { formatPrice } from "@/lib/format";
@@ -19,6 +20,11 @@ export default async function MinhaContaPage() {
   if (!user) {
     redirect(`/api/auth/logout?next=${encodeURIComponent("/login?next=/minha-conta")}`);
   }
+
+  await expirePendingOrdersForCustomer({
+    userId: user.id,
+    email: user.email,
+  });
 
   const orders = await prisma.order.findMany({
     where: {
@@ -155,6 +161,7 @@ export default async function MinhaContaPage() {
               orderNumber: o.orderNumber,
               createdAt: o.createdAt,
               status: o.status,
+              expiresAt: o.expiresAt,
               paymentMethod: o.paymentMethod,
               total: o.total,
               shippingAmount: o.shippingAmount,

@@ -6,6 +6,7 @@ export type OrderShippingFieldsRow = {
   superfreteStatus: string | null;
   trackingCode: string | null;
   labelGeneratedAt: string | null;
+  labelAutoGenerateError: string | null;
   shippingQuotedPrice: number | null;
   shippingDeliveryDaysMin: number | null;
   shippingDeliveryDaysMax: number | null;
@@ -38,6 +39,7 @@ export async function fetchOrderShippingFieldsByIds(
       superfreteStatus: string | null;
       trackingCode: string | null;
       labelGeneratedAt: string | null;
+      labelAutoGenerateError: string | null;
       shippingQuotedPrice: number | null;
       shippingDeliveryDaysMin: number | null;
       shippingDeliveryDaysMax: number | null;
@@ -50,6 +52,7 @@ export async function fetchOrderShippingFieldsByIds(
       "superfreteStatus",
       "trackingCode",
       "labelGeneratedAt",
+      "labelAutoGenerateError",
       "shippingQuotedPrice",
       "shippingDeliveryDaysMin",
       "shippingDeliveryDaysMax",
@@ -68,6 +71,7 @@ export async function fetchOrderShippingFieldsByIds(
         superfreteStatus: row.superfreteStatus,
         trackingCode: row.trackingCode,
         labelGeneratedAt: row.labelGeneratedAt,
+        labelAutoGenerateError: row.labelAutoGenerateError,
         shippingQuotedPrice: toPrice(row.shippingQuotedPrice),
         shippingDeliveryDaysMin: toInt(row.shippingDeliveryDaysMin),
         shippingDeliveryDaysMax: toInt(row.shippingDeliveryDaysMax),

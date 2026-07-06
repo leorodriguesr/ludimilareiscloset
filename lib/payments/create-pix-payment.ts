@@ -32,6 +32,8 @@ type MpOrderResponse = {
  */
 export async function createPixPayment(input: {
   orderId: string;
+  /** Chave de idempotência única por tentativa de pagamento. */
+  paymentAttemptId: string;
   amount: number;
   description: string;
   payerEmail: string;
@@ -47,7 +49,7 @@ export async function createPixPayment(input: {
 
   const order = await mpFetch<MpOrderResponse>("/v1/orders", {
     method: "POST",
-    idempotencyKey: input.orderId,
+    idempotencyKey: input.paymentAttemptId,
     body: {
       type: "online",
       external_reference: input.orderId,
@@ -101,11 +103,40 @@ export async function getMpOrderStatus(mpOrderId: string): Promise<{
   paid: boolean;
   externalReference: string | null;
 }> {
+  const details = await getMpOrderPixDetails(mpOrderId);
+  return {
+    status: details.status,
+    paid: details.paid,
+    externalReference: details.externalReference,
+  };
+}
+
+export async function getMpOrderPixDetails(mpOrderId: string): Promise<{
+  status: string;
+  paid: boolean;
+  externalReference: string | null;
+  pixCode: string | null;
+  pixQrBase64: string | null;
+  expiresAt: string | null;
+}> {
   const order = await mpFetch<MpOrderResponse>(
     `/v1/orders/${encodeURIComponent(mpOrderId)}`
   );
   const status = order.status ?? "unknown";
-  // Na Orders API, "processed" indica pagamento concluído.
   const paid = status === "processed";
-  return { status, paid, externalReference: order.external_reference ?? null };
+  const payment = order.transactions?.payments?.[0];
+  const pixCode = payment?.payment_method?.qr_code ?? null;
+  const pixQrBase64 = payment?.payment_method?.qr_code_base64 ?? null;
+  const expiresAt = payment?.date_of_expiration
+    ? new Date(payment.date_of_expiration).toISOString()
+    : null;
+
+  return {
+    status,
+    paid,
+    externalReference: order.external_reference ?? null,
+    pixCode,
+    pixQrBase64,
+    expiresAt,
+  };
 }

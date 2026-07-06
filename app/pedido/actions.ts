@@ -1,7 +1,11 @@
 "use server";
 
-import { markOrderPaidIfPending } from "@/lib/orders/mark-paid";
-import { infinitePayPaymentCheck } from "@/lib/payments/infinitepay";
+import { confirmPaymentFromInfinitePay } from "@/lib/orders/confirm-payment";
+import { getActivePaymentAttempt } from "@/lib/orders/get-active-payment-attempt";
+import { PAYMENT_GATEWAY } from "@/lib/orders/constants";
+import {
+  infinitePayPaymentCheckWithFallback,
+} from "@/lib/payments/infinitepay";
 import { prisma } from "@/lib/prisma";
 
 function pickParam(
@@ -20,7 +24,6 @@ function pickParam(
 
 /**
  * Confirma pagamento ao retornar do checkout InfinitePay (query params no /pedido/[id]).
- * O slug da fatura costuma vir na URL; se não vier, usa o salvo ao criar o link de pagamento.
  */
 export async function syncOrderPaymentFromReturn(
   orderId: string,
@@ -30,43 +33,58 @@ export async function syncOrderPaymentFromReturn(
     "slug",
     "invoice_slug",
     "invoiceSlug",
+    "lenc",
   ]);
   const transactionNsu = pickParam(searchParams, [
     "transaction_nsu",
     "transactionNsu",
-    /** Alguns retornos usam o mesmo UUID em `transaction_id`. */
     "transaction_id",
     "transactionId",
   ]);
 
-  let slug = slugFromUrl;
-  if (!slug) {
-    const row = await prisma.order.findUnique({
+  if (!transactionNsu) {
+    return { confirmed: false };
+  }
+
+  const [attempt, orderRow] = await Promise.all([
+    getActivePaymentAttempt(orderId),
+    prisma.order.findUnique({
       where: { id: orderId },
       select: { infinitePayInvoiceSlug: true },
-    });
-    slug = row?.infinitePayInvoiceSlug ?? null;
-  }
+    }),
+  ]);
 
-  if (!slug || !transactionNsu) {
-    return { confirmed: false };
-  }
+  const references: Array<string | null | undefined> = [
+    slugFromUrl,
+    attempt?.gateway === PAYMENT_GATEWAY.INFINITEPAY
+      ? attempt.gatewayReference
+      : null,
+    orderRow?.infinitePayInvoiceSlug,
+  ];
 
-  const check = await infinitePayPaymentCheck({
+  const verified = await infinitePayPaymentCheckWithFallback({
     orderNsu: orderId,
     transactionNsu,
-    slug,
+    references,
   });
 
-  if (!check.success || !check.paid) {
+  if (!verified) {
     return { confirmed: false };
   }
 
-  await markOrderPaidIfPending({
-    orderId,
+  const invoiceSlug =
+    slugFromUrl && !slugFromUrl.includes(".v1.")
+      ? slugFromUrl
+      : verified.reference;
+
+  const result = await confirmPaymentFromInfinitePay({
+    orderNsu: orderId,
+    invoiceSlug,
     transactionNsu,
-    invoiceSlug: slug,
-    captureMethod: check.captureMethod ?? undefined,
+    captureMethod: verified.check.captureMethod ?? undefined,
+    source: "return_url",
+    payload: { searchParams, paymentCheck: verified.check },
   });
-  return { confirmed: true };
+
+  return { confirmed: result.updated };
 }

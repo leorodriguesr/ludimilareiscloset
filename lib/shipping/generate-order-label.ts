@@ -18,6 +18,7 @@ import {
   updateOrderDeliveryDaysFromSuperfrete,
   updateOrderSuperfreteShippingPrice,
 } from "@/lib/orders/order-shipping-fields";
+import { clearLabelAutoGenerateError } from "@/lib/shipping/label-auto-generate-error";
 import { ShippingQuoteError } from "@/lib/shipping/types";
 
 const DEFAULT_PKG = { weightGrams: 300, lengthCm: 16, widthCm: 11, heightCm: 2 };
@@ -318,6 +319,8 @@ export async function generateOrderLabel(orderId: string) {
       trackingCode: true,
     },
   });
+
+  await clearLabelAutoGenerateError(orderId);
 
   return {
     shipmentId: updated?.superfreteShipmentId ?? "",

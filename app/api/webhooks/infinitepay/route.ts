@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  markOrderPaidFromInfinitePayWebhook,
-} from "@/lib/orders/mark-paid";
+import { confirmPaymentFromInfinitePay } from "@/lib/orders/confirm-payment";
 import { parseInfinitePayWebhookPayload } from "@/lib/payments/parse-infinitepay-webhook";
 import { readWebhookJsonBody } from "@/lib/payments/read-webhook-json-body";
 
@@ -50,15 +48,18 @@ async function respondInfinitePayWebhook(
   }
 
   try {
-    const { updated } = await markOrderPaidFromInfinitePayWebhook({
+    const result = await confirmPaymentFromInfinitePay({
       orderNsu: orderNsu || null,
       invoiceSlug: invoiceSlug || null,
       transactionNsu: parsed?.transactionNsu?.trim() || null,
       captureMethod: parsed?.captureMethod?.trim() || null,
+      source: "webhook",
+      payload: body,
     });
-    if (process.env.NODE_ENV === "development" && !updated) {
+    if (process.env.NODE_ENV === "development" && !result.updated) {
       console.info(
-        "[webhook infinitepay] pedido não atualizado (já pago, inválido ou inexistente)"
+        "[webhook infinitepay] pagamento não confirmado:",
+        result.outcome
       );
     }
   } catch (e) {

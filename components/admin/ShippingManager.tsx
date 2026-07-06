@@ -5,6 +5,11 @@ import { formatPrice } from "@/lib/format";
 import { formatDeliveryDaysLabel } from "@/lib/shipping/delivery-days-label";
 import { SUPERFRETE_STATUS_LABELS } from "@/lib/shipping/service-id";
 import type { NormalizedShippingOption } from "@/lib/shipping/types";
+import {
+  hasLabelAutoGenerateError,
+  labelAutoGenerateErrorTooltip,
+  LabelAutoGenerateWarningIcon,
+} from "@/components/admin/LabelPendingBanner";
 
 type ShipmentOrder = {
   id: string;
@@ -20,6 +25,7 @@ type ShipmentOrder = {
   superfreteShipmentId: string | null;
   labelUrl: string | null;
   labelGeneratedAt: string | null;
+  labelAutoGenerateError: string | null;
   paidAt: string | null;
   createdAt: string;
   shippingQuotedPrice: number | null;
@@ -316,6 +322,8 @@ function ShipmentRow({
   const canSelectForBulk = !order.labelUrl && !isSaleCancelled;
   const canChangeShipping = !order.labelUrl && !order.superfreteShipmentId && !isSaleCancelled;
   const canGenerateLabel = !order.labelUrl && !isSaleCancelled;
+  const labelAutoGenerateFailed = hasLabelAutoGenerateError(order);
+  const labelAutoGenerateTitle = labelAutoGenerateErrorTooltip(order);
 
   async function pollTrackingUntilReady(attemptsLeft = 8) {
     if (attemptsLeft <= 0) {
@@ -456,11 +464,16 @@ function ShipmentRow({
         {freightPrice != null ? formatPrice(freightPrice) : "—"}
       </td>
       <td className="py-3 pl-2 pr-4">
-        <div className="flex flex-wrap gap-1.5 justify-end">
+        <div className="flex flex-wrap items-center gap-1.5 justify-end">
           {canChangeShipping && (
-            <ActionButton disabled={!!busy} onClick={onChangeShipping}>
-              Alterar frete
-            </ActionButton>
+            <>
+              {labelAutoGenerateFailed && (
+                <LabelAutoGenerateWarningIcon title={labelAutoGenerateTitle} />
+              )}
+              <ActionButton disabled={!!busy} onClick={onChangeShipping}>
+                Alterar frete
+              </ActionButton>
+            </>
           )}
           {!canGenerateLabel && isSaleCancelled && !order.labelUrl && (
             <span className="text-[11px] text-stone-400">Venda cancelada</span>

@@ -32,3 +32,19 @@ export function getPaymentCallbackBaseUrl(): string {
 export function isLocalPaymentCallbackBaseUrl(): boolean {
   return LOCAL_RE.test(getPaymentCallbackBaseUrl());
 }
+
+/** Em dev local, webhook da InfinitePay não é entregue — confirmação via retorno em /pedido/[id]. */
+export function shouldOmitInfinitePayWebhookOnLocalhost(): boolean {
+  if (!isLocalPaymentCallbackBaseUrl()) return false;
+  if (process.env.NODE_ENV === "production") return false;
+  const flag = process.env.INFINITEPAY_SKIP_WEBHOOK_ON_LOCALHOST?.trim();
+  if (flag === "0" || flag?.toLowerCase() === "false") return false;
+  return true;
+}
+
+export function localPaymentDevNotice(): string | null {
+  if (!isLocalPaymentCallbackBaseUrl() || process.env.NODE_ENV === "production") {
+    return null;
+  }
+  return "Ambiente local: o pagamento será confirmado ao voltar para a loja (webhook não chega em localhost).";
+}

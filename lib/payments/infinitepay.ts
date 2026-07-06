@@ -66,6 +66,30 @@ function pickSlug(data: Record<string, unknown>): string | null {
   return null;
 }
 
+function gatewayReferenceFromCheckoutUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    for (const key of ["slug", "lenc"]) {
+      const value = parsed.searchParams.get(key)?.trim();
+      if (value) return value;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/** Identificador da fatura (slug legado ou token `lenc` na URL). */
+export function extractInfinitePayGatewayReference(input: {
+  response: Record<string, unknown>;
+  checkoutUrl: string;
+}): string | null {
+  return (
+    pickSlug(input.response) ??
+    gatewayReferenceFromCheckoutUrl(input.checkoutUrl)
+  );
+}
+
 /**
  * Cria link de checkout na InfinitePay (valores em centavos nos itens).
  */
@@ -125,12 +149,16 @@ export async function createInfinitePayCheckoutLink(
     throw new Error("Resposta inválida da InfinitePay.");
   }
 
-  return { checkoutUrl, slug: pickSlug(rec) };
+  return {
+    checkoutUrl,
+    slug: extractInfinitePayGatewayReference({ response: rec, checkoutUrl }),
+  };
 }
 
 export type PaymentCheckInput = {
   orderNsu: string;
   transactionNsu: string;
+  /** Slug curto da fatura ou token `lenc` retornado na criação do link. */
   slug: string;
 };
 
@@ -143,6 +171,30 @@ export type PaymentCheckResult = {
   captureMethod?: string;
 };
 
+function isInfinitePayLencToken(reference: string): boolean {
+  return reference.includes(".v1.");
+}
+
+export { isInfinitePayLencToken };
+
+function paymentCheckRequestBody(
+  handle: string,
+  input: PaymentCheckInput
+): Record<string, unknown> {
+  const ref = input.slug.trim();
+  const body: Record<string, unknown> = {
+    handle,
+    order_nsu: input.orderNsu,
+    transaction_nsu: input.transactionNsu,
+  };
+  if (isInfinitePayLencToken(ref)) {
+    body.lenc = ref;
+  } else {
+    body.slug = ref;
+  }
+  return body;
+}
+
 export async function infinitePayPaymentCheck(
   input: PaymentCheckInput
 ): Promise<PaymentCheckResult> {
@@ -153,12 +205,7 @@ export async function infinitePayPaymentCheck(
       Accept: "application/json",
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      handle,
-      order_nsu: input.orderNsu,
-      transaction_nsu: input.transactionNsu,
-      slug: input.slug,
-    }),
+    body: JSON.stringify(paymentCheckRequestBody(handle, input)),
     cache: "no-store",
   });
 
@@ -187,6 +234,29 @@ export async function infinitePayPaymentCheck(
   };
 }
 
+/** Tenta payment_check com slug da URL, lenc salvo na tentativa, etc. */
+export async function infinitePayPaymentCheckWithFallback(input: {
+  orderNsu: string;
+  transactionNsu: string;
+  references: Array<string | null | undefined>;
+}): Promise<{ check: PaymentCheckResult; reference: string } | null> {
+  const seen = new Set<string>();
+  for (const raw of input.references) {
+    const ref = raw?.trim();
+    if (!ref || seen.has(ref)) continue;
+    seen.add(ref);
+    const check = await infinitePayPaymentCheck({
+      orderNsu: input.orderNsu,
+      transactionNsu: input.transactionNsu,
+      slug: ref,
+    });
+    if (check.success && check.paid) {
+      return { check, reference: ref };
+    }
+  }
+  return null;
+}
+
 export function infinitePayWebhookUrl(): string {
   /** Precisa ser HTTPS acessível pela internet (não localhost). Mesmo host do Link Integrado no app InfinitePay ajuda na entrega. */
   return `${getPaymentCallbackBaseUrl()}/api/webhooks/infinitepay`;
@@ -194,4 +264,11 @@ export function infinitePayWebhookUrl(): string {
 
 export function infinitePayOrderRedirectUrl(orderId: string): string {
   return `${getPaymentCallbackBaseUrl()}/pedido/${orderId}`;
+}
+
+/** Reconstrói URL de checkout a partir do slug ou token lenc salvos na tentativa. */
+export function infinitePayCheckoutUrlFromSlug(reference: string): string {
+  const handle = getInfinitePayHandle();
+  const param = reference.includes(".v1.") ? "lenc" : "slug";
+  return `https://checkout.infinitepay.io/${encodeURIComponent(handle)}?${param}=${encodeURIComponent(reference)}`;
 }

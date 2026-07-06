@@ -22,6 +22,7 @@ export type AccountOrderListItem = {
   orderNumber: number | null;
   createdAt: Date;
   status: string;
+  expiresAt: Date | null;
   paymentMethod: string | null;
   total: number;
   shippingAmount: number;
@@ -91,12 +92,143 @@ function shippingStatusLabel(shippingStatus: string, paymentStatus: string): str
   return "Em preparação";
 }
 
-function orderStatusBadgeClass(isPaid: boolean, shippingStatus: string): string {
-  if (!isPaid) return "bg-amber-100 text-amber-800";
-  if (shippingStatus === "delivered") return "bg-emerald-100 text-emerald-800";
-  if (shippingStatus === "shipped") return "bg-sky-100 text-sky-800";
-  if (shippingStatus === "cancelled") return "bg-red-100 text-red-800";
+function paymentOrderStatusLabel(order: AccountOrderListItem): string {
+  if (order.status === "expired") return "Expirado";
+  if (order.status === "cancelled") return "Cancelado";
+  if (order.status === "paid") {
+    return shippingStatusLabel(order.shippingStatus, order.status);
+  }
+  return "Aguardando pagamento";
+}
+
+function orderStatusBadgeClass(order: AccountOrderListItem): string {
+  if (order.status === "expired") return "bg-stone-200 text-stone-600";
+  if (order.status === "cancelled") return "bg-red-100 text-red-800";
+  if (order.status !== "paid") return "bg-amber-100 text-amber-800";
+  if (order.shippingStatus === "delivered") return "bg-emerald-100 text-emerald-800";
+  if (order.shippingStatus === "shipped") return "bg-sky-100 text-sky-800";
   return "bg-stone-100 text-stone-800";
+}
+
+function isPendingPayment(order: AccountOrderListItem): boolean {
+  if (order.status !== "pending_payment") return false;
+  if (!order.expiresAt) return true;
+  return order.expiresAt.getTime() > Date.now();
+}
+
+function ContinuePaymentActions({ order }: { order: AccountOrderListItem }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pixData, setPixData] = useState<{
+    pixCode: string;
+    pixQrBase64: string | null;
+    amount: number;
+  } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function handleContinue() {
+    setBusy(true);
+    setError(null);
+    setPixData(null);
+    try {
+      const res = await fetch(
+        `/api/account/orders/${order.id}/continue-payment`,
+        { method: "POST" }
+      );
+      const data = (await res.json()) as {
+        error?: string;
+        type?: string;
+        checkoutUrl?: string;
+        pixCode?: string;
+        pixQrBase64?: string | null;
+        amount?: number;
+      };
+
+      if (!res.ok) {
+        setError(data.error ?? "Não foi possível continuar o pagamento.");
+        return;
+      }
+
+      if (data.type === "card" && data.checkoutUrl) {
+        window.location.assign(data.checkoutUrl);
+        return;
+      }
+
+      if (data.type === "pix" && data.pixCode) {
+        setPixData({
+          pixCode: data.pixCode,
+          pixQrBase64: data.pixQrBase64 ?? null,
+          amount: data.amount ?? order.total,
+        });
+        return;
+      }
+
+      setError("Resposta inválida ao retomar pagamento.");
+    } catch {
+      setError("Erro de conexão. Tente novamente.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyPixCode() {
+    if (!pixData?.pixCode) return;
+    try {
+      await navigator.clipboard.writeText(pixData.pixCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError("Não foi possível copiar o código PIX.");
+    }
+  }
+
+  return (
+    <div className="border-t border-stone-100 px-5 py-4">
+      {error ? (
+        <p className="mb-3 text-sm text-red-600">{error}</p>
+      ) : null}
+
+      {pixData ? (
+        <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-sm font-semibold text-amber-900">
+            Pague {formatPrice(pixData.amount)} via Pix
+          </p>
+          {pixData.pixQrBase64 ? (
+            <div className="flex justify-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`data:image/png;base64,${pixData.pixQrBase64}`}
+                alt="QR Code PIX"
+                className="h-44 w-44 object-contain"
+              />
+            </div>
+          ) : null}
+          <button
+            type="button"
+            onClick={copyPixCode}
+            className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-left text-xs font-mono text-stone-700 break-all hover:bg-amber-100/50"
+          >
+            {copied ? "Código copiado!" : pixData.pixCode}
+          </button>
+          <Link
+            href={`/pedido/${order.id}`}
+            className="block text-center text-xs font-medium text-amber-900 underline-offset-2 hover:underline"
+          >
+            Ver detalhes do pedido
+          </Link>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={handleContinue}
+          disabled={busy}
+          className="inline-flex w-full items-center justify-center rounded-lg bg-stone-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-stone-700 disabled:opacity-60 sm:w-auto"
+        >
+          {busy ? "Preparando pagamento…" : "Continuar pagamento"}
+        </button>
+      )}
+    </div>
+  );
 }
 
 function paymentMethodLabel(method: string | null) {
@@ -282,9 +414,11 @@ function TrackingBlock({ order }: { order: AccountOrderListItem }) {
 
 function OrderCard({ order }: { order: AccountOrderListItem }) {
   const isPaid = order.status === "paid";
+  const isExpired = order.status === "expired";
+  const pending = isPendingPayment(order);
   const subtotal = order.items.reduce((a, i) => a + i.price * i.quantity, 0);
   const address = formatAddress(order);
-  const statusLabel = shippingStatusLabel(order.shippingStatus, order.status);
+  const statusLabel = paymentOrderStatusLabel(order);
 
   return (
     <li className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
@@ -300,7 +434,7 @@ function OrderCard({ order }: { order: AccountOrderListItem }) {
           </div>
           <div className="text-right">
             <span
-              className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${orderStatusBadgeClass(isPaid, order.shippingStatus)}`}
+              className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${orderStatusBadgeClass(order)}`}
             >
               {statusLabel}
             </span>
@@ -383,21 +517,37 @@ function OrderCard({ order }: { order: AccountOrderListItem }) {
               </dd>
             </div>
             <div className="flex justify-between border-t border-stone-200 pt-2 font-semibold text-stone-900">
-              <dt>Total pago</dt>
+              <dt>{isPaid ? "Total pago" : "Total"}</dt>
               <dd className="tabular-nums">{formatPrice(order.total)}</dd>
             </div>
           </dl>
         </div>
       </div>
 
-      {/* Rastreio */}
-      <div className="border-t border-stone-100 px-5 py-4">
-        <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-stone-400">Acompanhar pedido</p>
-        <TrackingBlock order={order} />
-      </div>
+      {/* Rastreio / pagamento pendente */}
+      {isExpired ? (
+        <div className="border-t border-stone-100 px-5 py-4">
+          <p className="text-sm text-stone-500">
+            Este pedido expirou sem confirmação de pagamento. Você pode comprar os mesmos produtos novamente.
+          </p>
+          <Link
+            href="/"
+            className="mt-3 inline-flex items-center justify-center rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-800 transition hover:bg-stone-50"
+          >
+            Comprar novamente
+          </Link>
+        </div>
+      ) : pending ? (
+        <ContinuePaymentActions order={order} />
+      ) : (
+        <div className="border-t border-stone-100 px-5 py-4">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-stone-400">Acompanhar pedido</p>
+          <TrackingBlock order={order} />
+        </div>
+      )}
 
-      {/* Endereço */}
-      {address && (
+      {/* Endereço — oculto para expirados sem pagamento */}
+      {!isExpired && address && (
         <div className="border-t border-stone-100 bg-stone-50/40 px-5 py-3">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">Entrega</p>
           <p className="mt-1 text-sm text-stone-600">

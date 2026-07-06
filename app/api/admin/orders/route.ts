@@ -4,6 +4,10 @@ import {
   fetchOrderContactAddressByIds,
   mergeOrderContactAddress,
 } from "@/lib/orders/order-contact-address";
+import {
+  fetchOrderShippingFieldsByIds,
+  mergeOrderShippingFields,
+} from "@/lib/orders/order-shipping-fields";
 import { requireAdminApi } from "@/lib/require-admin-api";
 
 /**
@@ -64,7 +68,11 @@ export async function GET(request: NextRequest) {
     const contactAddressById = await fetchOrderContactAddressByIds(
       orders.map((order) => order.id)
     );
-    const enrichedOrders = mergeOrderContactAddress(orders, contactAddressById);
+    const shippingById = await fetchOrderShippingFieldsByIds(
+      orders.map((order) => order.id)
+    );
+    const withAddress = mergeOrderContactAddress(orders, contactAddressById);
+    const enrichedOrders = mergeOrderShippingFields(withAddress, shippingById);
 
     return NextResponse.json({ orders: enrichedOrders, total, page, limit });
   } catch (e) {

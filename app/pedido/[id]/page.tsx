@@ -7,6 +7,9 @@ import { prisma } from "@/lib/prisma";
 import { describeCartPieceSelection } from "@/lib/cart/format-piece-selections";
 import type { CartPieceSelection } from "@/lib/cart/types";
 import { formatPrice } from "@/lib/format";
+import { ClearCartOnPaymentSuccess } from "@/components/cart/ClearCartOnPaymentSuccess";
+import { PAYMENT_GATEWAY } from "@/lib/orders/constants";
+import { getActivePaymentAttempt } from "@/lib/orders/get-active-payment-attempt";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -75,15 +78,20 @@ export default async function PedidoPage({ params, searchParams }: PageProps) {
 
   const receiptUrl = pickReceiptUrl(sp);
   const isPaid = order.status === "paid";
+  const activeAttempt = !isPaid ? await getActivePaymentAttempt(id) : null;
   const isPix = order.paymentMethod === "pix";
   const isCard = order.paymentMethod === "card";
-  const isInfinitePay = isCard && !!order.infinitePayInvoiceSlug;
+  const isInfinitePay =
+    isCard &&
+    (!!order.infinitePayInvoiceSlug ||
+      activeAttempt?.gateway === PAYMENT_GATEWAY.INFINITEPAY);
   const loggedIn = Boolean(session.user);
 
   const subtotal = order.items.reduce((a, it) => a + it.price * it.quantity, 0);
 
   return (
     <div className="min-h-screen bg-stone-50">
+      {isPaid ? <ClearCartOnPaymentSuccess /> : null}
       <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
 
         {/* ── Hero ── */}

@@ -3,6 +3,18 @@ import { quoteShippingForCartLines } from "@/lib/shipping/quote-cart";
 import { normalizePostalCode } from "@/lib/shipping/superfrete";
 import { ShippingQuoteError } from "@/lib/shipping/types";
 
+function userFacingShippingError(error: ShippingQuoteError): string {
+  const msg = error.message.toLowerCase();
+  if (
+    msg.includes("correios") ||
+    msg.includes("servidor remoto") ||
+    msg.includes("no_result")
+  ) {
+    return "Não foi possível calcular o frete agora. Tente novamente em alguns minutos.";
+  }
+  return error.message;
+}
+
 type ShippingBody = {
   destinationCep?: string;
   productId?: string;
@@ -58,8 +70,12 @@ export async function POST(request: NextRequest) {
   } catch (e) {
     if (e instanceof ShippingQuoteError) {
       return NextResponse.json(
-        { error: e.message, code: e.code, details: e.details },
-        { status: e.status }
+        {
+          error: userFacingShippingError(e),
+          code: e.code,
+          details: process.env.NODE_ENV === "development" ? e.details : undefined,
+        },
+        { status: e.status >= 400 && e.status < 600 ? e.status : 502 }
       );
     }
     const msg = e instanceof Error ? e.message : "";

@@ -6,6 +6,7 @@ import Link from "next/link";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -14,6 +15,11 @@ import {
 import { placeOrderAction, updateUserCheckoutContactAction } from "@/app/checkout/actions";
 import { useCart } from "@/components/cart/CartProvider";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
+import {
+  clearCheckoutDraft,
+  readCheckoutDraft,
+  writeCheckoutDraft,
+} from "@/lib/checkout/draft-storage";
 import { GUEST_CHECKOUT_EMAIL_KEY } from "@/lib/checkout/guest-email-storage";
 import { describeCartPieceSelection } from "@/lib/cart/format-piece-selections";
 import { formatPrice } from "@/lib/format";
@@ -564,7 +570,7 @@ function ContactStep({
       {/* Desktop-only button */}
       <button type="button" onClick={handleNext} disabled={saving}
         className="hidden lg:flex w-full items-center justify-center gap-1.5 rounded-xl bg-stone-900 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800 disabled:opacity-60">
-        {saving ? "Salvando…" : "Continuar para entrega →"}
+        {saving ? "Salvando…" : "Continuar para entrega"}
       </button>
     </div>
   );
@@ -830,7 +836,7 @@ function DeliveryStep({
         </button>
         <button type="button" onClick={handleNext}
           className="flex flex-1 items-center justify-center rounded-xl bg-stone-900 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800">
-          Confirmar endereço →
+          Confirmar endereço
         </button>
       </div>
     </div>
@@ -1138,7 +1144,15 @@ function ConfirmStep({
 
 // ─── PIX Payment Screen ───────────────────────────────────────────────────────
 
-function PixPaymentScreen({ data, onBack }: { data: PixData; onBack: () => void }) {
+function PixPaymentScreen({
+  data,
+  onBack,
+  onPaid,
+}: {
+  data: PixData;
+  onBack: () => void;
+  onPaid: () => void;
+}) {
   const [copied, setCopied] = useState(false);
   const [pollingStatus, setPollingStatus] = useState<"waiting" | "paid" | "expired">("waiting");
   const [secondsLeft, setSecondsLeft] = useState(() => {
@@ -1160,6 +1174,16 @@ function PixPaymentScreen({ data, onBack }: { data: PixData; onBack: () => void 
   }, []);
 
   useEffect(() => {
+    const state = { checkoutView: "pix" as const };
+    window.history.pushState(state, "", window.location.href);
+    function onPopState() {
+      onBack();
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [onBack]);
+
+  useEffect(() => {
     if (pollingStatus !== "waiting") return;
     const interval = setInterval(async () => {
       try {
@@ -1168,12 +1192,13 @@ function PixPaymentScreen({ data, onBack }: { data: PixData; onBack: () => void 
         const json = (await res.json()) as { status: string };
         if (json.status === "paid") {
           setPollingStatus("paid");
+          onPaid();
           window.location.assign(`/pedido/${data.orderId}`);
         }
       } catch {}
     }, 3000);
     return () => clearInterval(interval);
-  }, [data.orderId, pollingStatus]);
+  }, [data.orderId, pollingStatus, onPaid]);
 
   function formatTime(s: number) {
     const h = Math.floor(s / 3600);
@@ -1294,10 +1319,18 @@ function PixPaymentScreen({ data, onBack }: { data: PixData; onBack: () => void 
         </ol>
 
         {/* Ações */}
-        {pollingStatus === "expired" && (
-          <button type="button" onClick={onBack}
+        {pollingStatus === "expired" ? (
+          <button type="button" onClick={() => window.history.back()}
             className="w-full rounded-xl bg-stone-900 py-3.5 text-sm font-semibold text-white transition-colors hover:bg-stone-700">
             Tentar novamente
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => window.history.back()}
+            className="w-full rounded-xl border border-stone-200 bg-white py-3.5 text-sm font-semibold text-stone-700 transition-colors hover:bg-stone-50"
+          >
+            Voltar ao checkout
           </button>
         )}
 
@@ -1316,8 +1349,21 @@ function PixPaymentScreen({ data, onBack }: { data: PixData; onBack: () => void 
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
+function applyCheckoutDraft(draft: NonNullable<ReturnType<typeof readCheckoutDraft>>) {
+  return {
+    contact: draft.contact,
+    shipping: draft.shipping,
+    step: draft.step,
+    paymentMethod: draft.paymentMethod as PaymentMethod,
+    contactDone: draft.contactDone,
+    deliveryDone: draft.deliveryDone,
+    pixData: draft.pixData ?? null,
+  };
+}
+
 export function CheckoutClient({ initialEmail, initialName, initialPhone, initialCpf, loggedIn }: Props) {
-  const { items, hydrated, clear, subtotalPix } = useCart();
+  const { items, hydrated, clear, replaceCart, subtotalPix } = useCart();
+  const draftLoadedRef = useRef(false);
   const [step, setStep] = useState(1);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(null);
   const [animKey, setAnimKey] = useState(0);
@@ -1325,6 +1371,7 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, initia
   const [contactDone, setContactDone] = useState(false);
   const [deliveryDone, setDeliveryDone] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [priceUpdatedNotice, setPriceUpdatedNotice] = useState<string | null>(null);
   const [redirecting, setRedirecting] = useState(false);
   const [pixData, setPixData] = useState<PixData | null>(null);
   const [pending, startTransition] = useTransition();
@@ -1351,6 +1398,29 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, initia
     optionId: "", optionLabel: "", optionPrice: 0, deliveryLabel: "",
   });
 
+  function restorePendingCheckoutDraft() {
+    const draft = readCheckoutDraft();
+    if (!draft?.pendingPayment) return;
+    const applied = applyCheckoutDraft(draft);
+    setContact(applied.contact);
+    setShipping(applied.shipping);
+    setStep(applied.step);
+    setPaymentMethod(applied.paymentMethod);
+    setContactDone(applied.contactDone);
+    setDeliveryDone(applied.deliveryDone);
+    setPixData(applied.pixData);
+    if (draft.cartItems?.length) {
+      replaceCart(draft.cartItems);
+    }
+  }
+
+  useLayoutEffect(() => {
+    if (draftLoadedRef.current) return;
+    draftLoadedRef.current = true;
+    restorePendingCheckoutDraft();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (loggedIn || typeof window === "undefined") return;
     try {
@@ -1363,6 +1433,63 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, initia
     try { const c = sessionStorage.getItem("shipping_cep") ?? ""; if (c.length === 8) setShipping((p) => ({ ...p, cep: c })); } catch {}
   }, []);
 
+  useEffect(() => {
+    function onPageShow(e: PageTransitionEvent) {
+      if (!e.persisted) return;
+      setRedirecting(false);
+      restorePendingCheckoutDraft();
+    }
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    writeCheckoutDraft({
+      contact,
+      shipping,
+      step,
+      paymentMethod,
+      contactDone,
+      deliveryDone,
+      pendingPayment: redirecting || pixData != null,
+      pixData,
+      cartItems: redirecting || pixData != null ? items : undefined,
+    });
+  }, [
+    hydrated,
+    contact,
+    shipping,
+    step,
+    paymentMethod,
+    contactDone,
+    deliveryDone,
+    redirecting,
+    pixData,
+    items,
+  ]);
+
+  const handlePaymentSuccess = useCallback(() => {
+    clear();
+    clearCheckoutDraft();
+  }, [clear]);
+
+  const handlePixBack = useCallback(() => {
+    setPixData(null);
+    setRedirecting(false);
+    writeCheckoutDraft({
+      contact,
+      shipping,
+      step,
+      paymentMethod,
+      contactDone,
+      deliveryDone,
+      pendingPayment: false,
+      pixData: null,
+    });
+  }, [contact, shipping, step, paymentMethod, contactDone, deliveryDone]);
+
   const lines = useMemo(() => items.map((i) => ({ lineId: i.lineId, productId: i.productId, quantity: i.quantity, name: i.name, price: i.price, pixPrice: i.pixPrice, installmentCount: i.installmentCount, image: i.image, pieceSelections: i.pieceSelections })), [items]);
   const shippingLines = useMemo(() => lines.map((l) => ({ productId: l.productId, quantity: l.quantity })), [lines]);
   const subtotal = useMemo(() => lines.reduce((a, l) => a + l.price * l.quantity, 0), [lines]);
@@ -1371,9 +1498,17 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, initia
     setDir(direction); setStep(to); setAnimKey((k) => k + 1);
   }
 
+  const handlePaymentMethodChange = useCallback((method: PaymentMethod) => {
+    setPaymentMethod(method);
+    if (method !== "pix") {
+      setPixData(null);
+    }
+  }, []);
+
   const handlePay = useCallback(() => {
     if (!paymentMethod) { setSubmitError("Selecione a forma de pagamento."); return; }
     setSubmitError(null);
+    setPriceUpdatedNotice(null);
     startTransition(async () => {
       const res = await placeOrderAction({
         email: loggedIn ? undefined : contact.email.trim(),
@@ -1385,14 +1520,41 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, initia
         paymentMethod,
       });
       if (!res.ok) { setSubmitError(res.error); return; }
-      clear();
+      if (res.priceUpdated) {
+        setPriceUpdatedNotice("O valor da sua compra foi atualizado.");
+      }
+      const nextPix =
+        res.type === "pix"
+          ? {
+              orderId: res.orderId,
+              pixCode: res.pixCode,
+              pixQrBase64: res.pixQrBase64,
+              expiresAt: res.expiresAt,
+              amount: res.amount,
+            }
+          : null;
+      writeCheckoutDraft({
+        contact,
+        shipping,
+        step,
+        paymentMethod,
+        contactDone,
+        deliveryDone,
+        pendingPayment: true,
+        pixData: nextPix,
+        cartItems: items,
+      });
       if (res.type === "pix") {
-        setPixData({ orderId: res.orderId, pixCode: res.pixCode, pixQrBase64: res.pixQrBase64, expiresAt: res.expiresAt, amount: res.amount });
+        setPixData(nextPix);
+      } else if (res.type === "card" && res.checkoutUrl) {
+        setPixData(null);
+        setRedirecting(true);
+        window.location.href = res.checkoutUrl;
       } else {
-        setRedirecting(true); window.location.assign(res.checkoutUrl);
+        setSubmitError("Não foi possível abrir o pagamento. Tente novamente.");
       }
     });
-  }, [paymentMethod, loggedIn, contact, shipping, lines, clear]);
+  }, [paymentMethod, loggedIn, contact, shipping, lines, step, contactDone, deliveryDone, items]);
 
   // Mobile back navigation
   function mobileBack() {
@@ -1400,9 +1562,15 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, initia
     else if (step === 3) { setDeliveryDone(false); navigate(2, "bwd"); }
   }
 
-  // PIX payment screen
-  if (pixData) {
-    return <PixPaymentScreen data={pixData} onBack={() => setPixData(null)} />;
+  // PIX payment screen (não sobrescreve redirecionamento ao InfinitePay)
+  if (pixData && !redirecting) {
+    return (
+      <PixPaymentScreen
+        data={pixData}
+        onBack={handlePixBack}
+        onPaid={handlePaymentSuccess}
+      />
+    );
   }
 
   // Redirecting overlay
@@ -1441,7 +1609,7 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, initia
     );
   }
 
-  const mobileActionLabel = step === 1 ? "Continuar para entrega →" : step === 2 ? "Confirmar endereço →" : "Efetuar pagamento →";
+  const mobileActionLabel = step === 1 ? "Continuar para entrega" : step === 2 ? "Confirmar endereço" : "Efetuar pagamento";
   const mobileCanPay = step !== 3 || paymentMethod !== null;
 
   return (
@@ -1476,6 +1644,11 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, initia
           </div>
 
           {/* Animated step */}
+          {priceUpdatedNotice && step === 3 && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              {priceUpdatedNotice}
+            </div>
+          )}
           <div key={animKey} className={dir === "fwd" ? "ck-fwd" : "ck-bwd"}>
             {step === 1 && (
               <ContactStep loggedIn={loggedIn} initialEmail={initialEmail}
@@ -1492,7 +1665,7 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, initia
             {step === 3 && (
               <ConfirmStep loggedIn={loggedIn} contact={contact} shipping={shipping}
                 lines={lines} subtotal={subtotal} subtotalPix={subtotalPix}
-                paymentMethod={paymentMethod} onPaymentMethodChange={setPaymentMethod}
+                paymentMethod={paymentMethod} onPaymentMethodChange={handlePaymentMethodChange}
                 onPay={handlePay} onBack={() => { setDeliveryDone(false); navigate(2, "bwd"); }}
                 error={submitError} pending={pending} />
             )}
@@ -1551,6 +1724,11 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, initia
               </div>
 
               {/* Animated step */}
+              {priceUpdatedNotice && step === 3 && (
+                <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  {priceUpdatedNotice}
+                </div>
+              )}
               <div key={animKey} className={dir === "fwd" ? "ck-fwd" : "ck-bwd"}>
                 {step === 1 && (
                   <ContactStep loggedIn={loggedIn} initialEmail={initialEmail}
@@ -1567,7 +1745,7 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, initia
                 {step === 3 && (
                   <ConfirmStep loggedIn={loggedIn} contact={contact} shipping={shipping}
                     lines={lines} subtotal={subtotal} subtotalPix={subtotalPix}
-                    paymentMethod={paymentMethod} onPaymentMethodChange={setPaymentMethod}
+                    paymentMethod={paymentMethod} onPaymentMethodChange={handlePaymentMethodChange}
                     onPay={handlePay} onBack={() => { setDeliveryDone(false); navigate(2, "bwd"); }}
                     error={submitError} pending={pending} />
                 )}

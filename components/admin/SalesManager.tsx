@@ -46,6 +46,7 @@ type AdminOrder = {
   trackingCode: string | null;
   superfreteShipmentId: string | null;
   labelUrl: string | null;
+  labelAutoGenerateError: string | null;
   cancellationReason: string | null;
   cancelledAt: string | null;
   createdAt: string;

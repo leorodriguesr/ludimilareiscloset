@@ -45,6 +45,8 @@ export type CartContextValue = {
   setQuantity: (lineId: string, quantity: number) => void;
   removeItem: (lineId: string) => void;
   clear: () => void;
+  /** Substitui o carrinho inteiro (ex.: restaurar rascunho do checkout). */
+  replaceCart: (items: CartState["items"]) => void;
 };
 
 const CartContext = createContext<CartContextValue | null>(null);
@@ -125,6 +127,17 @@ export function CartProvider({ children }: { children: ReactNode }) {
     });
   }, [persistNow]);
 
+  const replaceCart = useCallback(
+    (items: CartState["items"]) => {
+      setState(() => {
+        const next = { items };
+        persistNow(next);
+        return next;
+      });
+    },
+    [persistNow]
+  );
+
   const openCart = useCallback(() => setDrawerOpen(true), []);
   const closeCart = useCallback(() => setDrawerOpen(false), []);
   const toggleCart = useCallback(() => setDrawerOpen((o) => !o), []);
@@ -144,6 +157,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       setQuantity,
       removeItem,
       clear,
+      replaceCart,
     }),
     [
       state,
@@ -156,6 +170,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       setQuantity,
       removeItem,
       clear,
+      replaceCart,
     ]
   );
 

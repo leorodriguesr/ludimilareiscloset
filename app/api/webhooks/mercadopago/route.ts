@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getMpOrderStatus } from "@/lib/payments/create-pix-payment";
-import { markOrderPaidFromMercadoPago } from "@/lib/orders/mark-paid";
+import { confirmPaymentFromMercadoPago } from "@/lib/orders/confirm-payment";
 import crypto from "crypto";
 
 /**
@@ -79,13 +79,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     if (mp.paid) {
-      const { updated } = await markOrderPaidFromMercadoPago({
-        mpPaymentId: dataId,
-        externalReference: mp.externalReference,
+      const result = await confirmPaymentFromMercadoPago({
+        mpOrderId: dataId,
+        source: "webhook",
+        payload: { type, action, mpStatus: mp.status },
       });
-      if (process.env.NODE_ENV === "development" && !updated) {
+      if (process.env.NODE_ENV === "development" && !result.updated) {
         console.info(
-          "[webhook mercadopago] pedido não atualizado (já pago, inválido ou inexistente)"
+          "[webhook mercadopago] pagamento não confirmado:",
+          result.outcome
         );
       }
     }

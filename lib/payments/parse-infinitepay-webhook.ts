@@ -58,6 +58,7 @@ export function parseInfinitePayWebhookPayload(
         else if (kl === "nsu" && depth <= 4) transactionNsu ||= s;
         else if (kl === "invoice_slug") invoiceSlug ||= s;
         else if (kl === "slug" && depth <= 2) invoiceSlug ||= s;
+        else if (kl === "lenc") invoiceSlug ||= s;
         else if (kl === "capture_method") captureMethod ||= s;
       }
       visit(v, depth + 1);

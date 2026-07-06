@@ -103,12 +103,87 @@ model Order {
   /** URL da etiqueta de envio (gerada pela SuperFrete). */
   labelUrl                  String?
   labelGeneratedAt          DateTime?
+  /** Mensagem quando a geração automática de etiqueta falhou após o pagamento. */
+  labelAutoGenerateError    String?
   /** Motivo informado pelo admin ao cancelar a venda. */
   cancellationReason        String?
   cancelledAt               DateTime?
+  /** Expiração fixa da intenção de compra (createdAt + 24h). Não renova. */
+  expiresAt                 DateTime?
+  expiredAt                 DateTime?
+  /** Último recálculo de estoque, frete, preços e descontos antes de pagamento. */
+  lastRecalculatedAt        DateTime?
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
-  items     OrderItem[]
+  items              OrderItem[]
+  paymentAttempts    PaymentAttempt[]
+  stockReservations  StockReservation[]
+
+  @@index([userId, status])
+  @@index([email, status])
+  @@index([status, expiresAt])
+}
+
+/** Tentativa de pagamento de uma Order (histórico completo; no máximo uma `active` por Order). */
+model PaymentAttempt {
+  id                    String    @id @default(cuid())
+  orderId               String
+  order                 Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  /** Sequencial por Order: 1, 2, 3… */
+  attemptNumber         Int
+  paymentMethod         String
+  gateway               String
+  /** created | active | failed | superseded | expired | paid */
+  status                String
+  amount                Float
+  /** mpOrderId (Mercado Pago) ou invoice slug (InfinitePay). */
+  gatewayReference      String?
+  gatewayTransactionId  String?
+  failureReason         String?
+  expiresAt             DateTime?
+  createdAt             DateTime  @default(now())
+  paidAt                DateTime?
+
+  @@unique([orderId, attemptNumber])
+  @@unique([gateway, gatewayReference])
+  @@index([orderId, status])
+  @@index([gatewayReference])
+}
+
+/** Auditoria de webhooks/retornos de pagamento (inclui tentativas superseded rejeitadas). */
+model PaymentWebhookEvent {
+  id               String   @id @default(cuid())
+  gateway          String
+  source           String
+  outcome          String
+  orderId          String?
+  paymentAttemptId String?
+  gatewayReference String?
+  reason           String?
+  payloadJson      String?
+  createdAt        DateTime @default(now())
+
+  @@index([orderId])
+  @@index([outcome])
+  @@index([createdAt])
+}
+
+/** Reserva de estoque enquanto a Order estiver pendente (ou até pagamento/expiração). */
+model StockReservation {
+  id             String        @id @default(cuid())
+  orderId        String
+  order          Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
+  /** Null quando o produto não usa matriz cor×tamanho. */
+  pieceVariantId String?
+  pieceVariant   PieceVariant? @relation(fields: [pieceVariantId], references: [id], onDelete: Restrict)
+  quantity       Int
+  createdAt      DateTime      @default(now())
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([pieceVariantId])
 }
 
 model OrderItem {
@@ -185,8 +260,9 @@ model Product {
   pieces        ProductPiece[]
   categories    ProductCategory[]
   sections      ProductSection[]
-  orderItems    OrderItem[]
-  favorites     Favorite[]
+  orderItems        OrderItem[]
+  favorites         Favorite[]
+  stockReservations StockReservation[]
 }
 
 model ProductImage {
@@ -234,7 +310,8 @@ model PieceVariant {
   sizeId    String
   piece     ProductPiece @relation(fields: [pieceId], references: [id], onDelete: Cascade)
   color     PieceColor   @relation(fields: [colorId], references: [id], onDelete: Cascade)
-  size      PieceSize    @relation(fields: [sizeId], references: [id], onDelete: Cascade)
+  size              PieceSize          @relation(fields: [sizeId], references: [id], onDelete: Cascade)
+  stockReservations StockReservation[]
 
   @@unique([pieceId, colorId, sizeId])
 }
