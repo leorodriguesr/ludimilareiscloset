@@ -718,22 +718,24 @@ function ShipmentRowActionsMenu({
     }
 
     if (order.superfreteShipmentId) {
-      items.push({
-        id: "print",
-        label: busy === "print" ? "Reimprimindo…" : "Reimprimir etiqueta",
-        separatorBefore: items.length > 0,
-        disabled: busy === "print",
-        icon: (
-          <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0 1 10.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18M6.34 18H5.25A2.25 2.25 0 0 1 3 15.75V9.456c0-1.081.768-2.015 1.837-2.163a48.042 48.042 0 0 1 1.087-.128m12.725 0c.977.148 1.837 1.082 1.837 2.163V15.75A2.25 2.25 0 0 1 18.66 18h-1.08m-12.725 0h12.725" />
-          </svg>
-        ),
-        onClick: () => void runAction("print", `/api/admin/orders/${order.id}/shipment/print`),
-      });
+      // Reimprimir etiqueta: oculto no menu — "Baixar etiqueta" já renova URL expirada via /label/pdf.
+      // items.push({
+      //   id: "print",
+      //   label: busy === "print" ? "Reimprimindo…" : "Reimprimir etiqueta",
+      //   separatorBefore: items.length > 0,
+      //   disabled: busy === "print",
+      //   icon: (
+      //     <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+      //       <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0 1 10.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18M6.34 18H5.25A2.25 2.25 0 0 1 3 15.75V9.456c0-1.081.768-2.015 1.837-2.163a48.042 48.042 0 0 1 1.087-.128m12.725 0c.977.148 1.837 1.082 1.837 2.163V15.75A2.25 2.25 0 0 1 18.66 18h-1.08m-12.725 0h12.725" />
+      //     </svg>
+      //   ),
+      //   onClick: () => void runAction("print", `/api/admin/orders/${order.id}/shipment/print`),
+      // });
 
       items.push({
         id: "sync",
         label: busy === "sync" ? "Sincronizando…" : "Sincronizar status",
+        separatorBefore: items.length > 0,
         disabled: busy === "sync",
         icon: (
           <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
@@ -1171,14 +1173,8 @@ export function ShippingManager() {
               <p className="text-[10px] font-semibold uppercase tracking-widest text-stone-400">
                 Saldo SuperFrete
               </p>
-              {wallet?.environmentLabel ? (
-                <span
-                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                    wallet.environment === "sandbox"
-                      ? "bg-amber-100 text-amber-800 ring-1 ring-amber-200"
-                      : "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-                  }`}
-                >
+              {wallet?.environment === "sandbox" && wallet.environmentLabel ? (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 ring-1 ring-amber-200">
                   {wallet.environmentLabel}
                 </span>
               ) : null}
@@ -1198,11 +1194,6 @@ export function ShippingManager() {
                     <> · limite disponível: {wallet.shipmentsAvailable}</>
                   ) : null}
                 </p>
-                {lowBalance ? (
-                  <p className="mt-2 text-xs text-amber-700">
-                    Saldo baixo — recarregue antes de gerar novas etiquetas.
-                  </p>
-                ) : null}
               </>
             ) : null}
           </div>
@@ -1227,10 +1218,6 @@ export function ShippingManager() {
             </button>
           </div>
         </div>
-        <p className="mt-3 border-t border-stone-100 pt-3 text-xs text-stone-400">
-          A recarga é feita no painel SuperFrete (Pix ou cartão). A API não permite adicionar saldo
-          diretamente — use o botão acima para abrir a carteira.
-        </p>
       </div>
 
       <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5">
