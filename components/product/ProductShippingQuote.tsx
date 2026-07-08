@@ -5,6 +5,7 @@ import type { NormalizedShippingOption } from "@/lib/shipping/types";
 import { formatPrice } from "@/lib/format";
 import { useStoreSettings } from "@/lib/hooks/use-store-settings";
 import { checkFreeShipping } from "@/lib/shipping/free-shipping";
+import { formatEstimatedDeliveryLabel } from "@/lib/shipping/delivery-days-label";
 
 type ProductShippingQuoteProps = {
   productId: string;
@@ -21,13 +22,6 @@ function onlyDigits(s: string): string {
 function formatCepMask(digits: string): string {
   if (digits.length <= 5) return digits;
   return `${digits.slice(0, 5)}-${digits.slice(5)}`;
-}
-
-function deliveryLabel(o: NormalizedShippingOption): string {
-  const { deliveryDaysMin: a, deliveryDaysMax: b } = o;
-  if (a <= 0 && b <= 0) return "Prazo sob consulta";
-  if (a === b) return `${a} dia(s) útil(is)`;
-  return `${a} a ${b} dias úteis`;
 }
 
 function rankHighlights(options: NormalizedShippingOption[]) {
@@ -265,7 +259,7 @@ export function ProductShippingQuote({
                     <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                     </svg>
-                    <span>{deliveryLabel(o)}</span>
+                    <span>{formatEstimatedDeliveryLabel(o.deliveryDaysMin, o.deliveryDaysMax)}</span>
                   </div>
                 </div>
 

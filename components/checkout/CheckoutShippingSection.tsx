@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { NormalizedShippingOption } from "@/lib/shipping/types";
 import { formatPrice } from "@/lib/format";
+import { formatEstimatedDeliveryInline } from "@/lib/shipping/delivery-days-label";
 
 export type CheckoutShippingSelection = {
   destinationCep: string;
@@ -22,13 +23,6 @@ function onlyDigits(s: string): string {
 function formatCepMask(digits: string): string {
   if (digits.length <= 5) return digits;
   return `${digits.slice(0, 5)}-${digits.slice(5)}`;
-}
-
-function deliveryLabel(o: NormalizedShippingOption): string {
-  const { deliveryDaysMin: a, deliveryDaysMax: b } = o;
-  if (a <= 0 && b <= 0) return "Prazo sob consulta";
-  if (a === b) return `${a} dia(s) útil(is)`;
-  return `${a} a ${b} dias úteis`;
 }
 
 function rankHighlights(options: NormalizedShippingOption[]) {
@@ -275,7 +269,7 @@ export function CheckoutShippingSection({
                     {/* Linha 2: serviço + prazo · preço */}
                     <div className="mt-0.5 flex items-center justify-between gap-2">
                       <span className="text-xs text-stone-500">
-                        {o.serviceName} · {deliveryLabel(o)}
+                        {o.serviceName} · {formatEstimatedDeliveryInline(o.deliveryDaysMin, o.deliveryDaysMax)}
                       </span>
                       <span className={`shrink-0 text-xs font-semibold tabular-nums ${o.price === 0 ? "text-emerald-600" : "text-stone-900"}`}>
                         {o.price === 0 ? "Grátis" : formatPrice(o.price)}

@@ -28,6 +28,7 @@ import type { NormalizedShippingOption } from "@/lib/shipping/types";
 import type { CartPieceSelection } from "@/lib/cart/types";
 import { useStoreSettings } from "@/lib/hooks/use-store-settings";
 import { checkFreeShipping } from "@/lib/shipping/free-shipping";
+import { formatEstimatedDeliveryLabel } from "@/lib/shipping/delivery-days-label";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -72,11 +73,8 @@ const cpfFmt = (v: string) => {
   if (d.length <= 9) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6)}`;
   return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
 };
-const daysLabel = (o: NormalizedShippingOption) => {
-  const { deliveryDaysMin: a, deliveryDaysMax: b } = o;
-  if (a <= 0 && b <= 0) return "Prazo sob consulta";
-  return a === b ? `${a} dia(s) útil(is)` : `${a}–${b} dias úteis`;
-};
+const daysLabel = (o: NormalizedShippingOption) =>
+  formatEstimatedDeliveryLabel(o.deliveryDaysMin, o.deliveryDaysMax);
 function rankHighlights(opts: NormalizedShippingOption[]) {
   if (!opts.length) return { cheapestIds: new Set<string>(), fastestIds: new Set<string>() };
   const minP = Math.min(...opts.map((o) => o.price));
