@@ -14,7 +14,46 @@ enum StockType {
 
 enum UserRole {
   ADMIN
+  GESTOR
   CLIENT
+}
+
+enum OrderSource {
+  CHECKOUT
+  ADMIN_SALE
+}
+
+enum FulfillmentType {
+  CARRIER
+  ARRANGED
+}
+
+enum CustomerDataStatus {
+  PENDING
+  COMPLETE
+}
+
+enum PaymentChannel {
+  GATEWAY
+  MANUAL
+}
+
+enum DiscountMode {
+  FIXED
+  PERCENT
+}
+
+/** Tipos de evento para histórico futuro (OrderEvent). */
+enum OrderEventType {
+  CREATED
+  PAYMENT_CONFIRMED
+  CUSTOMER_DATA_COMPLETED
+  LABEL_GENERATED
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  UPDATED
+  NOTE_ADDED
 }
 
 model User {
@@ -32,6 +71,7 @@ model User {
   role         UserRole   @default(CLIENT)
   createdAt    DateTime   @default(now())
   orders       Order[]
+  ordersCreated Order[]   @relation("OrdersCreatedByStaff")
   favorites    Favorite[]
 }
 
@@ -56,8 +96,38 @@ model Order {
   user      User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
   email     String
   status    String      @default("pending_payment")
+  /** Origem do pedido: checkout da loja ou venda avulsa do admin. */
+  orderSource         OrderSource     @default(CHECKOUT)
+  /** Staff que criou a venda avulsa (null no checkout). */
+  createdByUserId     String?
+  createdBy           User?           @relation("OrdersCreatedByStaff", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  /** Modalidade de entrega. */
+  fulfillmentType     FulfillmentType @default(CARRIER)
+  /** Status do preenchimento de dados do cliente (venda avulsa). */
+  customerDataStatus  CustomerDataStatus?
+  /** Token exclusivo para o cliente preencher dados (venda avulsa). */
+  customerDataToken   String?         @unique
+  customerDataTokenExpiresAt DateTime?
+  /** Canal de pagamento: gateway online ou registro manual. */
+  paymentChannel      PaymentChannel?
+  manualPaidByUserId  String?
+  /** Observações da entrega (ex.: entregar após 18h). */
+  deliveryNotes       String?
+  /** Observações internas visíveis só para admin/gestor. */
+  internalNotes       String?
+  /** Entrega a combinar: quando o staff marcou como enviado. */
+  arrangedShippedAt       DateTime?
+  arrangedShippedByUserId String?
+  /** Soma dos preços de catálogo efetivos × quantidade (antes de descontos admin). */
+  subtotalOriginal    Float?
+  /** Soma dos descontos por item aplicados pelo admin. */
+  itemsDiscountTotal  Float           @default(0)
+  /** Desconto geral sobre a venda. */
+  orderDiscountMode   DiscountMode?
+  orderDiscountValue  Float?
+  orderDiscountAmount Float           @default(0)
   total     Float
-  /** Valor do frete (R$), validado no servidor na criação. */
+  /** Valor do frete/entrega (R$), validado no servidor na criação. */
   shippingAmount      Float   @default(0)
   /** Cotação SuperFrete escolhida no checkout (R$). */
   shippingQuotedPrice       Float?
@@ -85,7 +155,7 @@ model Order {
   paymentCaptureMethod      String?
   /** ID do pagamento no Mercado Pago (pagamentos PIX). */
   mercadoPagoPaymentId      String?
-  /** Status de envio: to_pack | packed | shipped | delivered | cancelled */
+  /** Status de envio: to_pack (por embalar) | packed (por enviar) | shipped | delivered | cancelled */
   shippingStatus            String    @default("to_pack")
   /** Código do serviço SuperFrete escolhido (1=PAC, 2=SEDEX, 3=Jadlog, 17=Mini, 31=Loggi). */
   shippingServiceId         Int?
@@ -118,10 +188,26 @@ model Order {
   items              OrderItem[]
   paymentAttempts    PaymentAttempt[]
   stockReservations  StockReservation[]
+  events             OrderEvent[]
 
   @@index([userId, status])
   @@index([email, status])
   @@index([status, expiresAt])
+  @@index([orderSource])
+  @@index([fulfillmentType])
+}
+
+/** Histórico de eventos da venda (preparado para uso futuro). */
+model OrderEvent {
+  id          String         @id @default(cuid())
+  orderId     String
+  order       Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  type        OrderEventType
+  actorUserId String?
+  payloadJson String?
+  createdAt   DateTime       @default(now())
+
+  @@index([orderId, createdAt])
 }
 
 /** Tentativa de pagamento de uma Order (histórico completo; no máximo uma `active` por Order). */
@@ -193,6 +279,22 @@ model OrderItem {
   productId String
   product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
   quantity  Int
+  /** Preço de tabela do catálogo no momento da venda (product.price). */
+  catalogListPrice      Float?
+  /** Preço promocional do catálogo (ex.: pixPrice), se houver. */
+  catalogPromoPrice     Float?
+  /** Preço efetivo do catálogo antes de desconto admin (pix ou card). */
+  catalogUnitPrice      Float?
+  /** Desconto admin por item. */
+  itemDiscountMode      DiscountMode?
+  itemDiscountValue     Float?
+  /** Valor total do desconto admin nesta linha (unitário × quantidade). */
+  itemDiscountAmount    Float           @default(0)
+  /** Subtotal original da linha (catalogUnitPrice × quantity). */
+  lineSubtotalOriginal  Float?
+  /** Subtotal final da linha (price × quantity). */
+  lineSubtotalFinal     Float?
+  /** Preço unitário final após descontos admin. */
   price     Float
   /** JSON: [{ pieceName, size, color }] — opções escolhidas por peça. */
   pieceSelectionsJson String?

@@ -20,6 +20,8 @@ import {
 } from "@/lib/orders/order-shipping-fields";
 import { clearLabelAutoGenerateError } from "@/lib/shipping/label-auto-generate-error";
 import { ShippingQuoteError } from "@/lib/shipping/types";
+import { FulfillmentType } from "@/app/generated/prisma/client";
+import { canGenerateLabelForFulfillment } from "@/lib/fulfillment/fulfillment-types";
 
 const DEFAULT_PKG = { weightGrams: 300, lengthCm: 16, widthCm: 11, heightCm: 2 };
 
@@ -60,6 +62,7 @@ async function loadOrderForLabel(orderId: string) {
       labelUrl: true,
       superfreteStatus: true,
       shippingStatus: true,
+      fulfillmentType: true,
       items: {
         include: {
           product: {
@@ -148,6 +151,14 @@ function validateOrderForLabel(order: OrderForLabel): {
   serviceId: number;
   destCep: string;
 } {
+  if (!canGenerateLabelForFulfillment(order.fulfillmentType)) {
+    throw new ShippingQuoteError(
+      "VALIDATION",
+      "Este pedido não utiliza transportadora. Etiqueta não aplicável.",
+      400
+    );
+  }
+
   if (!order.paidAt) {
     throw new ShippingQuoteError(
       "VALIDATION",
@@ -290,7 +301,6 @@ export async function generateOrderLabel(orderId: string) {
         superfreteShipmentId: result.shipmentId,
         labelUrl: null,
         superfreteStatus: result.superfreteStatus,
-        shippingStatus: "packed",
         labelGeneratedAt: new Date(),
         shippingServiceId: input.serviceId,
       },

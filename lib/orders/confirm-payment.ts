@@ -10,10 +10,26 @@ import {
 } from "@/lib/orders/payment-webhook-audit";
 import { commitStockReservations } from "@/lib/orders/stock/reservation";
 import { prisma } from "@/lib/prisma";
-import { tryAutoGenerateLabelForOrder } from "@/lib/shipping/auto-label";
+import { onOrderPaymentConfirmed } from "@/lib/fulfillment/fulfillment-service";
+import { OrderSource, FulfillmentType, CustomerDataStatus } from "@/app/generated/prisma/client";
 import { isInfinitePayLencToken } from "@/lib/payments/infinitepay";
 
 const AMOUNT_TOLERANCE_BRL = 0.01;
+
+const ORDER_SELECT_FOR_CONFIRMATION = {
+  id: true,
+  status: true,
+  total: true,
+  expiresAt: true,
+  orderSource: true,
+  fulfillmentType: true,
+  customerDataStatus: true,
+  recipientName: true,
+  addressStreet: true,
+  addressCity: true,
+  addressState: true,
+  destinationCep: true,
+} as const;
 
 export type ConfirmPaymentSource = "webhook" | "polling" | "return_url";
 
@@ -36,6 +52,14 @@ type AttemptWithOrder = {
     status: string;
     total: number;
     expiresAt: Date | null;
+    orderSource: OrderSource;
+    fulfillmentType: FulfillmentType;
+    customerDataStatus: CustomerDataStatus | null;
+    recipientName: string | null;
+    addressStreet: string | null;
+    addressCity: string | null;
+    addressState: string | null;
+    destinationCep: string | null;
   };
 };
 
@@ -50,12 +74,7 @@ async function findAttemptByGatewayReference(
     },
     include: {
       order: {
-        select: {
-          id: true,
-          status: true,
-          total: true,
-          expiresAt: true,
-        },
+        select: ORDER_SELECT_FOR_CONFIRMATION,
       },
     },
   });
@@ -184,7 +203,11 @@ async function validateAttemptForConfirmation(input: {
     });
   }
 
-  if (attempt.order.expiresAt && attempt.order.expiresAt <= now) {
+  if (
+    attempt.order.orderSource === OrderSource.CHECKOUT &&
+    attempt.order.expiresAt &&
+    attempt.order.expiresAt <= now
+  ) {
     return rejectConfirmation({
       gateway: input.gateway,
       source: input.source,
@@ -238,12 +261,7 @@ async function confirmAttemptInTransaction(input: {
         where: { id: input.attempt.id },
         include: {
           order: {
-            select: {
-              id: true,
-              status: true,
-              total: true,
-              expiresAt: true,
-            },
+            select: ORDER_SELECT_FOR_CONFIRMATION,
           },
         },
       });
@@ -291,6 +309,7 @@ async function confirmAttemptInTransaction(input: {
         data: {
           status: ORDER_STATUS.PAID,
           paidAt,
+          shippingStatus: "to_pack",
           ...(input.invoiceSlug
             ? { infinitePayInvoiceSlug: input.invoiceSlug }
             : {}),
@@ -324,7 +343,7 @@ async function confirmAttemptInTransaction(input: {
     payload: input.payload,
   });
 
-  void tryAutoGenerateLabelForOrder(input.attempt.orderId);
+  void onOrderPaymentConfirmed(input.attempt.order);
 
   return {
     updated: true,
@@ -413,12 +432,7 @@ export async function confirmPaymentFromInfinitePay(input: {
       },
       include: {
         order: {
-          select: {
-            id: true,
-            status: true,
-            total: true,
-            expiresAt: true,
-          },
+          select: ORDER_SELECT_FOR_CONFIRMATION,
         },
       },
     });

@@ -3,6 +3,10 @@ import { getIronSession } from "iron-session";
 import type { AppSessionData } from "@/lib/session";
 import { getSessionOptions } from "@/lib/session";
 
+function isStaffRole(role: string | undefined): boolean {
+  return role === "ADMIN" || role === "GESTOR";
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -48,7 +52,7 @@ export async function middleware(request: NextRequest) {
       url.search = "";
       return NextResponse.redirect(url);
     }
-    if (user.role !== "ADMIN") {
+    if (!isStaffRole(user.role)) {
       const url = request.nextUrl.clone();
       url.pathname = "/";
       url.searchParams.set("aviso", "admin");
@@ -58,7 +62,7 @@ export async function middleware(request: NextRequest) {
   }
 
   if (isAdminLogin) {
-    if (user?.role === "ADMIN") {
+    if (isStaffRole(user?.role)) {
       const url = request.nextUrl.clone();
       url.pathname = "/admin";
       url.search = "";

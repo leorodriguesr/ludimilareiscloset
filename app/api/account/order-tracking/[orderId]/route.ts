@@ -43,9 +43,9 @@ export async function GET(
   const isOwner =
     order.userId === session.user.userId ||
     (order.userId == null && order.email === userRecord?.email);
-  const isAdmin = userRecord?.role === "ADMIN";
+  const isStaff = userRecord?.role === "ADMIN" || userRecord?.role === "GESTOR";
 
-  if (!isOwner && !isAdmin) {
+  if (!isOwner && !isStaff) {
     return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
   }
 

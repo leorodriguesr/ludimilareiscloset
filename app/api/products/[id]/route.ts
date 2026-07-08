@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/app/generated/prisma/client";
 import { StockType } from "@/app/generated/prisma/client";
-import {
-  deletePieceVariantsForPiece,
-  insertPieceVariantRow,
-} from "@/lib/piece-variant-sql";
+import { syncProductPieces } from "@/lib/admin/sync-product-pieces";
 import { prisma } from "@/lib/prisma";
 import { productFullInclude } from "@/lib/product-include";
 import { requireAdminApi } from "@/lib/require-admin-api";
@@ -186,78 +183,7 @@ export async function PUT(
       }
 
       if (pieces !== undefined) {
-        const existingPieces = await tx.productPiece.findMany({
-          where: { productId: id },
-        });
-        for (const p of existingPieces) {
-          await deletePieceVariantsForPiece(tx, p.id);
-          await tx.pieceColor.deleteMany({ where: { pieceId: p.id } });
-          await tx.pieceSize.deleteMany({ where: { pieceId: p.id } });
-        }
-        await tx.productPiece.deleteMany({ where: { productId: id } });
-
-        for (const piece of pieces as {
-          name: string;
-          colors?: { name: string; hex?: string }[];
-          sizes?: { name: string }[];
-          variants?: {
-            colorName?: string;
-            sizeName?: string;
-            quantity?: number;
-          }[];
-        }[]) {
-          const colorsIn = piece.colors ?? [];
-          const sizesIn = piece.sizes ?? [];
-          const created = await tx.productPiece.create({
-            data: {
-              name: piece.name,
-              productId: id,
-              ...(colorsIn.length > 0
-                ? {
-                    colors: {
-                      create: colorsIn.map((c) => ({
-                        name: c.name,
-                        hex: c.hex || null,
-                      })),
-                    },
-                  }
-                : {}),
-              ...(sizesIn.length > 0
-                ? {
-                    sizes: {
-                      create: sizesIn.map((s) => ({
-                        name: s.name,
-                      })),
-                    },
-                  }
-                : {}),
-            },
-            include: { colors: true, sizes: true },
-          });
-
-          const variantsRaw = Array.isArray(piece.variants)
-            ? piece.variants
-            : [];
-          for (const v of variantsRaw) {
-            const cn =
-              typeof v.colorName === "string" ? v.colorName.trim() : "";
-            const sn =
-              typeof v.sizeName === "string" ? v.sizeName.trim() : "";
-            if (!cn || !sn) continue;
-            const q = Number(v.quantity);
-            const quantity =
-              Number.isFinite(q) && q >= 0 ? Math.floor(q) : 0;
-            const color = created.colors.find((c) => c.name === cn);
-            const size = created.sizes.find((s) => s.name === sn);
-            if (!color || !size) continue;
-            await insertPieceVariantRow(tx, {
-              pieceId: created.id,
-              colorId: color.id,
-              sizeId: size.id,
-              quantity,
-            });
-          }
-        }
+        await syncProductPieces(tx, id, pieces);
       }
 
       if (categoryIds !== undefined) {
@@ -326,10 +252,28 @@ export async function PUT(
         { status: 400 }
       );
     }
+    if (e instanceof Error && e.message === "ACTIVE_STOCK_RESERVATION") {
+      return NextResponse.json(
+        {
+          error:
+            "Não é possível alterar peças/cores/tamanhos: há pedidos pendentes com reserva de estoque nessa combinação.",
+        },
+        { status: 409 }
+      );
+    }
+    if (e instanceof Error && e.message === "INSUFFICIENT_STOCK_FOR_RESERVATIONS") {
+      return NextResponse.json(
+        {
+          error:
+            "O estoque informado ficou abaixo do que já está reservado em pedidos pendentes.",
+        },
+        { status: 409 }
+      );
+    }
     console.error("[PUT /api/products]", e);
     return NextResponse.json(
       { error: "Não foi possível atualizar o produto." },
-      { status: 404 }
+      { status: 500 }
     );
   }
 }

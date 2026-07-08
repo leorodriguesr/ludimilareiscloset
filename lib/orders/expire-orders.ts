@@ -4,6 +4,7 @@ import {
   PAYMENT_ATTEMPT_STATUS,
 } from "@/lib/orders/constants";
 import { releaseStockReservations } from "@/lib/orders/stock/reservation";
+import { OrderSource } from "@/app/generated/prisma/client";
 
 export type ExpireOrdersResult = {
   expiredOrderIds: string[];
@@ -56,6 +57,7 @@ export async function expireOrdersBatch(
   const due = await prisma.order.findMany({
     where: {
       status: ORDER_STATUS.PENDING_PAYMENT,
+      orderSource: OrderSource.CHECKOUT,
       expiresAt: { lte: now },
     },
     select: { id: true },
@@ -81,6 +83,7 @@ export async function expirePendingOrdersForCustomer(input: {
   const due = await prisma.order.findMany({
     where: {
       status: ORDER_STATUS.PENDING_PAYMENT,
+      orderSource: OrderSource.CHECKOUT,
       expiresAt: { lte: now },
       ...(input.userId
         ? { userId: input.userId }

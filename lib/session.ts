@@ -4,7 +4,7 @@ export const SESSION_COOKIE_NAME = "ludimila_session";
 
 export type SessionUser = {
   userId: string;
-  role: "ADMIN" | "CLIENT";
+  role: "ADMIN" | "GESTOR" | "CLIENT";
 };
 
 export type AppSessionData = {

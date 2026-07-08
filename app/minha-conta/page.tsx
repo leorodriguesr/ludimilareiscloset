@@ -54,7 +54,7 @@ export default async function MinhaContaPage() {
     },
   });
 
-  const isAdmin = user.role === "ADMIN";
+  const isStaff = user.role === "ADMIN" || user.role === "GESTOR";
 
   const paidOrders = orders.filter((o) => o.status === "paid");
   const totalSpent = paidOrders.reduce((acc, o) => acc + o.total, 0);
@@ -142,7 +142,9 @@ export default async function MinhaContaPage() {
             )}
             <div>
               <dt className="text-[10px] font-medium uppercase tracking-wide text-stone-400">Perfil</dt>
-              <dd className="mt-0.5 text-stone-700">{isAdmin ? "Administrador" : "Cliente"}</dd>
+              <dd className="mt-0.5 text-stone-700">
+                {user.role === "ADMIN" ? "Administrador" : user.role === "GESTOR" ? "Gestor" : "Cliente"}
+              </dd>
             </div>
           </dl>
         </div>
@@ -196,7 +198,7 @@ export default async function MinhaContaPage() {
           />
         </section>
 
-        {isAdmin && (
+        {isStaff && (
           <p className="mt-10 text-center text-sm text-stone-500">
             <Link href="/admin" className="font-medium text-stone-900 underline underline-offset-2">
               Ir ao painel administrativo →

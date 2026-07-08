@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { UserRole } from "@/app/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { claimGuestOrders } from "@/lib/orders/claim-guest-orders";
+import { isStaffRole } from "@/lib/auth/permissions";
 
 const SALT_ROUNDS = 12;
 
@@ -141,7 +142,7 @@ export async function authenticateUser(
   if (!valid) {
     return { ok: false as const, error: "E-mail ou senha incorretos." };
   }
-  if (intent === "admin" && user.role !== UserRole.ADMIN) {
+  if (intent === "admin" && !isStaffRole(user.role)) {
     return {
       ok: false as const,
       error: "Acesso negado. Use o login da loja para entrar como cliente.",
@@ -154,11 +155,17 @@ export async function authenticateUser(
     };
   }
   await claimGuestOrders(user.id, user.email);
+  const sessionRole =
+    user.role === UserRole.ADMIN
+      ? ("ADMIN" as const)
+      : user.role === UserRole.GESTOR
+        ? ("GESTOR" as const)
+        : ("CLIENT" as const);
   return {
     ok: true as const,
     user: {
       id: user.id,
-      role: user.role === UserRole.ADMIN ? ("ADMIN" as const) : ("CLIENT" as const),
+      role: sessionRole,
       name: user.name,
       email: user.email,
     },

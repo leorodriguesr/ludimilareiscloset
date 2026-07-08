@@ -283,6 +283,8 @@ export async function continueOrderPayment(input: {
   orderId: string;
   userId: string;
   userEmail: string;
+  /** Admin/gestor: ignora dono do pedido e TTL de checkout. */
+  staffBypass?: boolean;
 }): Promise<ContinueOrderPaymentResult> {
   const order = await prisma.order.findUnique({
     where: { id: input.orderId },
@@ -298,14 +300,16 @@ export async function continueOrderPayment(input: {
     return { ok: false, error: "Pedido não encontrado.", code: "not_found" };
   }
 
-  if (!isOrderOwner(order, input.userId, input.userEmail)) {
-    return { ok: false, error: "Acesso negado.", code: "forbidden" };
-  }
+  if (!input.staffBypass) {
+    if (!isOrderOwner(order, input.userId, input.userEmail)) {
+      return { ok: false, error: "Acesso negado.", code: "forbidden" };
+    }
 
-  await expirePendingOrdersForCustomer({
-    userId: order.userId,
-    email: order.email,
-  });
+    await expirePendingOrdersForCustomer({
+      userId: order.userId,
+      email: order.email,
+    });
+  }
 
   const fresh = await prisma.order.findUnique({
     where: { id: input.orderId },
@@ -354,7 +358,10 @@ export async function continueOrderPayment(input: {
   }
 
   const now = new Date();
-  if (!fresh.expiresAt || fresh.expiresAt <= now) {
+  if (
+    !input.staffBypass &&
+    (!fresh.expiresAt || fresh.expiresAt <= now)
+  ) {
     return {
       ok: false,
       error: "Este pedido expirou. Faça uma nova compra.",

@@ -8,12 +8,14 @@ import {
   fetchOrderShippingFieldsByIds,
   mergeOrderShippingFields,
 } from "@/lib/orders/order-shipping-fields";
+import { FulfillmentType } from "@/app/generated/prisma/client";
 import { requireAdminApi } from "@/lib/require-admin-api";
 
 /**
  * Lista operacional de envios (pedidos pagos).
  * Filtros:
  *  - needs_label → sem etiqueta
+ *  - to_pack      → por embalar
  *  - packed      → etiqueta gerada, aguardando postagem
  *  - shipped     → postado
  *  - delivered   → entregue
@@ -36,8 +38,10 @@ export async function GET(request: NextRequest) {
 
   const where =
     filter === "needs_label"
-      ? { ...baseWhere, labelUrl: null }
-      : filter === "packed"
+      ? { ...baseWhere, labelUrl: null, fulfillmentType: FulfillmentType.CARRIER }
+      : filter === "to_pack"
+        ? { ...baseWhere, shippingStatus: "to_pack" }
+        : filter === "packed"
         ? { ...baseWhere, shippingStatus: "packed" }
         : filter === "shipped"
           ? { ...baseWhere, shippingStatus: "shipped" }
@@ -59,7 +63,11 @@ export async function GET(request: NextRequest) {
           orderNumber: true,
           status: true,
           email: true,
+          fulfillmentType: true,
+          orderSource: true,
+          customerDataStatus: true,
           shippingServiceName: true,
+          deliveryNotes: true,
           shippingStatus: true,
           recipientName: true,
           superfreteShipmentId: true,

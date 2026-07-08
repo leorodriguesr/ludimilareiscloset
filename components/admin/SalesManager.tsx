@@ -1,9 +1,22 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import { formatPrice } from "@/lib/format";
 import type { CartPieceSelection } from "@/lib/cart/types";
+import type { Product } from "@/lib/types";
+import { StandaloneSaleWizard } from "@/components/admin/StandaloneSaleWizard";
+import { canManuallyChangeShippingStatus } from "@/lib/fulfillment/shipping-status-policy";
+import {
+  orderCustomerDisplayEmail,
+  orderCustomerDisplayName,
+} from "@/lib/admin-sale/customer-display";
+import {
+  resolveArrangedDeliveryDisplay,
+  splitArrangedDeliveryNotes,
+  arrangedDeliveryLabelFromServiceName,
+} from "@/lib/admin-sale/arranged-delivery";
 
 /* ─── Tipos ───────────────────────────────────────────────────────── */
 
@@ -26,6 +39,16 @@ type AdminOrder = {
   orderNumber: number | null;
   email: string;
   status: string;
+  orderSource?: string;
+  fulfillmentType?: string;
+  customerDataStatus?: string | null;
+  customerDataToken?: string | null;
+  paymentChannel?: string | null;
+  subtotalOriginal?: number | null;
+  itemsDiscountTotal?: number;
+  orderDiscountAmount?: number;
+  deliveryNotes?: string | null;
+  internalNotes?: string | null;
   total: number;
   shippingAmount: number;
   shippingServiceName: string | null;
@@ -40,6 +63,7 @@ type AdminOrder = {
   addressCity: string | null;
   addressState: string | null;
   paidAt: string | null;
+  paymentMethod?: string | null;
   paymentCaptureMethod: string | null;
   shippingStatus: string;
   superfreteStatus: string | null;
@@ -55,7 +79,445 @@ type AdminOrder = {
 };
 
 type ApiResponse = { orders: AdminOrder[]; total: number; page: number; limit: number };
-type FilterKey = "all" | "paid" | "waiting";
+type FilterKey = "paid" | "waiting" | "to_pack";
+
+function normalizeSearchText(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "");
+}
+
+function orderCustomerName(order: AdminOrder): string {
+  return orderCustomerDisplayName(order);
+}
+
+function orderMatchesCustomerSearch(order: AdminOrder, query: string): boolean {
+  const normalizedQuery = normalizeSearchText(query);
+  if (!normalizedQuery) return true;
+
+  const haystack = [
+    orderCustomerName(order),
+    order.email,
+    order.user?.name ?? "",
+    order.recipientName ?? "",
+  ]
+    .map(normalizeSearchText)
+    .join(" ");
+
+  return haystack.includes(normalizedQuery);
+}
+
+function orderMatchesStatusFilter(order: AdminOrder, filter: FilterKey | null): boolean {
+  if (!filter) return true;
+  if (filter === "paid") return Boolean(order.paidAt);
+  if (filter === "waiting") return !order.paidAt;
+  return Boolean(order.paidAt && order.shippingStatus === "to_pack");
+}
+
+function toLocalDateKey(iso: string): string {
+  const date = new Date(iso);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+type SaleDateRange = { from: string; to: string };
+
+const EMPTY_SALE_DATE_RANGE: SaleDateRange = { from: "", to: "" };
+
+function normalizeSaleDateRange(
+  from: string,
+  to: string
+): { from: string; to: string } | null {
+  if (!from && !to) return null;
+  if (!from) return { from: to, to };
+  if (!to) return { from, to: from };
+  return from <= to ? { from, to } : { from: to, to: from };
+}
+
+function orderMatchesSaleDateRange(
+  order: AdminOrder,
+  range: SaleDateRange
+): boolean {
+  const normalized = normalizeSaleDateRange(range.from, range.to);
+  if (!normalized) return true;
+
+  const orderDate = toLocalDateKey(order.createdAt);
+  return orderDate >= normalized.from && orderDate <= normalized.to;
+}
+
+function formatDateFilterLabel(value: string): string {
+  const [year, month, day] = value.split("-");
+  if (!year || !month || !day) return value;
+  return `${day}/${month}/${year}`;
+}
+
+function formatSaleDateRangeLabel(range: SaleDateRange): string {
+  const normalized = normalizeSaleDateRange(range.from, range.to);
+  if (!normalized) return "";
+
+  if (normalized.from === normalized.to) {
+    return formatDateFilterLabel(normalized.from);
+  }
+
+  return `${formatDateFilterLabel(normalized.from)} – ${formatDateFilterLabel(normalized.to)}`;
+}
+
+function hasSaleDateRangeSelection(range: SaleDateRange): boolean {
+  return Boolean(range.from || range.to);
+}
+
+type DayRangeState = "none" | "edge" | "middle";
+
+function getDayRangeState(
+  key: string,
+  range: SaleDateRange,
+  anchor: string | null
+): DayRangeState {
+  const preview = anchor && range.from && !range.to
+    ? normalizeSaleDateRange(range.from, anchor)
+    : normalizeSaleDateRange(range.from, range.to);
+
+  if (!preview) {
+    if (anchor && key === anchor) return "edge";
+    if (range.from && !range.to && key === range.from) return "edge";
+    return "none";
+  }
+
+  if (key < preview.from || key > preview.to) return "none";
+  if (key === preview.from || key === preview.to) return "edge";
+  return "middle";
+}
+
+function daysInMonth(year: number, month: number): number {
+  return new Date(year, month + 1, 0).getDate();
+}
+
+function buildDateKey(year: number, month: number, day: number): string {
+  return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function mondayBasedWeekday(year: number, month: number): number {
+  const weekday = new Date(year, month, 1).getDay();
+  return weekday === 0 ? 6 : weekday - 1;
+}
+
+const CALENDAR_WEEKDAYS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+
+const SALES_TOOLBAR_SIZE =
+  "box-border h-9 text-sm font-medium leading-none sm:h-8";
+
+const SALES_TOOLBAR_CONTROL = `${SALES_TOOLBAR_SIZE} rounded-lg border px-3 sm:px-3.5`;
+
+const DETAILS_DRAWER_MS = 300;
+
+function CalendarIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      viewBox="0 0 24 24"
+      aria-hidden
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M6.75 3v2.25M17.25 3v2.25M4.5 8.25h15m-13.5 0V18a2.25 2.25 0 0 0 2.25 2.25h10.5A2.25 2.25 0 0 0 21 18V8.25m-18 0V6.375c0-.621.504-1.125 1.125-1.125h15.75c.621 0 1.125.504 1.125 1.125V8.25"
+      />
+    </svg>
+  );
+}
+
+function SaleDatePicker({
+  range,
+  onChange,
+}: {
+  range: SaleDateRange;
+  onChange: (range: SaleDateRange) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [rangeAnchor, setRangeAnchor] = useState<string | null>(null);
+  const today = useMemo(() => new Date(), []);
+  const todayKey = useMemo(() => toLocalDateKey(today.toISOString()), [today]);
+  const [viewYear, setViewYear] = useState(today.getFullYear());
+  const [viewMonth, setViewMonth] = useState(today.getMonth());
+
+  const hasSelection = hasSaleDateRangeSelection(range);
+  const rangeLabel = formatSaleDateRangeLabel(range);
+  const isSelectingEnd = Boolean(range.from && !range.to);
+
+  const monthLabel = useMemo(
+    () =>
+      new Intl.DateTimeFormat("pt-BR", {
+        month: "long",
+        year: "numeric",
+      }).format(new Date(viewYear, viewMonth, 1)),
+    [viewYear, viewMonth]
+  );
+
+  const calendarCells = useMemo(() => {
+    const leadingBlanks = mondayBasedWeekday(viewYear, viewMonth);
+    const totalDays = daysInMonth(viewYear, viewMonth);
+    const cells: Array<{ key: string; day: number } | null> = [];
+
+    for (let index = 0; index < leadingBlanks; index += 1) {
+      cells.push(null);
+    }
+    for (let day = 1; day <= totalDays; day += 1) {
+      cells.push({
+        key: buildDateKey(viewYear, viewMonth, day),
+        day,
+      });
+    }
+
+    return cells;
+  }, [viewYear, viewMonth]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      setRangeAnchor(null);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
+  function selectDay(key: string) {
+    if (!range.from || (range.from && range.to)) {
+      onChange({ from: key, to: "" });
+      setRangeAnchor(key);
+      return;
+    }
+
+    const normalized = normalizeSaleDateRange(range.from, key);
+    if (!normalized) return;
+
+    onChange(normalized);
+    setRangeAnchor(null);
+  }
+
+  function goToPreviousMonth() {
+    if (viewMonth === 0) {
+      setViewMonth(11);
+      setViewYear((year) => year - 1);
+      return;
+    }
+    setViewMonth((month) => month - 1);
+  }
+
+  function goToNextMonth() {
+    if (viewMonth === 11) {
+      setViewMonth(0);
+      setViewYear((year) => year + 1);
+      return;
+    }
+    setViewMonth((month) => month + 1);
+  }
+
+  function clearSelection() {
+    onChange(EMPTY_SALE_DATE_RANGE);
+    setRangeAnchor(null);
+  }
+
+  function dayButtonClass(key: string): string {
+    const state = getDayRangeState(key, range, rangeAnchor);
+    const base =
+      "flex h-9 w-9 items-center justify-center text-sm font-medium transition-colors";
+
+    if (state === "edge") {
+      return `${base} rounded-lg bg-stone-900 text-white shadow-sm`;
+    }
+    if (state === "middle") {
+      return `${base} rounded-lg bg-stone-200 text-stone-800`;
+    }
+    if (key === todayKey) {
+      return `${base} rounded-lg border border-stone-300 bg-stone-50 text-stone-900 hover:bg-stone-100`;
+    }
+    return `${base} rounded-lg text-stone-700 hover:bg-stone-100`;
+  }
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        className={`inline-flex shrink-0 items-center gap-2 transition-colors ${SALES_TOOLBAR_CONTROL} ${
+          hasSelection
+            ? "border-stone-900 bg-stone-900 text-white"
+            : "border-stone-200 bg-white text-stone-600 hover:border-stone-300 hover:bg-stone-50"
+        }`}
+      >
+        <CalendarIcon className="h-4 w-4 shrink-0" />
+        <span>Data</span>
+      </button>
+
+      {mounted && open
+        ? createPortal(
+            <>
+              <button
+                type="button"
+                aria-label="Fechar calendário"
+                className="fixed inset-0 z-[100] bg-stone-900/25 backdrop-blur-[1px]"
+                onClick={() => setOpen(false)}
+              />
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label="Selecionar intervalo de datas da venda"
+                className="fixed left-1/2 top-1/2 z-[101] w-[min(calc(100vw-2rem),19rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-stone-200 bg-white p-4 shadow-2xl"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={goToPreviousMonth}
+                    aria-label="Mês anterior"
+                    className="rounded-lg p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800"
+                  >
+                    <svg
+                      className="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      viewBox="0 0 24 24"
+                      aria-hidden
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M15 19 8 12l7-7"
+                      />
+                    </svg>
+                  </button>
+
+                  <p className="text-sm font-semibold capitalize text-stone-900">
+                    {monthLabel}
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={goToNextMonth}
+                    aria-label="Próximo mês"
+                    className="rounded-lg p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800"
+                  >
+                    <svg
+                      className="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      viewBox="0 0 24 24"
+                      aria-hidden
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
+                  </button>
+                </div>
+
+                <div className="mb-1 grid grid-cols-7 gap-1">
+                  {CALENDAR_WEEKDAYS.map((weekday) => (
+                    <div
+                      key={weekday}
+                      className="py-1 text-center text-[10px] font-semibold uppercase tracking-wide text-stone-400"
+                    >
+                      {weekday}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-7 gap-1">
+                  {calendarCells.map((cell, index) =>
+                    cell ? (
+                      <button
+                        key={cell.key}
+                        type="button"
+                        onClick={() => selectDay(cell.key)}
+                        aria-pressed={getDayRangeState(cell.key, range, rangeAnchor) !== "none"}
+                        className={dayButtonClass(cell.key)}
+                      >
+                        {cell.day}
+                      </button>
+                    ) : (
+                      <div
+                        key={`blank-${index}`}
+                        className="h-9 w-9"
+                        aria-hidden
+                      />
+                    )
+                  )}
+                </div>
+
+                {hasSelection || isSelectingEnd ? (
+                  <div className="mt-3 border-t border-stone-100 pt-3">
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-stone-400">
+                      Período selecionado
+                    </p>
+                    <p className="text-sm font-medium text-stone-800">
+                      {isSelectingEnd
+                        ? `${formatDateFilterLabel(range.from)} – …`
+                        : rangeLabel}
+                    </p>
+                  </div>
+                ) : null}
+
+                <div className="mt-4 flex items-center justify-between gap-2 border-t border-stone-100 pt-3">
+                  <p className="text-xs text-stone-500">
+                    {isSelectingEnd
+                      ? "Agora escolha o dia final"
+                      : hasSelection
+                        ? "Intervalo aplicado ao filtro"
+                        : "Escolha o dia inicial e depois o final"}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    {hasSelection ? (
+                      <button
+                        type="button"
+                        onClick={clearSelection}
+                        className="text-xs font-medium text-stone-500 transition-colors hover:text-stone-800"
+                      >
+                        Limpar
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setOpen(false)}
+                      className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-stone-800"
+                    >
+                      Ok
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </>,
+            document.body
+          )
+        : null}
+    </div>
+  );
+}
 
 /* ─── Helpers ─────────────────────────────────────────────────────── */
 
@@ -89,6 +551,29 @@ function paymentMethodLabel(method: string | null): string {
   if (m.includes("boleto")) return "Boleto";
   return method;
 }
+
+function resolvePaymentMethodKind(method: string | null): "pix" | "card" | null {
+  if (!method) return null;
+  const m = method.toLowerCase();
+  if (m.includes("pix")) return "pix";
+  if (
+    m.includes("credit") ||
+    m.includes("credito") ||
+    m.includes("crédito") ||
+    m.includes("debit") ||
+    m.includes("debito") ||
+    m.includes("débito") ||
+    m.includes("card") ||
+    m.includes("cartao") ||
+    m.includes("cartão")
+  ) {
+    return "card";
+  }
+  return null;
+}
+
+const TABLE_CELL_PRIMARY = "text-sm font-medium text-stone-900";
+const TABLE_CELL_SECONDARY = "text-xs font-normal text-stone-500";
 
 function parsePieces(json: string | null): CartPieceSelection[] {
   try { return json ? (JSON.parse(json) as CartPieceSelection[]) : []; } catch { return []; }
@@ -125,12 +610,23 @@ function displayOrDash(v: string | null | undefined): string {
 
 const SHIPPING_STATUS = [
   { value: "to_pack",    label: "Por embalar", dot: "bg-amber-400"   },
-  { value: "packed",     label: "Embalado",    dot: "bg-blue-500"    },
+  { value: "packed",     label: "Por enviar",  dot: "bg-blue-500"    },
   { value: "shipped",    label: "Enviado",     dot: "bg-emerald-500" },
-  { value: "delivered",  label: "Entregue",    dot: "bg-teal-500"    },
+  { value: "delivered",  label: "Entregue",    dot: "bg-emerald-500" },
   { value: "cancelled",  label: "Cancelado",   dot: "bg-red-400"     },
 ] as const;
 function sInfo(v: string) { return SHIPPING_STATUS.find((s) => s.value === v) ?? SHIPPING_STATUS[0]; }
+
+function manualShippingStatusOptions(order: AdminOrder) {
+  if (!canManuallyChangeShippingStatus(order)) return [];
+  if (order.fulfillmentType === "ARRANGED") return SHIPPING_STATUS;
+  return SHIPPING_STATUS.filter(
+    (option) =>
+      option.value === "to_pack" ||
+      option.value === "packed" ||
+      option.value === order.shippingStatus
+  );
+}
 
 function payBadge(order: AdminOrder) {
   if (order.paidAt) return { label: "Pago", cls: "bg-emerald-50 text-emerald-700 ring-emerald-200" };
@@ -141,18 +637,773 @@ function Chip({ label, cls }: { label: string; cls: string }) {
   return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${cls}`}>{label}</span>;
 }
 
-/* ─── Linha expandida ─────────────────────────────────────────────── */
+function PaymentStatusBadge({ label, cls }: { label: string; cls: string }) {
+  return (
+    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${cls}`}>
+      {label}
+    </span>
+  );
+}
 
-function ExpandedRow({
+function PaymentMethodIcon({ kind }: { kind: "pix" | "card" }) {
+  if (kind === "pix") {
+    return (
+      <Image
+        src="/pix-icon.svg"
+        alt="PIX"
+        width={16}
+        height={16}
+        className="h-4 w-4 shrink-0"
+      />
+    );
+  }
+
+  return (
+    <svg
+      className="h-4 w-4 shrink-0 text-stone-500"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      viewBox="0 0 24 24"
+      aria-label="Cartão"
+    >
+      <path d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3Z" />
+    </svg>
+  );
+}
+
+function TablePaymentCell({
   order,
-  colSpan,
-  onRefresh,
-  muted = false,
+  isSaleCancelled,
 }: {
   order: AdminOrder;
-  colSpan: number;
+  isSaleCancelled: boolean;
+}) {
+  const paymentStatus = tablePaymentStatus(order);
+  const methodKind = resolvePaymentMethodKind(
+    order.paymentCaptureMethod ?? order.paymentMethod ?? null
+  );
+  const showElapsed = !order.paidAt && !isSaleCancelled;
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-1.5">
+        {methodKind ? <PaymentMethodIcon kind={methodKind} /> : null}
+        <PaymentStatusBadge label={paymentStatus.label} cls={paymentStatus.cls} />
+      </div>
+      {showElapsed ? (
+        <p className={TABLE_CELL_SECONDARY}>{elapsed(order.createdAt)}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function tablePaymentStatus(order: AdminOrder) {
+  return payBadge(order);
+}
+
+const TABLE_SHIPPING_LABELS: Record<string, string> = {
+  to_pack: "Por embalar",
+  packed: "Por enviar",
+  shipped: "Enviado",
+  delivered: "Entregue",
+  cancelled: "Cancelado",
+};
+
+function tableShippingLabel(status: string): string {
+  return TABLE_SHIPPING_LABELS[status] ?? sInfo(status).label;
+}
+
+function TruckIcon({ className = "h-3.5 w-3.5 shrink-0" }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      viewBox="0 0 24 24"
+      aria-hidden
+    >
+      <path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2" />
+      <path d="M15 18H9" />
+      <path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14" />
+      <circle cx="17" cy="18" r="2" />
+      <circle cx="7" cy="18" r="2" />
+    </svg>
+  );
+}
+
+function ShippingStatusBadge({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: "blue" | "emerald";
+}) {
+  const toneClass =
+    tone === "blue"
+      ? "bg-blue-50 text-blue-900 ring-blue-200"
+      : "bg-emerald-50 text-emerald-700 ring-emerald-200";
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${toneClass}`}
+    >
+      <TruckIcon />
+      {label}
+    </span>
+  );
+}
+
+function TableShippingStatus({
+  status,
+  shippingMethod,
+}: {
+  status: string;
+  shippingMethod: string | null;
+}) {
+  const label = tableShippingLabel(status);
+  const ss = sInfo(status);
+
+  if (status === "packed") {
+    return (
+      <>
+        <ShippingStatusBadge label={label} tone="blue" />
+        {shippingMethod ? (
+          <p className={`mt-1 ${TABLE_CELL_SECONDARY}`}>{shippingMethod}</p>
+        ) : null}
+      </>
+    );
+  }
+
+  if (status === "delivered") {
+    return (
+      <>
+        <ShippingStatusBadge label={label} tone="emerald" />
+        {shippingMethod ? (
+          <p className={`mt-1 ${TABLE_CELL_SECONDARY}`}>{shippingMethod}</p>
+        ) : null}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <span className={`inline-flex items-center gap-1.5 ${TABLE_CELL_PRIMARY}`}>
+        <span className={`h-2 w-2 shrink-0 rounded-full ${ss.dot}`} />
+        {label}
+      </span>
+      {shippingMethod ? (
+        <p className={TABLE_CELL_SECONDARY}>{shippingMethod}</p>
+      ) : null}
+    </>
+  );
+}
+
+function shortShippingMethod(
+  serviceName: string | null,
+  fulfillmentType?: string,
+  deliveryNotes?: string | null
+): string | null {
+  if (fulfillmentType === "ARRANGED") {
+    const fromService = arrangedDeliveryLabelFromServiceName(serviceName);
+    if (fromService) return fromService;
+    const split = splitArrangedDeliveryNotes(deliveryNotes);
+    return split.systemLabel;
+  }
+  if (!serviceName?.trim()) return null;
+
+  const lower = serviceName.toLowerCase();
+  if (lower.includes("sedex")) return "SEDEX";
+  if (/\bpac\b/i.test(lower) || lower.includes(" pac ") || lower.startsWith("pac ")) return "PAC";
+  if (lower.includes("jadlog")) return "Jadlog";
+  if (lower.includes("loggi")) return "Loggi";
+
+  const servicePart = serviceName.split("—").pop()?.trim() ?? serviceName.trim();
+  if (/sedex/i.test(servicePart)) return "SEDEX";
+  if (/\bpac\b/i.test(servicePart)) return "PAC";
+  if (/jadlog/i.test(servicePart)) return "Jadlog";
+  if (/loggi/i.test(servicePart)) return "Loggi";
+
+  return servicePart.length > 18 ? `${servicePart.slice(0, 16)}…` : servicePart;
+}
+
+function AdminSaleNotesHint({ notes }: { notes: string }) {
+  return (
+    <span className="relative inline-flex group/notes">
+      <span
+        className="inline-flex h-5 w-5 items-center justify-center rounded text-violet-500 transition-colors hover:bg-violet-50 hover:text-violet-700"
+        aria-label="Ver observações da venda avulsa"
+      >
+        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+        </svg>
+      </span>
+      <span className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 hidden w-64 rounded-lg border border-stone-200 bg-white p-3 text-xs leading-relaxed text-stone-600 shadow-lg group-hover/notes:block">
+        <span className="mb-1 block font-medium text-stone-800">Observações da venda</span>
+        {notes}
+      </span>
+    </span>
+  );
+}
+
+function ExpandedSection({
+  title,
+  children,
+  className = "",
+}: {
+  title: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`rounded-xl border border-stone-200 bg-white p-4 shadow-sm ${className}`}>
+      <h3 className="mb-4 text-sm font-semibold text-stone-900">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function customerInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function formatOrderAddressBlock(order: AdminOrder): string | null {
+  if (!hasOrderAddress(order)) return null;
+  const street = [order.addressStreet, order.addressNumber].filter(Boolean).join(", ");
+  const city = [order.addressNeighborhood, order.addressCity, order.addressState]
+    .filter(Boolean)
+    .join(" · ");
+  const cep = cepDisplay(order.destinationCep);
+  return [street || null, order.addressComplement?.trim() || null, city || null, cep !== "—" ? cep : null]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function ReceiptLine({ label, value, bold = false }: { label: string; value: string; bold?: boolean }) {
+  return (
+    <div className={`flex justify-between gap-4 text-sm ${bold ? "font-semibold text-stone-900" : ""}`}>
+      <span className={bold ? "" : "text-stone-500"}>{label}</span>
+      <span className={`tabular-nums ${bold ? "" : "text-stone-800"}`}>{value}</span>
+    </div>
+  );
+}
+
+type PaymentInfo =
+  | { type: "pix"; pixCode: string; amount: number }
+  | { type: "card"; checkoutUrl: string }
+  | { type: "paid" };
+
+function AdminSaleLinks({
+  order,
+}: {
+  order: AdminOrder;
+}) {
+  const [paymentInfo, setPaymentInfo] = useState<PaymentInfo | null>(null);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [copied, setCopied] = useState<"data" | "pix" | "card" | null>(null);
+
+  const showCustomerLink =
+    order.orderSource === "ADMIN_SALE" &&
+    order.customerDataStatus === "PENDING" &&
+    Boolean(order.customerDataToken);
+
+  const showPaymentLink =
+    order.orderSource === "ADMIN_SALE" &&
+    !order.paidAt &&
+    order.status !== "cancelled" &&
+    order.paymentChannel !== "MANUAL";
+
+  useEffect(() => {
+    if (!showPaymentLink) return;
+    let cancelled = false;
+    setPaymentLoading(true);
+    setPaymentError(null);
+    void fetch(`/api/admin/orders/${order.id}/payment-info`)
+      .then(async (res) => {
+        const data = (await res.json()) as PaymentInfo & { error?: string };
+        if (cancelled) return;
+        if (!res.ok) {
+          setPaymentError(data.error ?? "Não foi possível carregar o pagamento.");
+          return;
+        }
+        setPaymentInfo(data);
+      })
+      .catch(() => {
+        if (!cancelled) setPaymentError("Erro de conexão.");
+      })
+      .finally(() => {
+        if (!cancelled) setPaymentLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [order.id, showPaymentLink]);
+
+  if (!showCustomerLink && !showPaymentLink) return null;
+
+  async function copyText(value: string, key: "data" | "pix" | "card") {
+    await navigator.clipboard.writeText(value);
+    setCopied(key);
+    setTimeout(() => setCopied(null), 2000);
+  }
+
+  const customerUrl =
+    order.customerDataToken
+      ? `${window.location.origin}/venda-avulsa/completar/${order.customerDataToken}`
+      : "";
+
+  return (
+    <div className="flex flex-col gap-2">
+      {showPaymentLink && (
+        <>
+          {paymentLoading && (
+            <p className="text-xs text-stone-500">Carregando pagamento…</p>
+          )}
+          {paymentError && (
+            <p className="text-xs text-red-600">{paymentError}</p>
+          )}
+          {paymentInfo?.type === "pix" && (
+            <button
+              type="button"
+              onClick={() => void copyText(paymentInfo.pixCode, "pix")}
+              className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
+            >
+              {copied === "pix" ? "Código copiado!" : "Copiar código PIX"}
+            </button>
+          )}
+          {paymentInfo?.type === "card" && (
+            <button
+              type="button"
+              onClick={() => void copyText(paymentInfo.checkoutUrl, "card")}
+              className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
+            >
+              {copied === "card" ? "Link copiado!" : "Copiar link de pagamento"}
+            </button>
+          )}
+          {paymentInfo?.type === "paid" && (
+            <p className="text-xs text-emerald-700">Pagamento já confirmado.</p>
+          )}
+        </>
+      )}
+
+      {showCustomerLink && (
+        <button
+          type="button"
+          onClick={() => void copyText(customerUrl, "data")}
+          className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
+        >
+          {copied === "data" ? "Link copiado!" : "Copiar link de preenchimento dos dados"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+const ORDER_ACTION_MENU_WIDTH = 236;
+
+function ActionMenuIcon({ children }: { children: ReactNode }) {
+  return (
+    <span className="flex h-5 w-5 shrink-0 items-center justify-center text-stone-500">
+      {children}
+    </span>
+  );
+}
+
+function OrderRowActionsMenu({
+  order,
+  isDetailsOpen,
+  onToggleDetails,
+  onRefresh,
+  onRequestCancel,
+}: {
+  order: AdminOrder;
+  isDetailsOpen: boolean;
+  onToggleDetails: () => void;
   onRefresh: () => void;
-  muted?: boolean;
+  onRequestCancel: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  const isCancelled = order.status === "cancelled";
+  const isPaid = Boolean(order.paidAt);
+  const isArranged = order.fulfillmentType === "ARRANGED";
+  const showCustomerLink =
+    order.orderSource === "ADMIN_SALE" &&
+    order.customerDataStatus === "PENDING" &&
+    Boolean(order.customerDataToken);
+  const showPaymentLink =
+    order.orderSource === "ADMIN_SALE" &&
+    !order.paidAt &&
+    !isCancelled &&
+    order.paymentChannel !== "MANUAL";
+
+  useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (!open) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    function onScroll() {
+      setOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [open]);
+
+  function closeMenu() {
+    setOpen(false);
+  }
+
+  function toggleMenu() {
+    if (open) {
+      closeMenu();
+      return;
+    }
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const left = Math.max(
+      8,
+      Math.min(rect.right - ORDER_ACTION_MENU_WIDTH, window.innerWidth - ORDER_ACTION_MENU_WIDTH - 8)
+    );
+    setMenuPos({ top: rect.bottom + 6, left });
+    setOpen(true);
+  }
+
+  async function patchShipping(status: string) {
+    setBusy(status);
+    try {
+      await fetch(`/api/admin/orders/${order.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shippingStatus: status }),
+      });
+      onRefresh();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleLabelAction() {
+    if (order.labelUrl) {
+      window.open(`/api/admin/orders/${order.id}/label/pdf`, "_blank");
+      return;
+    }
+    setBusy("label");
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}/label`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) return;
+      window.open(`/api/admin/orders/${order.id}/label/pdf`, "_blank");
+      onRefresh();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleMarkShipped() {
+    setBusy("shipped");
+    try {
+      await fetch(`/api/admin/sales/${order.id}/mark-shipped`, { method: "POST" });
+      onRefresh();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function copyText(value: string) {
+    await navigator.clipboard.writeText(value);
+  }
+
+  async function handleCopyCustomerLink() {
+    if (!order.customerDataToken) return;
+    await copyText(`${window.location.origin}/venda-avulsa/completar/${order.customerDataToken}`);
+  }
+
+  async function handleCopyPaymentLink() {
+    setBusy("payment");
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}/payment-info`);
+      const data = (await res.json()) as PaymentInfo & { error?: string };
+      if (!res.ok) return;
+      if (data.type === "pix") await copyText(data.pixCode);
+      if (data.type === "card") await copyText(data.checkoutUrl);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  type MenuAction = {
+    id: string;
+    label: string;
+    icon: ReactNode;
+    onClick: () => void | Promise<void>;
+    disabled?: boolean;
+    danger?: boolean;
+    separatorBefore?: boolean;
+  };
+
+  const actions = useMemo(() => {
+    const items: MenuAction[] = [];
+
+    if (!isCancelled && isPaid && order.shippingStatus === "to_pack") {
+      items.push({
+        id: "pack",
+        label: "Marcar como embalada",
+        separatorBefore: items.length > 0,
+        disabled: busy === "packed",
+        icon: (
+          <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+          </svg>
+        ),
+        onClick: () => void patchShipping("packed"),
+      });
+    }
+
+    if (!isCancelled && isPaid && !isArranged && (order.labelUrl || order.shippingStatus === "packed")) {
+      items.push({
+        id: "label",
+        label: order.labelUrl ? "Imprimir etiqueta" : "Gerar etiqueta",
+        separatorBefore: items.length > 0,
+        disabled: busy === "label",
+        icon: (
+          <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0 1 10.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18M6.34 18H5.25A2.25 2.25 0 0 1 3 15.75V9.456c0-1.081.768-2.015 1.837-2.163a48.042 48.042 0 0 1 1.087-.128m12.725 0c.977.148 1.837 1.082 1.837 2.163V15.75A2.25 2.25 0 0 1 18.66 18h-1.08m-12.725 0h12.725" />
+          </svg>
+        ),
+        onClick: () => void handleLabelAction(),
+      });
+    }
+
+    if (
+      !isCancelled &&
+      isPaid &&
+      isArranged &&
+      order.shippingStatus !== "shipped" &&
+      order.shippingStatus !== "delivered"
+    ) {
+      items.push({
+        id: "notify",
+        label: "Notificar envio",
+        separatorBefore: items.length > 0,
+        disabled: busy === "shipped",
+        icon: <TruckIcon className="h-[18px] w-[18px]" />,
+        onClick: () => void handleMarkShipped(),
+      });
+    }
+
+    items.push({
+      id: "details",
+      label: isDetailsOpen ? "Fechar detalhes" : "Ver detalhes",
+      separatorBefore: items.length > 0,
+      icon: (
+        <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+          <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
+        </svg>
+      ),
+      onClick: onToggleDetails,
+    });
+
+    if (showCustomerLink) {
+      items.push({
+        id: "customer-link",
+        label: "Copiar link de dados",
+        icon: (
+          <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m9.86-2.121a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
+          </svg>
+        ),
+        onClick: () => void handleCopyCustomerLink(),
+      });
+    }
+
+    if (showPaymentLink) {
+      items.push({
+        id: "payment-link",
+        label: busy === "payment" ? "Copiando…" : "Copiar link de pagamento",
+        disabled: busy === "payment",
+        icon: (
+          <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z" />
+          </svg>
+        ),
+        onClick: () => void handleCopyPaymentLink(),
+      });
+    }
+
+    if (!isCancelled) {
+      items.push({
+        id: "cancel",
+        label: "Cancelar",
+        danger: true,
+        separatorBefore: true,
+        icon: (
+          <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636" />
+          </svg>
+        ),
+        onClick: onRequestCancel,
+      });
+    }
+
+    return items;
+  }, [
+    busy,
+    isArranged,
+    isCancelled,
+    isDetailsOpen,
+    isPaid,
+    onRequestCancel,
+    onToggleDetails,
+    order.customerDataToken,
+    order.labelUrl,
+    order.shippingStatus,
+    showCustomerLink,
+    showPaymentLink,
+  ]);
+
+  return (
+    <td className="px-3 py-3.5" onClick={(event) => event.stopPropagation()}>
+      <div className="flex justify-center">
+        <button
+          ref={btnRef}
+          type="button"
+          aria-label="Ações do pedido"
+          aria-expanded={open}
+          aria-haspopup="menu"
+          onClick={toggleMenu}
+          className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
+            open ? "bg-blue-50 text-blue-600" : "text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+          }`}
+        >
+          <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+            <circle cx="12" cy="5" r="1.75" />
+            <circle cx="12" cy="12" r="1.75" />
+            <circle cx="12" cy="19" r="1.75" />
+          </svg>
+        </button>
+      </div>
+
+      {mounted && open && menuPos
+        ? createPortal(
+            <>
+              <button
+                type="button"
+                aria-label="Fechar menu de ações"
+                className="fixed inset-0 z-[90]"
+                onClick={closeMenu}
+              />
+              <div
+                role="menu"
+                aria-label="Ações do pedido"
+                className="fixed z-[91] overflow-hidden rounded-xl border border-stone-200 bg-white py-1.5 shadow-lg"
+                style={{ top: menuPos.top, left: menuPos.left, width: ORDER_ACTION_MENU_WIDTH }}
+                onClick={(event) => event.stopPropagation()}
+              >
+                {actions.map((action) => (
+                  <div key={action.id}>
+                    {action.separatorBefore ? (
+                      <div className="my-1 border-t border-stone-100" role="separator" />
+                    ) : null}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={action.disabled}
+                      onClick={() => {
+                        void action.onClick();
+                        closeMenu();
+                      }}
+                      className={`flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-sm transition-colors disabled:opacity-50 ${
+                        action.danger
+                          ? "text-red-600 hover:bg-red-50"
+                          : "text-stone-700 hover:bg-stone-50"
+                      }`}
+                    >
+                      <ActionMenuIcon>{action.icon}</ActionMenuIcon>
+                      <span>{action.label}</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>,
+            document.body
+          )
+        : null}
+    </td>
+  );
+}
+
+/* ─── Detalhes do pedido (drawer) ─────────────────────────────────── */
+
+function OrderProductsCards({ order }: { order: AdminOrder }) {
+  return (
+    <div className="divide-y divide-stone-100">
+      {order.items.map((item) => {
+        const pieces = parsePieces(item.pieceSelectionsJson);
+        const img = item.product.images[0]?.url ?? null;
+        return (
+          <div key={item.id} className="flex gap-3 py-3 first:pt-0 last:pb-0">
+            <div className="relative h-16 w-12 shrink-0 overflow-hidden rounded-lg bg-stone-100">
+              {img ? (
+                <Image src={img} alt="" fill className="object-cover" sizes="48px" />
+              ) : (
+                <div className="flex h-full items-center justify-center text-[9px] text-stone-300">—</div>
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-medium leading-snug text-stone-900">{item.product.name}</p>
+              {pieces.length > 0 ? (
+                <p className="mt-0.5 text-xs text-stone-400">
+                  {pieces.map((p) => [p.pieceName, p.color, p.size].filter(Boolean).join(" · ")).join(" / ")}
+                </p>
+              ) : null}
+              <div className="mt-1.5 flex items-center justify-between gap-2 text-sm">
+                <span className="text-stone-500">
+                  {item.quantity}× {formatPrice(item.price)}
+                </span>
+                <span className="font-semibold tabular-nums text-stone-900">
+                  {formatPrice(item.price * item.quantity)}
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function OrderDetailsBody({
+  order,
+  onRefresh,
+  openCancelForm = false,
+  onCancelIntentHandled,
+}: {
+  order: AdminOrder;
+  onRefresh: () => void;
+  openCancelForm?: boolean;
+  onCancelIntentHandled?: () => void;
 }) {
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [generatingLabel, setGeneratingLabel] = useState(false);
@@ -161,6 +1412,13 @@ function ExpandedRow({
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (openCancelForm) {
+      setShowCancelForm(true);
+      setCancelError(null);
+    }
+  }, [openCancelForm]);
 
   const isCancelled = order.status === "cancelled";
   const hasActiveLabel = Boolean(order.labelUrl || order.superfreteShipmentId);
@@ -214,6 +1472,7 @@ function ExpandedRow({
       }
       setShowCancelForm(false);
       setCancelReason("");
+      onCancelIntentHandled?.();
       onRefresh();
     } catch {
       setCancelError("Erro de conexão.");
@@ -222,253 +1481,415 @@ function ExpandedRow({
     }
   }
 
-  const customerName = order.recipientName || order.user?.name || order.email.split("@")[0];
+  const customerName = orderCustomerName(order);
   const customerPhone = order.phone || order.user?.phone || null;
-  const customerEmail = order.email;
+  const customerEmail = orderCustomerDisplayEmail(order);
   const customerCpf = order.cpf;
 
   const pb = payBadge(order);
+  const itemsSubtotal = order.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const shippingMethod = shortShippingMethod(
+    order.shippingServiceName,
+    order.fulfillmentType,
+    order.deliveryNotes
+  );
+  const arrangedDelivery =
+    order.fulfillmentType === "ARRANGED"
+      ? resolveArrangedDeliveryDisplay({
+          shippingServiceName: order.shippingServiceName,
+          deliveryNotes: order.deliveryNotes,
+          shippingAmount: order.shippingAmount,
+        })
+      : null;
+  const deliveryUserNotes = arrangedDelivery?.userNotes ?? order.deliveryNotes?.trim() ?? null;
+  const addressBlock = formatOrderAddressBlock(order);
+  const showCustomerLink =
+    order.orderSource === "ADMIN_SALE" &&
+    order.customerDataStatus === "PENDING" &&
+    Boolean(order.customerDataToken);
+  const showPaymentLink =
+    order.orderSource === "ADMIN_SALE" &&
+    !order.paidAt &&
+    order.status !== "cancelled" &&
+    order.paymentChannel !== "MANUAL";
+  const hasAdminLinks = showCustomerLink || showPaymentLink;
+  const shippingStatusLocked = !canManuallyChangeShippingStatus(order);
+  const shippingStatusInfo = sInfo(order.shippingStatus);
 
   return (
-    <tr className={muted ? "opacity-45" : undefined}>
-      <td colSpan={colSpan} className="border-b border-stone-200 bg-stone-50/80 px-5 pb-6 pt-1">
-        <div className="grid gap-5 pt-4 lg:grid-cols-[1fr_340px]">
+    <div className="space-y-4">
+      <ExpandedSection title="Produtos">
+        <OrderProductsCards order={order} />
+      </ExpandedSection>
 
-          {/* Produtos */}
-          <div>
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-stone-400">Produtos</p>
-            <div className="overflow-hidden rounded-xl border border-stone-200 bg-white">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-stone-100 text-[10px] font-semibold uppercase tracking-widest text-stone-400">
-                    <th className="py-2.5 pl-4 pr-2 text-left">Produto</th>
-                    <th className="px-2 py-2.5 text-center">Qtd</th>
-                    <th className="px-2 py-2.5 text-right">Unit.</th>
-                    <th className="py-2.5 pl-2 pr-4 text-right">Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-100">
-                  {order.items.map((item) => {
-                    const pieces = parsePieces(item.pieceSelectionsJson);
-                    const img = item.product.images[0]?.url ?? null;
-                    return (
-                      <tr key={item.id}>
-                        <td className="py-3 pl-4 pr-2">
-                          <div className="flex items-center gap-3">
-                            <div className="relative h-12 w-10 shrink-0 overflow-hidden rounded-lg bg-stone-100">
-                              {img
-                                ? <Image src={img} alt="" fill className="object-cover" sizes="40px" />
-                                : <div className="flex h-full items-center justify-center text-[9px] text-stone-300">—</div>}
-                            </div>
-                            <div className="min-w-0">
-                              <p className="font-medium text-stone-900 leading-snug">{item.product.name}</p>
-                              {pieces.length > 0 && (
-                                <p className="mt-0.5 text-xs text-stone-400">
-                                  {pieces.map((p) => [p.pieceName, p.color, p.size].filter(Boolean).join(" · ")).join(" / ")}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-2 py-3 text-center text-stone-600">{item.quantity}</td>
-                        <td className="px-2 py-3 text-right tabular-nums text-stone-600">{formatPrice(item.price)}</td>
-                        <td className="py-3 pl-2 pr-4 text-right tabular-nums font-semibold text-stone-900">{formatPrice(item.price * item.quantity)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t border-stone-100 bg-stone-50">
-                    <td colSpan={3} className="py-2.5 pl-4 pr-2 text-xs font-semibold uppercase tracking-widest text-stone-400">Total</td>
-                    <td className="py-2.5 pl-2 pr-4 text-right tabular-nums font-bold text-stone-900">{formatPrice(order.total)}</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+      <ExpandedSection title="Dados pessoais">
+        <div className="flex items-start gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-stone-100 text-sm font-semibold text-stone-600">
+            {customerInitials(customerName)}
           </div>
-
-          {/* Coluna direita */}
-          <div className="space-y-4">
-
-            {/* Dados da cliente */}
-            <div className="rounded-xl border border-stone-200 bg-white p-4">
-              <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-stone-400">Dados da cliente</p>
-              <dl className="space-y-2 text-sm">
-                <DetailRow label="Nome" value={customerName} />
-                <DetailRow label="E-mail" value={customerEmail} />
-                <DetailRow label="Telefone" value={customerPhone ?? "—"} />
-                <DetailRow label="CPF" value={cpfDisplay(customerCpf)} />
-              </dl>
-            </div>
-
-            {/* Endereço de entrega */}
-            <div className="rounded-xl border border-stone-200 bg-white p-4">
-              <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-stone-400">Endereço de entrega</p>
-              {hasOrderAddress(order) ? (
-                <dl className="space-y-2 text-sm">
-                  <DetailRow label="Logradouro" value={displayOrDash(order.addressStreet)} />
-                  <DetailRow label="Número" value={displayOrDash(order.addressNumber)} />
-                  <DetailRow label="Complemento" value={displayOrDash(order.addressComplement)} />
-                  <DetailRow label="Bairro" value={displayOrDash(order.addressNeighborhood)} />
-                  <DetailRow label="Cidade" value={displayOrDash(order.addressCity)} />
-                  <DetailRow label="Estado" value={displayOrDash(order.addressState)} />
-                  <DetailRow label="CEP" value={cepDisplay(order.destinationCep)} />
-                </dl>
-              ) : (
-                <p className="text-sm text-stone-400">Endereço não informado</p>
-              )}
-              {order.shippingServiceName && (
-                <p className="mt-3 border-t border-stone-100 pt-2 text-xs text-stone-500">
-                  <span className="font-medium">Serviço:</span> {order.shippingServiceName}
-                  {" · "}{order.shippingAmount > 0 ? formatPrice(order.shippingAmount) : "Grátis"}
-                </p>
-              )}
-            </div>
-
-            {/* Pagamento */}
-            <div className="rounded-xl border border-stone-200 bg-white p-4">
-              <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-stone-400">Pagamento</p>
-              <dl className="space-y-2 text-sm">
-                <div className="flex items-center justify-between gap-2">
-                  <dt className="text-stone-500">Status</dt>
-                  <dd className="flex flex-col items-end gap-1">
-                    <Chip label={pb.label} cls={pb.cls} />
-                    {isCancelled && (
-                      <span className="text-[11px] font-medium text-red-600">Venda cancelada</span>
-                    )}
-                  </dd>
-                </div>
-                {order.paidAt && <DetailRow label="Pago em" value={fmtFull(order.paidAt)} />}
-                <DetailRow label="Método" value={paymentMethodLabel(order.paymentCaptureMethod)} />
-                {isCancelled && order.cancelledAt && (
-                  <DetailRow label="Cancelado em" value={fmtFull(order.cancelledAt)} />
-                )}
-                {isCancelled && order.cancellationReason && (
-                  <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-800">
-                    <span className="font-medium">Motivo:</span> {order.cancellationReason}
-                  </div>
-                )}
-              </dl>
-            </div>
-
-            {/* Ações de envio (só pedidos pagos e não cancelados) */}
-            {order.paidAt && !isCancelled && (
-              <div className="rounded-xl border border-stone-200 bg-white p-4 space-y-3">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-stone-400">Status de envio</p>
-                <select
-                  className="w-full rounded-lg border border-stone-200 bg-white py-2 pl-3 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900 disabled:opacity-50"
-                  value={order.shippingStatus}
-                  disabled={updatingStatus}
-                  onChange={(e) => updateShippingStatus(e.target.value)}
-                >
-                  {SHIPPING_STATUS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-                {order.trackingCode && (
-                  <p className="text-xs text-stone-500">
-                    Rastreio: <span className="font-mono">{order.trackingCode}</span>
-                  </p>
-                )}
-                {order.labelUrl ? (
-                  <a href={`/api/admin/orders/${order.id}/label/pdf`} target="_blank" rel="noopener noreferrer"
-                    className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-stone-300 bg-white py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 transition-colors">
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-                    </svg>
-                    Baixar etiqueta
-                  </a>
-                ) : (
-                  <button type="button" disabled={generatingLabel} onClick={generateLabel}
-                    className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-stone-900 py-2 text-sm font-medium text-white hover:bg-stone-800 transition-colors disabled:opacity-50">
-                    {generatingLabel
-                      ? <><span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />Gerando…</>
-                      : <>
-                          <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0110.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0l.229 2.523a1.125 1.125 0 01-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0021 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 00-1.913-.247M6.34 18H5.25A2.25 2.25 0 013 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.056 48.056 0 011.913-.247m10.5 0a48.536 48.536 0 00-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659M18 10.5h.008v.008H18V10.5zm-3 0h.008v.008H15V10.5z" />
-                          </svg>
-                          Gerar etiqueta
-                        </>}
-                  </button>
-                )}
-                {labelError && (
-                  <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{labelError}</p>
-                )}
-              </div>
-            )}
-
-            {!isCancelled && (
-              <div className="rounded-xl border border-red-200 bg-red-50/40 p-4 space-y-3">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-red-700">
-                  Cancelar venda
-                </p>
-                {!showCancelForm ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowCancelForm(true);
-                      setCancelError(null);
-                    }}
-                    className="flex w-full items-center justify-center rounded-lg border border-red-200 bg-white py-2 text-sm font-medium text-red-700 hover:bg-red-50 transition-colors"
-                  >
-                    Cancelar venda
-                  </button>
-                ) : (
-                  <div className="space-y-3">
-                    <div>
-                      <label
-                        htmlFor={`cancel-reason-${order.id}`}
-                        className="mb-1.5 block text-xs font-medium text-stone-700"
-                      >
-                        Motivo do cancelamento
-                      </label>
-                      <textarea
-                        id={`cancel-reason-${order.id}`}
-                        rows={3}
-                        value={cancelReason}
-                        onChange={(e) => setCancelReason(e.target.value)}
-                        placeholder="Ex.: cliente desistiu, pagamento duplicado, endereço inválido…"
-                        className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-red-300"
-                      />
-                    </div>
-                    {hasActiveLabel && (
-                      <p className="text-xs text-red-700">
-                        Este pedido possui etiqueta gerada. Ela será cancelada na SuperFrete também.
-                      </p>
-                    )}
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        disabled={cancelling}
-                        onClick={() => void cancelSale()}
-                        className="flex-1 rounded-lg bg-red-700 py-2 text-sm font-medium text-white hover:bg-red-800 transition-colors disabled:opacity-50"
-                      >
-                        {cancelling ? "Cancelando…" : "Confirmar cancelamento"}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={cancelling}
-                        onClick={() => {
-                          setShowCancelForm(false);
-                          setCancelReason("");
-                          setCancelError(null);
-                        }}
-                        className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 transition-colors disabled:opacity-50"
-                      >
-                        Voltar
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {cancelError && (
-                  <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-                    {cancelError}
-                  </p>
-                )}
-              </div>
-            )}
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-stone-900">{customerName}</p>
+            {customerEmail ? (
+              <p className="mt-1 text-sm text-stone-600">{customerEmail}</p>
+            ) : null}
+            {customerPhone ? <p className="text-sm text-stone-600">{customerPhone}</p> : null}
+            {customerCpf ? (
+              <p className="mt-1 text-xs text-stone-500">CPF {cpfDisplay(customerCpf)}</p>
+            ) : null}
           </div>
         </div>
-      </td>
-    </tr>
+
+        <div className="mt-4 border-t border-stone-100 pt-4">
+          <p className="mb-2 text-xs font-medium text-stone-500">Endereço de entrega</p>
+          {addressBlock ? (
+            <p className="whitespace-pre-line text-sm leading-relaxed text-stone-700">{addressBlock}</p>
+          ) : (
+            <p className="text-sm text-stone-400">Não informado</p>
+          )}
+          {arrangedDelivery ? (
+            <p className="mt-2 text-xs text-stone-500">
+              {arrangedDelivery.typeLabel}
+              {arrangedDelivery.showPrice
+                ? ` · ${order.shippingAmount > 0 ? formatPrice(order.shippingAmount) : "Grátis"}`
+                : null}
+            </p>
+          ) : shippingMethod ? (
+            <p className="mt-2 text-xs text-stone-500">
+              {shippingMethod}
+              {" · "}
+              {order.shippingAmount > 0 ? formatPrice(order.shippingAmount) : "Frete grátis"}
+            </p>
+          ) : null}
+        </div>
+
+        {(order.internalNotes?.trim() || deliveryUserNotes) ? (
+          <div className="mt-4 space-y-2 border-t border-stone-100 pt-4 text-sm text-stone-600">
+            {order.internalNotes?.trim() ? (
+              <p><span className="font-medium text-stone-800">Obs. internas:</span> {order.internalNotes}</p>
+            ) : null}
+            {deliveryUserNotes ? (
+              <p><span className="font-medium text-stone-800">Obs. entrega:</span> {deliveryUserNotes}</p>
+            ) : null}
+          </div>
+        ) : null}
+      </ExpandedSection>
+
+      <ExpandedSection title="Pagamento">
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <span className="text-sm text-stone-500">Status</span>
+          <PaymentStatusBadge label={pb.label} cls={pb.cls} />
+        </div>
+        <dl className="space-y-2 text-sm">
+          <DetailRow label="Método" value={paymentMethodLabel(order.paymentCaptureMethod)} />
+          {order.paidAt ? <DetailRow label="Pago em" value={fmtFull(order.paidAt)} /> : null}
+        </dl>
+        <div className="my-4 border-t border-stone-100" />
+        <div className="space-y-1.5 rounded-lg bg-stone-50 p-3">
+          <ReceiptLine label="Subtotal" value={formatPrice(itemsSubtotal)} />
+          {(order.itemsDiscountTotal ?? 0) > 0 ? (
+            <ReceiptLine label="Desc. itens" value={`-${formatPrice(order.itemsDiscountTotal!)}`} />
+          ) : null}
+          {(order.orderDiscountAmount ?? 0) > 0 ? (
+            <ReceiptLine label="Desc. geral" value={`-${formatPrice(order.orderDiscountAmount!)}`} />
+          ) : null}
+          <ReceiptLine
+            label="Frete"
+            value={order.shippingAmount > 0 ? formatPrice(order.shippingAmount) : "Grátis"}
+          />
+          <div className="border-t border-stone-200 pt-2">
+            <ReceiptLine label="Total" value={formatPrice(order.total)} bold />
+          </div>
+        </div>
+        {isCancelled && order.cancelledAt ? (
+          <p className="mt-3 text-xs text-stone-500">Cancelado em {fmtFull(order.cancelledAt)}</p>
+        ) : null}
+        {isCancelled && order.cancellationReason ? (
+          <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">
+            <span className="font-medium">Motivo:</span> {order.cancellationReason}
+          </p>
+        ) : null}
+      </ExpandedSection>
+
+      {!isCancelled ? (
+        <ExpandedSection title="Ações">
+          <div className="space-y-3">
+            {order.paidAt ? (
+              <>
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-stone-500">
+                    Status do envio
+                  </label>
+                  {shippingStatusLocked ? (
+                    <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2.5">
+                      {order.shippingStatus === "delivered" ? (
+                        <ShippingStatusBadge
+                          label={tableShippingLabel(order.shippingStatus)}
+                          tone="emerald"
+                        />
+                      ) : order.shippingStatus === "packed" ? (
+                        <ShippingStatusBadge
+                          label={tableShippingLabel(order.shippingStatus)}
+                          tone="blue"
+                        />
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-stone-800">
+                          <span className={`h-2 w-2 shrink-0 rounded-full ${shippingStatusInfo.dot}`} />
+                          {tableShippingLabel(order.shippingStatus)}
+                        </span>
+                      )}
+                      <p className="mt-1.5 text-xs text-stone-500">
+                        Atualizado automaticamente pela SuperFrete.
+                      </p>
+                    </div>
+                  ) : (
+                    <select
+                      className="w-full rounded-lg border border-stone-200 bg-white py-2 pl-3 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900 disabled:opacity-50"
+                      value={order.shippingStatus}
+                      disabled={updatingStatus}
+                      onChange={(e) => updateShippingStatus(e.target.value)}
+                    >
+                      {manualShippingStatusOptions(order).map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                {order.trackingCode ? (
+                  <p className="text-xs text-stone-500">
+                    Rastreio: <span className="font-mono text-stone-700">{order.trackingCode}</span>
+                  </p>
+                ) : null}
+                <div className="flex flex-col gap-2">
+                  {order.fulfillmentType !== "ARRANGED" ? (
+                    order.labelUrl ? (
+                      <a
+                        href={`/api/admin/orders/${order.id}/label/pdf`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex w-full items-center justify-center rounded-lg border border-stone-200 bg-white py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
+                      >
+                        Baixar etiqueta
+                      </a>
+                    ) : order.shippingStatus === "packed" ? (
+                      <button
+                        type="button"
+                        disabled={generatingLabel}
+                        onClick={generateLabel}
+                        className="flex w-full items-center justify-center rounded-lg bg-stone-900 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:opacity-50"
+                      >
+                        {generatingLabel ? "Gerando…" : "Gerar etiqueta"}
+                      </button>
+                    ) : (
+                      <p className="text-xs text-stone-500">
+                        Marque como embalada para gerar a etiqueta.
+                      </p>
+                    )
+                  ) : null}
+                  {order.fulfillmentType === "ARRANGED" &&
+                  order.shippingStatus !== "shipped" &&
+                  order.shippingStatus !== "delivered" ? (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await fetch(`/api/admin/sales/${order.id}/mark-shipped`, { method: "POST" });
+                        onRefresh();
+                      }}
+                      className="flex w-full items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 py-2 text-sm font-medium text-emerald-800 transition-colors hover:bg-emerald-100"
+                    >
+                      Marcar enviado
+                    </button>
+                  ) : null}
+                </div>
+                {labelError ? (
+                  <p className="text-xs text-red-600">{labelError}</p>
+                ) : null}
+              </>
+            ) : (
+              <p className="text-xs text-stone-500">
+                Status de envio e etiqueta disponíveis após o pagamento.
+              </p>
+            )}
+
+            {showCancelForm ? (
+              <div className="space-y-2 border-t border-stone-100 pt-3">
+                <textarea
+                  id={`cancel-reason-${order.id}`}
+                  rows={2}
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  placeholder="Motivo do cancelamento…"
+                  className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-200"
+                />
+                {hasActiveLabel ? (
+                  <p className="text-xs text-stone-500">A etiqueta será cancelada na SuperFrete.</p>
+                ) : null}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={cancelling}
+                    onClick={() => void cancelSale()}
+                    className="flex-1 rounded-lg bg-red-600 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {cancelling ? "Cancelando…" : "Confirmar"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={cancelling}
+                    onClick={() => {
+                      setShowCancelForm(false);
+                      setCancelReason("");
+                      setCancelError(null);
+                      onCancelIntentHandled?.();
+                    }}
+                    className="rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-600 hover:bg-stone-50"
+                  >
+                    Voltar
+                  </button>
+                </div>
+                {cancelError ? <p className="text-xs text-red-600">{cancelError}</p> : null}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCancelForm(true);
+                  setCancelError(null);
+                }}
+                className="flex w-full items-center justify-center rounded-lg border border-red-200 bg-red-50 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100"
+              >
+                Cancelar venda
+              </button>
+            )}
+          </div>
+        </ExpandedSection>
+      ) : null}
+
+      {hasAdminLinks ? (
+        <ExpandedSection title="Links">
+          <AdminSaleLinks order={order} />
+        </ExpandedSection>
+      ) : null}
+    </div>
+  );
+}
+
+function SaleOrderDrawer({
+  order,
+  open,
+  onClose,
+  onRefresh,
+  openCancelForm = false,
+  onCancelIntentHandled,
+}: {
+  order: AdminOrder | null;
+  open: boolean;
+  onClose: () => void;
+  onRefresh: () => void;
+  openCancelForm?: boolean;
+  onCancelIntentHandled?: () => void;
+}) {
+  const [mounted, setMounted] = useState(false);
+  const [entered, setEntered] = useState(false);
+  const [displayOrder, setDisplayOrder] = useState<AdminOrder | null>(null);
+
+  useEffect(() => {
+    if (open && order) {
+      setDisplayOrder(order);
+      setMounted(true);
+      setEntered(false);
+      let inner = 0;
+      const outer = requestAnimationFrame(() => {
+        inner = requestAnimationFrame(() => setEntered(true));
+      });
+      return () => {
+        cancelAnimationFrame(outer);
+        if (inner) cancelAnimationFrame(inner);
+      };
+    }
+
+    if (!open) {
+      setEntered(false);
+      const t = window.setTimeout(() => {
+        setMounted(false);
+        setDisplayOrder(null);
+      }, DETAILS_DRAWER_MS);
+      return () => clearTimeout(t);
+    }
+  }, [open, order]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [mounted]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mounted, onClose]);
+
+  if (!mounted || !displayOrder) return null;
+
+  const title = `Pedido #${displayOrder.orderNumber ?? "—"}`;
+  const isSaleCancelled = displayOrder.status === "cancelled";
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100]">
+      <button
+        type="button"
+        className={`absolute inset-0 bg-black/40 backdrop-blur-[1px] transition-opacity duration-300 ease-out motion-reduce:transition-none ${
+          entered ? "opacity-100" : "opacity-0"
+        }`}
+        aria-label="Fechar detalhes do pedido"
+        onClick={onClose}
+      />
+      <aside
+        className={`absolute top-0 right-0 flex h-full w-full max-w-full flex-col bg-white shadow-2xl transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none sm:max-w-md sm:border-l sm:border-stone-200 ${
+          entered ? "translate-x-0" : "translate-x-full"
+        }`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sale-order-drawer-title"
+      >
+        <div className="flex shrink-0 items-center justify-between border-b border-stone-200 px-4 py-4">
+          <div className="min-w-0">
+            <h2 id="sale-order-drawer-title" className="text-lg font-semibold text-stone-900">
+              {title}
+            </h2>
+            {isSaleCancelled ? (
+              <p className="mt-0.5 text-xs font-medium text-red-600">Cancelado</p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            className="rounded-full p-2 text-stone-500 hover:bg-stone-100 hover:text-stone-900"
+            aria-label="Fechar"
+            onClick={onClose}
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+          <OrderDetailsBody
+            order={displayOrder}
+            onRefresh={onRefresh}
+            openCancelForm={openCancelForm}
+            onCancelIntentHandled={onCancelIntentHandled}
+          />
+        </div>
+      </aside>
+    </div>,
+    document.body
   );
 }
 
@@ -485,42 +1906,104 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 
 export function SalesManager() {
   const [orders, setOrders]       = useState<AdminOrder[]>([]);
-  const [total, setTotal]         = useState(0);
   const [loading, setLoading]     = useState(true);
-  const [filter, setFilter]       = useState<FilterKey>("all");
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [filter, setFilter]       = useState<FilterKey | null>(null);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState("");
+  const [saleDateRange, setSaleDateRange] = useState<SaleDateRange>(
+    EMPTY_SALE_DATE_RANGE
+  );
+  const [detailsOrderId, setDetailsOrderId] = useState<string | null>(null);
+  const [cancelFormOrderId, setCancelFormOrderId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkMsg, setBulkMsg]         = useState<string | null>(null);
+  const [showWizard, setShowWizard] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+
+  const fetchProducts = useCallback(async () => {
+    const res = await fetch("/api/products");
+    const data = await res.json();
+    if (Array.isArray(data)) setProducts(data as Product[]);
+  }, []);
+
+  useEffect(() => {
+    if (showWizard && products.length === 0) void fetchProducts();
+  }, [showWizard, products.length, fetchProducts]);
   const allRef = useRef<HTMLInputElement>(null);
 
   const fetchOrders = useCallback(async () => {
-    setLoading(true); setSelectedIds(new Set()); setExpandedIds(new Set());
+    setLoading(true); setSelectedIds(new Set()); setDetailsOrderId(null);
     try {
-      const qs = filter !== "all" ? `?status=${filter}` : "";
-      const res = await fetch(`/api/admin/orders${qs}`);
+      const res = await fetch("/api/admin/orders");
       const data = (await res.json()) as ApiResponse;
       setOrders(data.orders ?? []);
-      setTotal(data.total ?? 0);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [filter]);
+  }, []);
 
   useEffect(() => { void fetchOrders(); }, [fetchOrders]);
+
+  const filterCounts = useMemo(
+    () => ({
+      paid: orders.filter((order) => order.paidAt).length,
+      waiting: orders.filter((order) => !order.paidAt).length,
+      to_pack: orders.filter(
+        (order) => order.paidAt && order.shippingStatus === "to_pack"
+      ).length,
+    }),
+    [orders]
+  );
+
+  const visibleOrders = useMemo(() => {
+    const query = customerSearchQuery.trim();
+
+    return orders.filter((order) => {
+      if (!orderMatchesStatusFilter(order, filter)) return false;
+      if (!orderMatchesSaleDateRange(order, saleDateRange)) return false;
+      return orderMatchesCustomerSearch(order, query);
+    });
+  }, [orders, filter, customerSearchQuery, saleDateRange]);
+
+  function toggleFilter(key: FilterKey) {
+    setFilter((current) => (current === key ? null : key));
+  }
 
   useEffect(() => {
     if (!allRef.current) return;
     const n = selectedIds.size;
-    allRef.current.indeterminate = n > 0 && n < orders.length;
-    allRef.current.checked = n === orders.length && orders.length > 0;
-  }, [selectedIds, orders.length]);
+    allRef.current.indeterminate = n > 0 && n < visibleOrders.length;
+    allRef.current.checked = n === visibleOrders.length && visibleOrders.length > 0;
+  }, [selectedIds, visibleOrders.length]);
 
-  const toggleExpand = (id: string) =>
-    setExpandedIds((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const openDetails = (id: string) => setDetailsOrderId(id);
+
+  const closeDetails = () => {
+    setDetailsOrderId(null);
+    setCancelFormOrderId((current) =>
+      current === detailsOrderId ? null : current
+    );
+  };
+
+  const toggleDetails = (id: string) => {
+    if (detailsOrderId === id) {
+      closeDetails();
+    } else {
+      openDetails(id);
+    }
+  };
+
+  function requestCancel(orderId: string) {
+    setDetailsOrderId(orderId);
+    setCancelFormOrderId(orderId);
+  }
   const toggleSelect = (id: string) =>
     setSelectedIds((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const toggleAll = () =>
-    setSelectedIds(selectedIds.size === orders.length ? new Set() : new Set(orders.map((o) => o.id)));
+    setSelectedIds(
+      selectedIds.size === visibleOrders.length
+        ? new Set()
+        : new Set(visibleOrders.map((o) => o.id))
+    );
 
   async function bulkShipping(status: string, label: string) {
     const ids = [...selectedIds];
@@ -540,63 +2023,142 @@ export function SalesManager() {
   }
 
   const FILTERS: { key: FilterKey; label: string }[] = [
-    { key: "all",     label: "Todas" },
     { key: "paid",    label: "Pagas" },
     { key: "waiting", label: "Aguardando pagamento" },
+    { key: "to_pack", label: "Por embalar" },
   ];
 
-  const paidOrders = orders.filter((o) => o.paidAt);
-  const paidTotal  = paidOrders.reduce((s, o) => s + o.total, 0);
-  const toPackCount = paidOrders.filter((o) => o.shippingStatus === "to_pack").length;
-
-  const COL_COUNT = 8;
+  const detailsOrder = detailsOrderId
+    ? visibleOrders.find((order) => order.id === detailsOrderId) ??
+      orders.find((order) => order.id === detailsOrderId) ??
+      null
+    : null;
+  const hasCustomerSearch = customerSearchQuery.trim().length > 0;
+  const hasSaleDateFilter = hasSaleDateRangeSelection(saleDateRange);
+  const hasActiveFilter = filter !== null;
+  const hasListFilters =
+    hasCustomerSearch || hasActiveFilter || hasSaleDateFilter;
 
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-stone-900">Vendas</h2>
-          <p className="mt-0.5 text-sm text-stone-500">{total} pedido{total !== 1 ? "s" : ""}</p>
+          <p className="mt-0.5 text-sm text-stone-500">
+            {hasListFilters
+              ? `${visibleOrders.length} de ${orders.length} pedido${orders.length !== 1 ? "s" : ""}`
+              : `${orders.length} pedido${orders.length !== 1 ? "s" : ""}`}
+          </p>
         </div>
-        <button type="button" onClick={fetchOrders} disabled={loading}
-          className="flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-600 hover:bg-stone-50 transition-colors disabled:opacity-50">
-          <svg className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setShowWizard(true)}
+            className={`inline-flex items-center gap-1.5 rounded-lg bg-blue-500 px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-600 ${SALES_TOOLBAR_SIZE}`}
+          >
+            Criar Venda Avulsa
+          </button>
+          <button
+            type="button"
+            onClick={fetchOrders}
+            disabled={loading}
+            className={`inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50 ${SALES_TOOLBAR_SIZE}`}
+          >
+          <svg className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
           </svg>
-          Atualizar
         </button>
+        </div>
       </div>
 
-      {/* Cards resumo */}
-      {!loading && filter === "all" && orders.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {[
-            { label: "Pedidos pagos",  val: String(paidOrders.length) },
-            { label: "Receita",        val: formatPrice(paidTotal) },
-            { label: "Ticket médio",   val: paidOrders.length > 0 ? formatPrice(paidTotal / paidOrders.length) : "—" },
-            { label: "Por embalar",    val: String(toPackCount) },
-          ].map(({ label, val }) => (
-            <div key={label} className="rounded-xl border border-stone-200 bg-white px-4 py-3">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-stone-400">{label}</p>
-              <p className="mt-1 text-xl font-semibold text-stone-900">{val}</p>
-            </div>
-          ))}
-        </div>
+      {showWizard && (
+        <StandaloneSaleWizard
+          products={products}
+          onClose={() => setShowWizard(false)}
+          onCreated={() => void fetchOrders()}
+        />
       )}
+      <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5 md:justify-between md:overflow-visible">
+        <div className="flex shrink-0 items-center gap-1.5">
+          {FILTERS.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => toggleFilter(key)}
+              className={`inline-flex shrink-0 items-center gap-2 transition-colors ${SALES_TOOLBAR_CONTROL} ${
+                filter === key
+                  ? "border-stone-900 bg-stone-900 text-white"
+                  : "border-stone-200 bg-white text-stone-600 hover:border-stone-300 hover:bg-stone-50"
+              }`}
+            >
+              <span>{label}</span>
+              <span
+                className={`inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-sm border px-1 text-[11px] font-semibold tabular-nums ${
+                  filter === key
+                    ? "border-white/25 bg-white/10 text-white"
+                    : "border-stone-200 bg-stone-100 text-stone-700"
+                }`}
+              >
+                {filterCounts[key]}
+              </span>
+            </button>
+          ))}
 
-      {/* Filtros */}
-      <div className="flex flex-wrap gap-1.5">
-        {FILTERS.map(({ key, label }) => (
-          <button key={key} type="button" onClick={() => setFilter(key)}
-            className={`rounded-lg border px-3.5 py-1.5 text-sm font-medium transition-colors ${
-              filter === key
-                ? "border-stone-900 bg-stone-900 text-white"
-                : "border-stone-200 bg-white text-stone-600 hover:border-stone-300 hover:bg-stone-50"
-            }`}>
-            {label}
-          </button>
-        ))}
+          <SaleDatePicker
+            range={saleDateRange}
+            onChange={setSaleDateRange}
+          />
+        </div>
+
+        <label className="relative ml-1.5 w-full min-w-[9.5rem] shrink-0 md:ml-auto md:w-52 md:max-w-none lg:w-90">
+          <span className="sr-only">Buscar por nome do cliente</span>
+          <svg
+            className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-400"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.75}
+            viewBox="0 0 24 24"
+            aria-hidden
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+            />
+          </svg>
+          <input
+            type="text"
+            inputMode="search"
+            value={customerSearchQuery}
+            onChange={(event) => setCustomerSearchQuery(event.target.value)}
+            placeholder="Buscar cliente…"
+            className={`w-full rounded-lg border border-stone-200 bg-white text-stone-900 placeholder:text-stone-400 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-100 ${SALES_TOOLBAR_SIZE} pl-8 ${hasCustomerSearch ? "pr-8" : "pr-3"}`}
+          />
+          {hasCustomerSearch ? (
+            <button
+              type="button"
+              onClick={() => setCustomerSearchQuery("")}
+              aria-label="Limpar busca"
+              className="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600"
+            >
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                viewBox="0 0 24 24"
+                aria-hidden
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M6 18 18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          ) : null}
+        </label>
       </div>
 
       {/* Barra de ações em massa */}
@@ -605,7 +2167,7 @@ export function SalesManager() {
           <span className="text-sm font-medium text-stone-700">{selectedIds.size} selecionado{selectedIds.size !== 1 ? "s" : ""}</span>
           <div className="ml-2 flex flex-wrap gap-2">
             <BulkBtn onClick={() => bulkShipping("to_pack",  "Por embalar")} disabled={bulkLoading}>Por embalar</BulkBtn>
-            <BulkBtn onClick={() => bulkShipping("packed",   "Embalado")}   disabled={bulkLoading} cls="border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100">Marcar embalado</BulkBtn>
+            <BulkBtn onClick={() => bulkShipping("packed",   "Por enviar")}   disabled={bulkLoading} cls="border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100">Marcar embalado</BulkBtn>
             <BulkBtn onClick={() => bulkShipping("shipped",  "Enviado")}    disabled={bulkLoading} cls="border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100">Marcar enviado</BulkBtn>
           </div>
           {bulkLoading && <span className="h-4 w-4 animate-spin rounded-full border-2 border-stone-300 border-t-stone-700" />}
@@ -619,150 +2181,184 @@ export function SalesManager() {
           <span className="h-4 w-4 animate-spin rounded-full border-2 border-stone-200 border-t-stone-700" />
           Carregando pedidos…
         </div>
-      ) : orders.length === 0 ? (
+      ) : visibleOrders.length === 0 ? (
         <div className="rounded-xl border border-stone-200 bg-stone-50 py-14 text-center">
           <p className="text-sm text-stone-500">
-            {filter === "waiting" ? "Nenhum pedido aguardando pagamento."
-              : filter === "paid" ? "Nenhum pedido pago encontrado."
-              : "Nenhuma venda encontrada."}
+            {hasCustomerSearch
+              ? `Nenhum pedido encontrado para “${customerSearchQuery.trim()}”.`
+              : hasSaleDateFilter
+                ? `Nenhum pedido encontrado no período ${formatSaleDateRangeLabel(saleDateRange)}.`
+                : filter === "waiting"
+                ? "Nenhum pedido aguardando pagamento."
+                : filter === "paid"
+                  ? "Nenhum pedido pago encontrado."
+                  : filter === "to_pack"
+                    ? "Nenhum pedido por embalar."
+                    : "Nenhuma venda encontrada."}
           </p>
         </div>
       ) : (
         /* ─── Tabela ─── */
-        <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white shadow-sm">
-          <table className="w-full min-w-[860px] text-sm">
-            <thead>
-              <tr className="border-b border-stone-200 bg-stone-50 text-[11px] font-semibold uppercase tracking-wider text-stone-400">
-                <th className="w-10 px-4 py-3">
-                  <input ref={allRef} type="checkbox" aria-label="Selecionar todos"
-                    className="h-4 w-4 rounded border-stone-300 accent-stone-900" onChange={toggleAll} />
-                </th>
-                <th className="px-3 py-3 text-left">Pedido</th>
-                <th className="px-3 py-3 text-left">Data</th>
-                <th className="px-3 py-3 text-left">Cliente</th>
-                <th className="px-3 py-3 text-left">Pagamento</th>
-                <th className="px-3 py-3 text-center">Produtos</th>
-                <th className="px-3 py-3 text-right">Total</th>
-                <th className="px-3 py-3 text-left">Envio</th>
-                <th className="w-8 px-3 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map((order) => {
-                const isExpanded = expandedIds.has(order.id);
-                const isSelected = selectedIds.has(order.id);
-                const isSaleCancelled = order.status === "cancelled";
-                const pb = payBadge(order);
-                const ss = sInfo(order.shippingStatus);
-                const totalUnits = order.items.reduce((s, i) => s + i.quantity, 0);
-                const customerName = order.recipientName || order.user?.name || order.email.split("@")[0];
-                const rowMuted = isSaleCancelled
-                  ? "opacity-45 pointer-events-auto"
-                  : "";
+        <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead>
+                <tr className="border-b border-stone-200 bg-stone-50/80 text-xs font-medium text-stone-500">
+                  <th className="w-10 px-4 py-3.5">
+                    <input
+                      ref={allRef}
+                      type="checkbox"
+                      aria-label="Selecionar todos"
+                      className="h-4 w-4 rounded border-stone-300 accent-stone-900"
+                      onChange={toggleAll}
+                    />
+                  </th>
+                  <th className="px-4 py-3.5 text-left">Pedido</th>
+                  <th className="px-4 py-3.5 text-left">Data</th>
+                  <th className="px-4 py-3.5 text-left">Cliente</th>
+                  <th className="px-4 py-3.5 text-left">Pagamento</th>
+                  <th className="px-4 py-3.5 text-right">Total</th>
+                  <th className="px-4 py-3.5 text-left">Envio</th>
+                  <th className="w-12 px-3 py-3.5 text-center">Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleOrders.map((order) => {
+                  const isDetailsOpen = detailsOrderId === order.id;
+                  const isSelected = selectedIds.has(order.id);
+                  const isSaleCancelled = order.status === "cancelled";
+                  const customerName = orderCustomerName(order);
+                  const shippingMethod = shortShippingMethod(
+                    order.shippingServiceName,
+                    order.fulfillmentType,
+                    order.deliveryNotes
+                  );
+                  const adminSaleNotes = order.internalNotes?.trim() ?? "";
 
-                return (
-                  <Fragment key={order.id}>
-                    <tr
-                      className={`border-b border-stone-100 transition-colors ${rowMuted} ${
-                        isSaleCancelled
-                          ? "bg-stone-50/60"
-                          : isExpanded
+                  return (
+                    <Fragment key={order.id}>
+                      <tr
+                        className={`border-b border-stone-100 transition-colors ${
+                          isSaleCancelled
                             ? "bg-stone-50"
-                            : "hover:bg-stone-50/60"
-                      } ${isSelected && !isSaleCancelled ? "bg-stone-100" : ""}`}>
+                            : isDetailsOpen
+                              ? "bg-stone-50/70"
+                              : "hover:bg-stone-50/60"
+                        } ${isSelected ? "bg-stone-100/70" : ""}`}
+                      >
+                        <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelect(order.id)}
+                            className="h-4 w-4 rounded border-stone-300 accent-stone-900"
+                          />
+                        </td>
 
-                      {/* Checkbox */}
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(order.id)}
-                          className="h-4 w-4 rounded border-stone-300 accent-stone-900" />
-                      </td>
-
-                      {/* # Pedido */}
-                      <td className="cursor-pointer px-3 py-3" onClick={() => toggleExpand(order.id)}>
-                        <span className="font-mono font-semibold text-stone-900">
-                          #{order.orderNumber ?? "—"}
-                        </span>
-                      </td>
-
-                      {/* Data — data em cima, hora embaixo */}
-                      <td className="cursor-pointer px-3 py-3" onClick={() => toggleExpand(order.id)}>
-                        <p className="font-medium text-stone-700">{fmtDate(order.createdAt)}</p>
-                        <p className="text-xs text-stone-400">{fmtTime(order.createdAt)}</p>
-                      </td>
-
-                      {/* Cliente — só nome */}
-                      <td className="cursor-pointer px-3 py-3" onClick={() => toggleExpand(order.id)}>
-                        <p className="font-medium text-stone-900 truncate max-w-[140px]">{customerName}</p>
-                      </td>
-
-                      {/* Pagamento: status + método + tempo (se aguardando) */}
-                      <td className="cursor-pointer px-3 py-3" onClick={() => toggleExpand(order.id)}>
-                        <div className="flex flex-col gap-1">
-                          <Chip label={pb.label} cls={pb.cls} />
-                          {isSaleCancelled && (
-                            <span className="text-[11px] font-medium text-red-600">Venda cancelada</span>
-                          )}
-                          <span className="text-xs text-stone-400">{paymentMethodLabel(order.paymentCaptureMethod)}</span>
-                          {!order.paidAt && !isSaleCancelled && (
-                            <span className="text-[11px] text-stone-400 italic">{elapsed(order.createdAt)}</span>
-                          )}
-                        </div>
-                      </td>
-
-                      {/* Produtos */}
-                      <td className="cursor-pointer px-3 py-3 text-center" onClick={() => toggleExpand(order.id)}>
-                        <p className="font-medium text-stone-900">{order.items.length} {order.items.length === 1 ? "item" : "itens"}</p>
-                        <p className="text-xs text-stone-400">{totalUnits} unid.</p>
-                      </td>
-
-                      {/* Total */}
-                      <td className="cursor-pointer px-3 py-3 text-right" onClick={() => toggleExpand(order.id)}>
-                        <span className="font-semibold tabular-nums text-stone-900">{formatPrice(order.total)}</span>
-                      </td>
-
-                      {/* Envio */}
-                      <td className="cursor-pointer px-3 py-3" onClick={() => toggleExpand(order.id)}>
-                        {isSaleCancelled ? (
-                          <span className="text-xs text-stone-400">—</span>
-                        ) : order.paidAt ? (
-                          <div className="flex flex-col gap-1">
+                        <td
+                          className="cursor-pointer px-4 py-3.5"
+                          onClick={() => openDetails(order.id)}
+                        >
+                          <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-1.5">
-                              <span className={`h-2 w-2 rounded-full ${ss.dot}`} />
-                              <span className="text-stone-700">{ss.label}</span>
+                              <span className={`font-mono ${TABLE_CELL_PRIMARY}`}>
+                                #{order.orderNumber ?? "—"}
+                              </span>
+                              {order.orderSource === "ADMIN_SALE" ? (
+                                <>
+                                  <span className="text-xs font-normal text-stone-600">Avulsa</span>
+                                  {adminSaleNotes ? (
+                                    <span onClick={(e) => e.stopPropagation()}>
+                                      <AdminSaleNotesHint notes={adminSaleNotes} />
+                                    </span>
+                                  ) : null}
+                                </>
+                              ) : null}
                             </div>
-                            {order.shippingServiceName && (
-                              <span className="text-xs text-stone-400 truncate max-w-[130px]">{order.shippingServiceName}</span>
-                            )}
+                            {isSaleCancelled ? (
+                              <span className="text-xs font-normal text-red-600">Cancelado</span>
+                            ) : null}
                           </div>
-                        ) : (
-                          <span className="text-stone-300">—</span>
-                        )}
-                      </td>
+                        </td>
 
-                      {/* Chevron */}
-                      <td className="cursor-pointer px-3 py-3" onClick={() => toggleExpand(order.id)}>
-                        <svg className={`mx-auto h-4 w-4 text-stone-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}
-                          fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                        </svg>
-                      </td>
-                    </tr>
+                        <td
+                          className="cursor-pointer px-4 py-3.5"
+                          onClick={() => openDetails(order.id)}
+                        >
+                          <p className={TABLE_CELL_PRIMARY}>{fmtDate(order.createdAt)}</p>
+                          <p className={TABLE_CELL_SECONDARY}>{fmtTime(order.createdAt)}</p>
+                        </td>
 
-                    {isExpanded && (
-                      <ExpandedRow
-                        order={order}
-                        colSpan={COL_COUNT + 1}
-                        onRefresh={fetchOrders}
-                        muted={isSaleCancelled}
-                      />
-                    )}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
+                        <td
+                          className="cursor-pointer px-4 py-3.5"
+                          onClick={() => openDetails(order.id)}
+                        >
+                          <p className={`truncate max-w-[160px] ${TABLE_CELL_PRIMARY}`}>
+                            {customerName}
+                          </p>
+                        </td>
+
+                        <td
+                          className="cursor-pointer px-4 py-3.5"
+                          onClick={() => openDetails(order.id)}
+                        >
+                          <TablePaymentCell order={order} isSaleCancelled={isSaleCancelled} />
+                        </td>
+
+                        <td
+                          className="cursor-pointer px-4 py-3.5 text-right"
+                          onClick={() => openDetails(order.id)}
+                        >
+                          <p className={`tabular-nums ${TABLE_CELL_PRIMARY}`}>
+                            {formatPrice(order.total)}
+                          </p>
+                        </td>
+
+                        <td
+                          className="cursor-pointer px-4 py-3.5"
+                          onClick={() => openDetails(order.id)}
+                        >
+                          {isSaleCancelled ? (
+                            <span className="text-xs text-stone-400">—</span>
+                          ) : order.paidAt ? (
+                            <TableShippingStatus
+                              status={order.shippingStatus}
+                              shippingMethod={shippingMethod}
+                            />
+                          ) : (
+                            <span className="text-xs text-stone-300">—</span>
+                          )}
+                        </td>
+
+                        <OrderRowActionsMenu
+                          order={order}
+                          isDetailsOpen={isDetailsOpen}
+                          onToggleDetails={() => toggleDetails(order.id)}
+                          onRefresh={() => void fetchOrders()}
+                          onRequestCancel={() => requestCancel(order.id)}
+                        />
+                      </tr>
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
+
+      <SaleOrderDrawer
+        order={detailsOrder}
+        open={detailsOrderId !== null}
+        onClose={closeDetails}
+        onRefresh={() => void fetchOrders()}
+        openCancelForm={cancelFormOrderId === detailsOrderId}
+        onCancelIntentHandled={() =>
+          setCancelFormOrderId((current) =>
+            current === detailsOrderId ? null : current
+          )
+        }
+      />
     </div>
   );
 }

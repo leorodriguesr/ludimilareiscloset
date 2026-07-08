@@ -24,11 +24,11 @@ export function insertPieceVariantRow(
   `;
 }
 
-export function deletePieceVariantsForPiece(
+export async function deletePieceVariantsForPiece(
   tx: SqlClient,
   pieceId: string
-): Promise<number> {
-  return tx.$executeRaw`
+): Promise<void> {
+  await tx.$executeRaw`
     DELETE FROM "PieceVariant" WHERE "pieceId" = ${pieceId}
   `;
 }

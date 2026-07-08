@@ -114,6 +114,14 @@ interface ProductFormProps {
   onSuccess: () => void;
 }
 
+const LABEL_CLASS = "mb-1.5 block text-sm font-semibold text-stone-800";
+const INPUT_CLASS =
+  "w-full rounded-lg border border-stone-300 bg-white px-4 py-2.5 text-sm text-stone-900 shadow-sm placeholder:text-stone-400 focus:border-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-900/10 transition-colors";
+const SECTION_CLASS =
+  "space-y-4 rounded-xl border border-stone-200 bg-white p-4 shadow-sm sm:p-5";
+const SECTION_TITLE_CLASS = "text-sm font-semibold text-stone-900";
+const HELPER_CLASS = "mt-1.5 text-xs text-stone-500";
+
 const COMMON_SIZES = ["PP", "P", "M", "G", "GG", "XG"];
 
 const COMMON_COLORS = [
@@ -411,9 +419,11 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2">
+      <section className={SECTION_CLASS}>
+        <h3 className={SECTION_TITLE_CLASS}>Informações básicas</h3>
+        <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <label className="block text-sm font-medium text-stone-700 mb-1">
+          <label className={LABEL_CLASS}>
             Nome *
           </label>
           <input
@@ -421,12 +431,12 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
             required
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
-            className="w-full rounded-lg border border-stone-300 px-4 py-2.5 text-sm focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors"
+            className={INPUT_CLASS}
             placeholder="Nome do produto"
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-stone-700 mb-1">
+          <label className={LABEL_CLASS}>
             Preço de venda (R$) *
           </label>
           <input
@@ -436,12 +446,12 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
             min="0"
             value={form.price}
             onChange={(e) => setForm({ ...form, price: e.target.value })}
-            className="w-full rounded-lg border border-stone-300 px-4 py-2.5 text-sm focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors"
+            className={INPUT_CLASS}
             placeholder="99.90"
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-stone-700 mb-1">
+          <label className={LABEL_CLASS}>
             Pagamento por Pix (R$)
           </label>
           <input
@@ -450,16 +460,16 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
             min="0"
             value={form.pixPrice}
             onChange={(e) => setForm({ ...form, pixPrice: e.target.value })}
-            className="w-full rounded-lg border border-stone-300 px-4 py-2.5 text-sm focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors"
+            className={INPUT_CLASS}
             placeholder="Ex.: 89,90"
           />
-          <p className="mt-1 text-xs text-stone-500">
+          <p className={HELPER_CLASS}>
             Opcional. Só aparece o card “Pix” na página do produto quando este
             valor estiver preenchido.
           </p>
         </div>
         <div>
-          <label className="block text-sm font-medium text-stone-700 mb-1">
+          <label className={LABEL_CLASS}>
             Parcelas no cartão (sem juros)
           </label>
           <input
@@ -471,10 +481,10 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
             onChange={(e) =>
               setForm({ ...form, installmentCount: e.target.value })
             }
-            className="w-full rounded-lg border border-stone-300 px-4 py-2.5 text-sm focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors"
+            className={INPUT_CLASS}
             placeholder="Ex.: 3 — vazio = só preço no cartão"
           />
-          <p className="mt-1 text-xs text-stone-500">
+          <p className={HELPER_CLASS}>
             Opcional. Com número, a vitrine mostra “Parcelamento” (Nx sem
             juros). Vazio, só “Cartão” com o preço.
           </p>
@@ -482,7 +492,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-stone-700 mb-1">
+        <label className={LABEL_CLASS}>
           Preço de custo (R$)
         </label>
         <input
@@ -491,18 +501,19 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
           min="0"
           value={form.costPrice}
           onChange={(e) => setForm({ ...form, costPrice: e.target.value })}
-          className="w-full max-w-xs rounded-lg border border-stone-300 px-4 py-2.5 text-sm focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors"
+          className={`${INPUT_CLASS} max-w-xs`}
           placeholder="Opcional — uso interno"
         />
       </div>
+      </section>
 
-      <div className="rounded-lg border border-stone-200 bg-stone-50 p-4 space-y-4">
-        <h3 className="text-sm font-semibold text-stone-900">
+      <section className={SECTION_CLASS}>
+        <h3 className={SECTION_TITLE_CLASS}>
           Peso e dimensões (envio)
         </h3>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div>
-            <label className="block text-xs font-medium text-stone-600 mb-1">
+            <label className="mb-1.5 block text-xs font-semibold text-stone-700">
               Peso (g)
             </label>
             <input
@@ -513,12 +524,12 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
               onChange={(e) =>
                 setForm({ ...form, weightGrams: e.target.value })
               }
-              className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
+              className={INPUT_CLASS}
               placeholder="Ex: 320"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-stone-600 mb-1">
+            <label className="mb-1.5 block text-xs font-semibold text-stone-700">
               Comprimento (cm)
             </label>
             <input
@@ -527,11 +538,11 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
               step="0.1"
               value={form.lengthCm}
               onChange={(e) => setForm({ ...form, lengthCm: e.target.value })}
-              className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
+              className={INPUT_CLASS}
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-stone-600 mb-1">
+            <label className="mb-1.5 block text-xs font-semibold text-stone-700">
               Largura (cm)
             </label>
             <input
@@ -540,11 +551,11 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
               step="0.1"
               value={form.widthCm}
               onChange={(e) => setForm({ ...form, widthCm: e.target.value })}
-              className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
+              className={INPUT_CLASS}
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-stone-600 mb-1">
+            <label className="mb-1.5 block text-xs font-semibold text-stone-700">
               Altura (cm)
             </label>
             <input
@@ -553,30 +564,32 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
               step="0.1"
               value={form.heightCm}
               onChange={(e) => setForm({ ...form, heightCm: e.target.value })}
-              className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm"
+              className={INPUT_CLASS}
             />
           </div>
         </div>
-      </div>
+      </section>
 
+      <section className={SECTION_CLASS}>
+        <h3 className={SECTION_TITLE_CLASS}>Mídia e vitrine</h3>
       <div>
-        <label className="block text-sm font-medium text-stone-700 mb-1">
+        <label className={LABEL_CLASS}>
           Link do vídeo (YouTube, Vimeo ou outro)
         </label>
         <input
           type="url"
           value={form.videoUrl}
           onChange={(e) => setForm({ ...form, videoUrl: e.target.value })}
-          className="w-full rounded-lg border border-stone-300 px-4 py-2.5 text-sm focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors"
+          className={INPUT_CLASS}
           placeholder="https://..."
         />
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-stone-700 mb-2">
+        <label className={LABEL_CLASS}>
           Seções
         </label>
-        <p className="text-xs text-stone-500 mb-2">
+        <p className={`${HELPER_CLASS} mb-2`}>
           Escolha em qual seção da página inicial este produto aparecerá (ex:
           Promoção, Lançamentos).
         </p>
@@ -589,10 +602,10 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
             {sections.map((s) => (
               <label
                 key={s.id}
-                className={`cursor-pointer rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                className={`cursor-pointer rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
                   sectionIds.includes(s.id)
-                    ? "border-stone-900 bg-stone-900 text-white"
-                    : "border-stone-300 bg-white text-stone-600 hover:border-stone-400"
+                    ? "border-stone-900 bg-stone-900 text-white shadow-sm"
+                    : "border-stone-300 bg-stone-50 text-stone-700 hover:border-stone-400 hover:bg-white"
                 }`}
               >
                 <input
@@ -609,7 +622,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-stone-700 mb-2">
+        <label className={`${LABEL_CLASS} mb-2`}>
           Categorias
         </label>
         {categories.length === 0 ? (
@@ -621,10 +634,10 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
             {categories.map((c) => (
               <label
                 key={c.id}
-                className={`cursor-pointer rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                className={`cursor-pointer rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
                   categoryIds.includes(c.id)
-                    ? "border-stone-900 bg-stone-900 text-white"
-                    : "border-stone-300 bg-white text-stone-600 hover:border-stone-400"
+                    ? "border-stone-900 bg-stone-900 text-white shadow-sm"
+                    : "border-stone-300 bg-stone-50 text-stone-700 hover:border-stone-400 hover:bg-white"
                 }`}
               >
                 <input
@@ -641,37 +654,38 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-stone-700 mb-1">
+        <label className={LABEL_CLASS}>
           Descrição
         </label>
         <textarea
           rows={3}
           value={form.description}
           onChange={(e) => setForm({ ...form, description: e.target.value })}
-          className="w-full rounded-lg border border-stone-300 px-4 py-2.5 text-sm focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors resize-none"
+          className={`${INPUT_CLASS} resize-none`}
           placeholder="Descrição do produto (opcional)"
         />
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-stone-700 mb-1">
+        <label className={LABEL_CLASS}>
           Tag
         </label>
         <input
           type="text"
           value={form.tag}
           onChange={(e) => setForm({ ...form, tag: e.target.value })}
-          className="w-full rounded-lg border border-stone-300 px-4 py-2.5 text-sm focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors"
+          className={INPUT_CLASS}
           placeholder="Ex: Novo, Promoção, Destaque"
         />
       </div>
+      </section>
 
-      <div>
-        <label className="block text-sm font-medium text-stone-700 mb-1">
+      <section className={SECTION_CLASS}>
+        <h3 className={SECTION_TITLE_CLASS}>
           Imagens * ({images.length}{" "}
           {images.length === 1 ? "foto" : "fotos"})
-        </label>
-        <p className="mb-2 text-xs text-stone-500">
+        </h3>
+        <p className={HELPER_CLASS}>
           Arraste uma foto sobre outra para mudar a ordem. A primeira continua
           sendo a capa.
         </p>
@@ -768,29 +782,29 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
           folder="ludimila-reis-closet/products"
           maxFilesPerBatch={15}
         />
-      </div>
+      </section>
 
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <label className="block text-sm font-medium text-stone-700">
+      <section className={SECTION_CLASS}>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className={SECTION_TITLE_CLASS}>
             Peças e Variações
-          </label>
+          </h3>
           <button
             type="button"
             onClick={addPiece}
-            className="text-xs font-medium text-stone-600 hover:text-stone-900 border border-stone-300 rounded-lg px-3 py-1.5 hover:border-stone-400 transition-colors"
+            className="shrink-0 rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 shadow-sm transition-colors hover:border-stone-400 hover:bg-stone-50"
           >
             + Adicionar peça
           </button>
         </div>
-        <p className="mb-3 text-xs text-stone-500">
+        <p className={HELPER_CLASS}>
           Para cada peça, marque os tamanhos e as cores. Em seguida use a
           tabela para informar quantas unidades existem de cada combinação
           (ex.: P + Branco = 2).
         </p>
 
         {pieces.length === 0 && (
-          <p className="text-xs text-stone-400 py-4 text-center border border-dashed border-stone-200 rounded-lg">
+          <p className="rounded-xl border border-dashed border-stone-300 bg-stone-50 py-6 text-center text-xs text-stone-500">
             Nenhuma peça adicionada. Clique em &quot;Adicionar peça&quot; para
             definir tamanhos, cores e quantidades por combinação.
           </p>
@@ -800,14 +814,14 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
           {pieces.map((piece, pi) => (
             <div
               key={pi}
-              className="rounded-lg border border-stone-200 bg-stone-50 p-4 space-y-4"
+              className="space-y-4 rounded-xl border border-stone-200 bg-stone-50/80 p-4 shadow-sm"
             >
               <div className="flex items-center gap-3">
                 <input
                   type="text"
                   value={piece.name}
                   onChange={(e) => updatePiece(pi, { name: e.target.value })}
-                  className="flex-1 rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900 transition-colors"
+                  className={`${INPUT_CLASS} flex-1`}
                   placeholder="Nome da peça (ex: Blusa, Calça)"
                 />
                 <button
@@ -835,7 +849,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
               </div>
 
               <div>
-                <p className="text-xs font-medium text-stone-600 mb-2">
+                <p className="mb-2 text-xs font-semibold text-stone-700">
                   Tamanhos
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -846,10 +860,10 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
                         key={size}
                         type="button"
                         onClick={() => toggleSize(pi, size)}
-                        className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                        className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
                           active
-                            ? "bg-stone-200 text-stone-900 border-stone-400 shadow-sm"
-                            : "bg-white text-stone-600 border-stone-300 hover:border-stone-400"
+                            ? "border-stone-900 bg-stone-900 text-white shadow-sm"
+                            : "border-stone-300 bg-white text-stone-700 hover:border-stone-400"
                         }`}
                       >
                         {size}
@@ -860,7 +874,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
               </div>
 
               <div>
-                <p className="text-xs font-medium text-stone-600 mb-2">Cores</p>
+                <p className="mb-2 text-xs font-semibold text-stone-700">Cores</p>
                 <div className="flex flex-wrap gap-2">
                   {COMMON_COLORS.map((color) => {
                     const active = piece.colors.some(
@@ -871,10 +885,10 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
                         key={color.name}
                         type="button"
                         onClick={() => toggleColor(pi, color.name, color.hex)}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                        className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
                           active
-                            ? "bg-stone-200 text-stone-900 border-stone-400 shadow-sm"
-                            : "bg-white text-stone-600 border-stone-300 hover:border-stone-400"
+                            ? "border-stone-900 bg-stone-900 text-white shadow-sm"
+                            : "border-stone-300 bg-white text-stone-700 hover:border-stone-400"
                         }`}
                       >
                         <span
@@ -889,8 +903,8 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
               </div>
 
               {piece.colors.length > 0 && piece.sizes.length > 0 && (
-                <div className="overflow-x-auto rounded-lg border border-stone-200 bg-white">
-                  <p className="border-b border-stone-100 bg-stone-50 px-3 py-2 text-xs font-medium text-stone-700">
+                <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white shadow-sm">
+                  <p className="border-b border-stone-100 bg-stone-50 px-3 py-2.5 text-xs font-semibold text-stone-800">
                     Quantidade em estoque (cor × tamanho)
                   </p>
                   <table className="w-full min-w-[240px] border-collapse text-center text-xs">
@@ -944,7 +958,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
                                   step={1}
                                   inputMode="numeric"
                                   aria-label={`Quantidade ${piece.name || "peça"} ${c.name} ${s.name}`}
-                                  className="w-full max-w-[4.5rem] rounded-md border border-stone-200 px-1 py-1.5 text-center text-sm tabular-nums focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900"
+                                  className="w-full max-w-[4.5rem] rounded-md border border-stone-300 bg-white px-1 py-1.5 text-center text-sm font-medium tabular-nums text-stone-900 focus:border-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-900/10"
                                   value={cell?.quantity ?? "0"}
                                   onChange={(e) =>
                                     updateVariantQty(
@@ -967,12 +981,13 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
             </div>
           ))}
         </div>
-      </div>
+      </section>
 
+      <div className="sticky bottom-0 -mx-4 border-t border-stone-200 bg-white/95 px-4 py-4 backdrop-blur-sm sm:-mx-6 sm:px-6">
       <button
         type="submit"
         disabled={loading || images.length === 0}
-        className="w-full sm:w-auto rounded-lg bg-stone-900 px-8 py-2.5 text-sm font-medium text-white hover:bg-stone-800 focus:outline-none focus:ring-2 focus:ring-stone-900 focus:ring-offset-2 disabled:opacity-50 transition-colors"
+        className="w-full rounded-lg bg-stone-900 px-8 py-3 text-sm font-semibold text-white shadow-sm hover:bg-stone-800 focus:outline-none focus:ring-2 focus:ring-stone-900 focus:ring-offset-2 disabled:opacity-50 transition-colors sm:w-auto"
       >
         {loading
           ? "Salvando..."
@@ -980,6 +995,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
             ? "Atualizar Produto"
             : "Cadastrar Produto"}
       </button>
+      </div>
     </form>
   );
 }

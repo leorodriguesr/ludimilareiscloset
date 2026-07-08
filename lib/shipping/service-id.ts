@@ -53,14 +53,15 @@ export const SUPERFRETE_STATUS_LABELS: Record<string, string> = {
   cancelled: "Cancelado",
 };
 
+/**
+ * Mapeia status bruto da SuperFrete para `shippingStatus` do pedido.
+ * `to_pack` e `packed` (por enviar) são controlados manualmente no admin;
+ * a SuperFrete só avança para enviado/entregue após postagem.
+ */
 export function mapSuperfreteStatusToShippingStatus(
   sfStatus: string | null | undefined
 ): "to_pack" | "packed" | "shipped" | "delivered" | "cancelled" | null {
   switch (sfStatus) {
-    case "pending":
-      return "packed";
-    case "released":
-      return "packed";
     case "posted":
       return "shipped";
     case "delivered":

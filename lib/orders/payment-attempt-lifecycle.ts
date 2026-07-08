@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { OrderSource } from "@/app/generated/prisma/client";
 import {
   ORDER_STATUS,
   PAYMENT_ATTEMPT_STATUS,
@@ -27,7 +28,7 @@ export async function beginPaymentAttempt(input: {
   return prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
       where: { id: input.orderId },
-      select: { id: true, status: true, expiresAt: true, total: true },
+      select: { id: true, status: true, expiresAt: true, total: true, orderSource: true },
     });
 
     if (!order || order.status !== ORDER_STATUS.PENDING_PAYMENT) {
@@ -35,7 +36,10 @@ export async function beginPaymentAttempt(input: {
     }
 
     const now = new Date();
-    if (!order.expiresAt || order.expiresAt <= now) {
+    if (
+      order.orderSource === OrderSource.CHECKOUT &&
+      (!order.expiresAt || order.expiresAt <= now)
+    ) {
       throw new Error("ORDER_EXPIRED");
     }
 

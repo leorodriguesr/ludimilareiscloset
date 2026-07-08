@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { FulfillmentType } from "@/app/generated/prisma/client";
+import { isCarrierShippingStatusLocked } from "@/lib/fulfillment/shipping-status-policy";
 import { prisma } from "@/lib/prisma";
 import { requireAdminApi } from "@/lib/require-admin-api";
 
@@ -37,6 +39,38 @@ export async function PATCH(
         { status: 400 }
       );
     }
+
+    const order = await prisma.order.findUnique({
+      where: { id },
+      select: { fulfillmentType: true, shippingStatus: true },
+    });
+    if (!order) {
+      return NextResponse.json({ error: "Pedido não encontrado." }, { status: 404 });
+    }
+
+    if (isCarrierShippingStatusLocked(order)) {
+      return NextResponse.json(
+        {
+          error:
+            "Status de envio bloqueado: enviado/recebido são atualizados automaticamente pela SuperFrete.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (
+      order.fulfillmentType === FulfillmentType.CARRIER &&
+      (s === "shipped" || s === "delivered")
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Pedidos com transportadora só avançam para enviado/recebido via SuperFrete.",
+        },
+        { status: 400 }
+      );
+    }
+
     updates.shippingStatus = s;
   }
 

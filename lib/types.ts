@@ -30,6 +30,7 @@ export interface ProductImage {
   id: string;
   url: string;
   order: number;
+  colorName?: string | null;
 }
 
 export interface PieceColor {
