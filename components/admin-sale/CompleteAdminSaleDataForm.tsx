@@ -1,8 +1,36 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { isCustomerContactAddressComplete } from "@/lib/admin-sale/customer-form-complete";
+import {
+  cepMask,
+  cpfFmt,
+  lookupAddressByCep,
+  onlyDigits,
+  phoneFmt,
+} from "@/lib/admin-sale/customer-form-input";
 
 type Props = { token: string };
+
+function FieldLabel({ children, optional }: { children: React.ReactNode; optional?: boolean }) {
+  return (
+    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-stone-500">
+      {children}
+      {optional ? (
+        <span className="ml-1 font-normal normal-case text-stone-400">(opcional)</span>
+      ) : null}
+    </label>
+  );
+}
+
+function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      {...props}
+      className={`w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200 ${props.className ?? ""}`}
+    />
+  );
+}
 
 export function CompleteAdminSaleDataForm({ token }: Props) {
   const [form, setForm] = useState({
@@ -18,12 +46,59 @@ export function CompleteAdminSaleDataForm({ token }: Props) {
     addressCity: "",
     addressState: "",
   });
+  const [cepLookupError, setCepLookupError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
+  const isComplete = useMemo(
+    () =>
+      isCustomerContactAddressComplete({
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        cpf: form.cpf,
+        destinationCep: form.destinationCep,
+        street: form.addressStreet,
+        number: form.addressNumber,
+        complement: form.addressComplement,
+        neighborhood: form.addressNeighborhood,
+        city: form.addressCity,
+        state: form.addressState,
+      }),
+    [form]
+  );
+
+  useEffect(() => {
+    const digits = onlyDigits(form.destinationCep, 8);
+    if (digits.length !== 8) return;
+
+    const timeout = setTimeout(() => {
+      void (async () => {
+        setCepLookupError(null);
+        const result = await lookupAddressByCep(digits);
+        if (!result.ok) {
+          setCepLookupError(result.error);
+          return;
+        }
+        setForm((current) => ({
+          ...current,
+          destinationCep: digits,
+          addressStreet: result.address.street || current.addressStreet,
+          addressNeighborhood:
+            result.address.neighborhood || current.addressNeighborhood,
+          addressCity: result.address.city || current.addressCity,
+          addressState: result.address.state || current.addressState,
+        }));
+      })();
+    }, 400);
+
+    return () => clearTimeout(timeout);
+  }, [form.destinationCep]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!isComplete) return;
     setLoading(true);
     setError(null);
     try {
@@ -46,46 +121,175 @@ export function CompleteAdminSaleDataForm({ token }: Props) {
     return (
       <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-8 text-center">
         <h2 className="text-lg font-semibold text-emerald-900">Dados enviados com sucesso!</h2>
-        <p className="mt-2 text-sm text-emerald-700">Obrigada. Em breve entraremos em contato sobre sua compra.</p>
+        <p className="mt-2 text-sm text-emerald-700">
+          Obrigada. Em breve entraremos em contato sobre sua compra.
+        </p>
       </div>
     );
   }
 
   return (
-    <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4 rounded-xl border border-stone-200 bg-white p-6">
-      <h2 className="text-lg font-semibold text-stone-900">Complete seus dados</h2>
-      <p className="text-sm text-stone-500">Preencha as informações para finalizar sua compra.</p>
-      {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      <div className="grid gap-3 sm:grid-cols-2">
-        {(
-          [
-            ["name", "Nome completo"],
-            ["email", "E-mail"],
-            ["phone", "Telefone"],
-            ["cpf", "CPF"],
-            ["destinationCep", "CEP"],
-            ["addressStreet", "Rua"],
-            ["addressNumber", "Número"],
-            ["addressComplement", "Complemento"],
-            ["addressNeighborhood", "Bairro"],
-            ["addressCity", "Cidade"],
-            ["addressState", "Estado (UF)"],
-          ] as const
-        ).map(([key, label]) => (
-          <input
-            key={key}
-            required={key !== "addressComplement" && key !== "cpf"}
-            placeholder={label}
-            value={form[key]}
-            onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-            className="rounded-lg border border-stone-300 px-3 py-2 text-sm"
-          />
-        ))}
+    <form
+      onSubmit={(e) => void handleSubmit(e)}
+      className="space-y-6 rounded-xl border border-stone-200 bg-white p-6"
+    >
+      <div>
+        <h2 className="text-lg font-semibold text-stone-900">Complete seus dados</h2>
+        <p className="mt-1 text-sm text-stone-500">
+          Preencha contato e endereço para finalizar sua compra.
+        </p>
       </div>
+
+      {error && (
+        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+      )}
+
+      <div className="space-y-5">
+        <div>
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-stone-400">
+            Contato
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <FieldLabel>Nome completo</FieldLabel>
+              <TextInput
+                autoComplete="name"
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              />
+            </div>
+            <div>
+              <FieldLabel>E-mail</FieldLabel>
+              <TextInput
+                type="email"
+                autoComplete="email"
+                value={form.email}
+                onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+              />
+            </div>
+            <div>
+              <FieldLabel>Telefone</FieldLabel>
+              <TextInput
+                inputMode="numeric"
+                autoComplete="tel"
+                placeholder="(00) 00000-0000"
+                value={phoneFmt(form.phone)}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    phone: onlyDigits(e.target.value, 11),
+                  }))
+                }
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <FieldLabel>CPF</FieldLabel>
+              <TextInput
+                inputMode="numeric"
+                placeholder="000.000.000-00"
+                value={cpfFmt(form.cpf)}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    cpf: onlyDigits(e.target.value, 11),
+                  }))
+                }
+              />
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-stone-400">
+            Endereço
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <FieldLabel>CEP</FieldLabel>
+              <TextInput
+                inputMode="numeric"
+                autoComplete="postal-code"
+                placeholder="00000-000"
+                value={cepMask(onlyDigits(form.destinationCep, 8))}
+                onChange={(e) => {
+                  const digits = onlyDigits(e.target.value, 8);
+                  setForm((f) => ({ ...f, destinationCep: digits }));
+                  if (digits.length < 8) setCepLookupError(null);
+                }}
+              />
+              {cepLookupError && (
+                <p className="mt-1 text-xs text-red-500">{cepLookupError}</p>
+              )}
+            </div>
+            <div className="sm:col-span-2">
+              <FieldLabel>Rua</FieldLabel>
+              <TextInput
+                autoComplete="street-address"
+                value={form.addressStreet}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, addressStreet: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <FieldLabel>Número</FieldLabel>
+              <TextInput
+                value={form.addressNumber}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, addressNumber: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <FieldLabel optional>Complemento</FieldLabel>
+              <TextInput
+                value={form.addressComplement}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, addressComplement: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <FieldLabel>Bairro</FieldLabel>
+              <TextInput
+                value={form.addressNeighborhood}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, addressNeighborhood: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <FieldLabel>Cidade</FieldLabel>
+              <TextInput
+                autoComplete="address-level2"
+                value={form.addressCity}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, addressCity: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <FieldLabel>Estado</FieldLabel>
+              <TextInput
+                maxLength={2}
+                autoComplete="address-level1"
+                value={form.addressState}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    addressState: e.target.value.toUpperCase(),
+                  }))
+                }
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
       <button
         type="submit"
-        disabled={loading}
-        className="w-full rounded-lg bg-stone-900 py-3 text-sm font-medium text-white disabled:opacity-50"
+        disabled={loading || !isComplete}
+        className="w-full rounded-lg bg-stone-900 py-3 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {loading ? "Enviando…" : "Enviar dados"}
       </button>

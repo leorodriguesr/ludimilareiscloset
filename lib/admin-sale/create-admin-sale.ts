@@ -18,6 +18,9 @@ import {
   buildCustomerDataUrl,
   generateCustomerDataToken,
 } from "@/lib/admin-sale/complete-customer-data";
+import {
+  customerContactAddressValidationError,
+} from "@/lib/admin-sale/customer-form-complete";
 import { getFulfillmentStrategy } from "@/lib/fulfillment/fulfillment-types";
 import { initiateOrderPayment } from "@/lib/order/payment/initiate-payment";
 import { ORDER_STATUS, type PaymentMethod } from "@/lib/orders/constants";
@@ -195,17 +198,22 @@ export async function createAdminSale(
 
   const fillNow = input.customerData === "now";
   if (fillNow) {
-    if (!input.contact?.email?.trim()) {
-      return { ok: false, error: "Informe o e-mail do cliente." };
-    }
-    if (
-      input.fulfillmentType === FulfillmentType.CARRIER &&
-      (!input.address?.street || !input.address?.city)
-    ) {
-      return {
-        ok: false,
-        error: "Informe o endereço completo para entrega por transportadora.",
-      };
+    const contactFields = {
+      name: input.contact?.name ?? "",
+      email: input.contact?.email ?? "",
+      phone: input.contact?.phone ?? "",
+      cpf: input.contact?.cpf ?? "",
+      destinationCep: input.address?.destinationCep ?? "",
+      street: input.address?.street ?? "",
+      number: input.address?.number ?? "",
+      complement: input.address?.complement ?? "",
+      neighborhood: input.address?.neighborhood ?? "",
+      city: input.address?.city ?? "",
+      state: input.address?.state ?? "",
+    };
+    const validationError = customerContactAddressValidationError(contactFields);
+    if (validationError) {
+      return { ok: false, error: validationError };
     }
   }
 

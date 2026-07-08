@@ -3,6 +3,7 @@ import {
   CustomerDataStatus,
   OrderSource,
 } from "@/app/generated/prisma/client";
+import { customerContactAddressValidationError } from "@/lib/admin-sale/customer-form-complete";
 import { getAppBaseUrl } from "@/lib/site-url";
 
 const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -74,6 +75,23 @@ export async function submitCustomerData(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const validation = await validateCustomerDataToken(token);
   if (!validation.ok) return validation;
+
+  const validationError = customerContactAddressValidationError({
+    name: data.name,
+    email: data.email,
+    phone: data.phone,
+    cpf: data.cpf ?? "",
+    destinationCep: data.destinationCep,
+    street: data.addressStreet,
+    number: data.addressNumber,
+    complement: data.addressComplement ?? "",
+    neighborhood: data.addressNeighborhood,
+    city: data.addressCity,
+    state: data.addressState,
+  });
+  if (validationError) {
+    return { ok: false, error: validationError };
+  }
 
   const { prisma } = await import("@/lib/prisma");
   const { onOrderPaymentConfirmed } = await import(

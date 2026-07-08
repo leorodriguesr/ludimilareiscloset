@@ -25,6 +25,8 @@ import {
   infinitePayWebhookUrl,
 } from "@/lib/payments/infinitepay";
 import { orderToInfinitePayItems } from "@/lib/payments/order-to-infinitepay-items";
+import { buildInfinitePayCustomer } from "@/lib/order/payment/infinitepay-customer";
+import type { CustomerDataStatus } from "@/app/generated/prisma/client";
 
 export type ContinueOrderPaymentSuccess =
   | {
@@ -51,13 +53,6 @@ export type ContinueOrderPaymentSuccess =
 export type ContinueOrderPaymentResult =
   | ContinueOrderPaymentSuccess
   | { ok: false; error: string; code?: "expired" | "not_pending" | "forbidden" | "not_found" };
-
-function normalizePhone(phone: string): string | undefined {
-  const d = phone.replace(/\D/g, "");
-  if (d.length < 10) return undefined;
-  if (d.startsWith("55")) return `+${d}`;
-  return `+55${d}`;
-}
 
 function guestDisplayName(email: string): string {
   const local = email.split("@")[0]?.trim();
@@ -154,6 +149,7 @@ async function restartCardPayment(
   order: {
     id: string;
     email: string;
+    customerDataStatus: CustomerDataStatus | null;
     destinationCep: string | null;
     recipientName: string | null;
     phone: string | null;
@@ -206,12 +202,7 @@ async function restartCardPayment(
     };
   }
 
-  const phone = order.phone ? normalizePhone(order.phone) : undefined;
-  const customer = {
-    name: (order.recipientName ?? guestDisplayName(order.email)).slice(0, 120),
-    email: order.email,
-    ...(phone ? { phone_number: phone } : {}),
-  };
+  const customer = buildInfinitePayCustomer(order);
 
   const destDigits = (order.destinationCep ?? "").replace(/\D/g, "");
 
@@ -222,7 +213,7 @@ async function restartCardPayment(
         orderNsu: order.id,
         redirectUrl: infinitePayOrderRedirectUrl(order.id),
         webhookUrl: infinitePayWebhookUrl(),
-        customer,
+        ...(customer ? { customer } : {}),
         ...(destDigits.length === 8
           ? {
               address: {
@@ -319,6 +310,7 @@ export async function continueOrderPayment(input: {
       expiresAt: true,
       total: true,
       email: true,
+      customerDataStatus: true,
       paymentMethod: true,
       shippingAmount: true,
       shippingServiceName: true,
@@ -447,6 +439,7 @@ export async function continueOrderPayment(input: {
   const restarted = await restartCardPayment({
     id: fresh.id,
     email: fresh.email,
+    customerDataStatus: fresh.customerDataStatus,
     destinationCep: fresh.destinationCep,
     recipientName: fresh.recipientName,
     phone: fresh.phone,

@@ -17,6 +17,7 @@ import {
   infinitePayWebhookUrl,
 } from "@/lib/payments/infinitepay";
 import { orderToInfinitePayItems } from "@/lib/payments/order-to-infinitepay-items";
+import { buildInfinitePayCustomer } from "@/lib/order/payment/infinitepay-customer";
 
 export type InitiatePaymentSuccess =
   | {
@@ -43,13 +44,6 @@ function guestDisplayName(email: string): string {
   const local = email.split("@")[0]?.trim();
   if (local && local.length > 0) return local.slice(0, 80);
   return "Cliente";
-}
-
-function normalizePhone(phone: string): string | undefined {
-  const d = phone.replace(/\D/g, "");
-  if (d.length < 10) return undefined;
-  if (d.startsWith("55")) return `+${d}`;
-  return `+55${d}`;
 }
 
 async function loadOrderForPayment(orderId: string) {
@@ -161,12 +155,7 @@ async function processCard(
     };
   }
 
-  const phone = order.phone ? normalizePhone(order.phone) : undefined;
-  const customer = {
-    name: (order.recipientName ?? guestDisplayName(order.email)).slice(0, 120),
-    email: order.email,
-    ...(phone ? { phone_number: phone } : {}),
-  };
+  const customer = buildInfinitePayCustomer(order);
 
   const destDigits = (order.destinationCep ?? "").replace(/\D/g, "");
 
@@ -177,7 +166,7 @@ async function processCard(
         orderNsu: order.id,
         redirectUrl: infinitePayOrderRedirectUrl(order.id),
         webhookUrl: infinitePayWebhookUrl(),
-        customer,
+        ...(customer ? { customer } : {}),
         ...(destDigits.length === 8
           ? {
               address: {

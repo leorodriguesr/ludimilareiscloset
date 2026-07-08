@@ -14,6 +14,14 @@ import {
 import type { Product } from "@/lib/types";
 import type { NormalizedShippingOption } from "@/lib/shipping/types";
 import { parseDiscountInputValue } from "@/lib/admin-sale/parse-discount-value";
+import { isCustomerContactAddressComplete } from "@/lib/admin-sale/customer-form-complete";
+import {
+  cepMask,
+  cpfFmt,
+  lookupAddressByCep,
+  onlyDigits,
+  phoneFmt,
+} from "@/lib/admin-sale/customer-form-input";
 
 type DiscountForm = { mode: "FIXED" | "PERCENT"; value: string };
 
@@ -55,29 +63,21 @@ const STEPS = [
 
 type ArrangedMode = "store_delivery" | "pickup" | "uber";
 
-const onlyDigits = (s: string, max = 99) => s.replace(/\D/g, "").slice(0, max);
-const cepMask = (d: string) => (d.length <= 5 ? d : `${d.slice(0, 5)}-${d.slice(5)}`);
-const phoneFmt = (v: string) => {
-  const d = v.replace(/\D/g, "").slice(0, 11);
-  if (d.length <= 2) return d;
-  if (d.length <= 7) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
-  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
-  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
-};
-const cpfFmt = (v: string) => {
-  const d = v.replace(/\D/g, "").slice(0, 11);
-  if (d.length <= 3) return d;
-  if (d.length <= 6) return `${d.slice(0, 3)}.${d.slice(3)}`;
-  if (d.length <= 9) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6)}`;
-  return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
-};
-
 /* ─── UI helpers ─────────────────────────────────────────────── */
 
-function FieldLabel({ children }: { children: React.ReactNode }) {
+function FieldLabel({
+  children,
+  optional,
+}: {
+  children: React.ReactNode;
+  optional?: boolean;
+}) {
   return (
     <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-stone-500">
       {children}
+      {optional ? (
+        <span className="ml-1 font-normal normal-case text-stone-400">(opcional)</span>
+      ) : null}
     </label>
   );
 }
@@ -560,30 +560,19 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
   async function lookupAddressCep(digits: string) {
     if (digits.length !== 8) return;
     setCepLookupError(null);
-    try {
-      const res = await fetch(`https://viacep.com.br/ws/${digits}/json/`);
-      const data = (await res.json()) as {
-        erro?: boolean;
-        logradouro?: string;
-        bairro?: string;
-        localidade?: string;
-        uf?: string;
-      };
-      if (data.erro) {
-        setCepLookupError("CEP não encontrado.");
-        return;
-      }
-      setAddress((a) => ({
-        ...a,
-        destinationCep: digits,
-        street: data.logradouro || a.street,
-        neighborhood: data.bairro || a.neighborhood,
-        city: data.localidade || a.city,
-        state: data.uf || a.state,
-      }));
-    } catch {
-      setCepLookupError("Erro ao buscar CEP.");
+    const result = await lookupAddressByCep(digits);
+    if (!result.ok) {
+      setCepLookupError(result.error);
+      return;
     }
+    setAddress((a) => ({
+      ...a,
+      destinationCep: digits,
+      street: result.address.street || a.street,
+      neighborhood: result.address.neighborhood || a.neighborhood,
+      city: result.address.city || a.city,
+      state: result.address.state || a.state,
+    }));
   }
 
   useEffect(() => {
@@ -648,7 +637,7 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
           customerData,
           contact: customerData === "now" ? contact : undefined,
           address:
-            customerData === "now" && (fulfillmentType === "CARRIER" || address.street)
+            customerData === "now"
               ? {
                   ...address,
                   destinationCep:
@@ -673,6 +662,23 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
     }
   }
 
+  const customerStepComplete = useMemo(() => {
+    if (customerData === "later") return true;
+    return isCustomerContactAddressComplete({
+      name: contact.name,
+      email: contact.email,
+      phone: contact.phone,
+      cpf: contact.cpf,
+      destinationCep: address.destinationCep,
+      street: address.street,
+      number: address.number,
+      complement: address.complement,
+      neighborhood: address.neighborhood,
+      city: address.city,
+      state: address.state,
+    });
+  }, [address, contact, customerData]);
+
   const canGoNext =
     step === 0
       ? lines.length > 0 &&
@@ -682,7 +688,9 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
           ? arrangedMode !== null &&
             (arrangedMode !== "store_delivery" || arrangedAmount.trim() !== "")
           : Boolean(selectedShippingId)
-        : true;
+        : step === 2
+          ? customerStepComplete
+          : true;
 
   /* ─── Success screen ───────────────────────────────────────── */
 
@@ -1146,7 +1154,7 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                           <TextInput value={address.number} onChange={(e) => setAddress((a) => ({ ...a, number: e.target.value }))} />
                         </div>
                         <div>
-                          <FieldLabel>Complemento</FieldLabel>
+                          <FieldLabel optional>Complemento</FieldLabel>
                           <TextInput value={address.complement} onChange={(e) => setAddress((a) => ({ ...a, complement: e.target.value }))} />
                         </div>
                         <div>
