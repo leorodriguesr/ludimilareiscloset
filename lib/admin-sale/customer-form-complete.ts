@@ -1,3 +1,5 @@
+import { cpfValidationError, isValidCpf } from "@/lib/validation/cpf";
+
 export type CustomerContactAddressFields = {
   name: string;
   email: string;
@@ -45,7 +47,7 @@ export function isCustomerContactAddressComplete(
   if (!data.name.trim()) return false;
   if (!email || !email.includes("@") || !email.includes(".")) return false;
   if (digits(data.phone).length < 10) return false;
-  if (digits(data.cpf).length !== 11) return false;
+  if (!isValidCpf(data.cpf)) return false;
   if (digits(data.destinationCep).length !== 8) return false;
   if (!data.street.trim()) return false;
   if (!data.number.trim()) return false;
@@ -58,6 +60,27 @@ export function isCustomerContactAddressComplete(
 export function customerContactAddressValidationError(
   data: CustomerContactAddressFields
 ): string | null {
-  if (isCustomerContactAddressComplete(data)) return null;
-  return "Preencha todos os dados de contato e endereço.";
+  if (!data.name.trim()) return "Preencha todos os dados de contato e endereço.";
+  const email = data.email.trim();
+  if (!email || !email.includes("@") || !email.includes(".")) {
+    return "Preencha todos os dados de contato e endereço.";
+  }
+  if (digits(data.phone).length < 10) {
+    return "Preencha todos os dados de contato e endereço.";
+  }
+  const cpfError = cpfValidationError(data.cpf);
+  if (cpfError) return cpfError;
+  if (digits(data.destinationCep).length !== 8) {
+    return "Preencha todos os dados de contato e endereço.";
+  }
+  if (
+    !data.street.trim() ||
+    !data.number.trim() ||
+    !data.neighborhood.trim() ||
+    !data.city.trim() ||
+    data.state.trim().length !== 2
+  ) {
+    return "Preencha todos os dados de contato e endereço.";
+  }
+  return null;
 }

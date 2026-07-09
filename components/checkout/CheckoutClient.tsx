@@ -29,6 +29,7 @@ import type { CartPieceSelection } from "@/lib/cart/types";
 import { useStoreSettings } from "@/lib/hooks/use-store-settings";
 import { checkFreeShipping } from "@/lib/shipping/free-shipping";
 import { formatEstimatedDeliveryLabel } from "@/lib/shipping/delivery-days-label";
+import { cpfValidationError } from "@/lib/validation/cpf";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -495,7 +496,10 @@ function ContactStep({
     if (!data.email.trim()) { setError("Informe seu e-mail."); return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email.trim())) { setError("E-mail inválido."); return; }
     if (data.phone.replace(/\D/g, "").length < 10) { setError("Informe um telefone válido com DDD."); return; }
-    if (data.cpf.replace(/\D/g, "").length !== 11) { setError("Informe um CPF válido (11 dígitos)."); return; }
+    {
+      const cpfErr = cpfValidationError(data.cpf);
+      if (cpfErr) { setError(cpfErr); return; }
+    }
     setError(null);
     if (loggedIn) {
       setSaving(true);
@@ -562,6 +566,12 @@ function ContactStep({
         <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500" htmlFor="c-cpf">CPF</label>
         <input id="c-cpf" type="text" inputMode="numeric" autoComplete="off" placeholder="000.000.000-00"
           value={data.cpf} onChange={(e) => onChange({ ...data, cpf: cpfFmt(e.target.value) })} className={inputCls} />
+        {(() => {
+          const digits = data.cpf.replace(/\D/g, "");
+          if (digits.length !== 11) return null;
+          const err = cpfValidationError(digits);
+          return err ? <p className="mt-1.5 text-xs text-red-600">{err}</p> : null;
+        })()}
       </div>
       {error && <p className="rounded-lg bg-red-50 px-4 py-2.5 text-sm text-red-600">{error}</p>}
 

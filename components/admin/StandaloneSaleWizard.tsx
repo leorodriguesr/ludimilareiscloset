@@ -25,6 +25,7 @@ import {
   onlyDigits,
   phoneFmt,
 } from "@/lib/admin-sale/customer-form-input";
+import { cpfValidationError } from "@/lib/validation/cpf";
 
 type DiscountForm = { mode: "FIXED" | "PERCENT"; value: string };
 
@@ -168,6 +169,156 @@ function ProductPrices({
             {formatPrice(pixTotal)}
           </span>
           <span className="text-xs text-stone-400">à vista</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type SaleCustomer = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  cpf: string | null;
+  orderCount?: number;
+  lastAddress: {
+    destinationCep: string;
+    street: string;
+    number: string;
+    complement: string;
+    neighborhood: string;
+    city: string;
+    state: string;
+  } | null;
+};
+
+function CustomerSearchSelect({
+  selected,
+  onSelect,
+}: {
+  selected: SaleCustomer | null;
+  onSelect: (customer: SaleCustomer) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [customers, setCustomers] = useState<SaleCustomer[]>([]);
+  const [loading, setLoading] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const q = query.trim();
+    if (q.length < 2) {
+      setCustomers([]);
+      setLoading(false);
+      return;
+    }
+    const t = setTimeout(() => {
+      void (async () => {
+        setLoading(true);
+        try {
+          const params = new URLSearchParams({ q });
+          const res = await fetch(`/api/admin/sales/customers?${params}`);
+          const data = await res.json();
+          if (res.ok) setCustomers(data.customers ?? []);
+          else setCustomers([]);
+        } catch {
+          setCustomers([]);
+        } finally {
+          setLoading(false);
+        }
+      })();
+    }, 250);
+    return () => clearTimeout(t);
+  }, [open, query]);
+
+  return (
+    <div ref={rootRef} className="relative min-w-0 flex-1">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-left text-sm transition-colors hover:border-stone-300 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+      >
+        <span className={selected ? "truncate text-stone-900" : "text-stone-500"}>
+          {selected ? selected.name : "Buscar cliente…"}
+        </span>
+        <svg
+          className={`h-4 w-4 shrink-0 text-stone-400 transition-transform ${open ? "rotate-180" : ""}`}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 right-0 z-20 mt-2 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg">
+          <div className="border-b border-stone-100 p-3">
+            <input
+              autoFocus
+              placeholder="Buscar por nome, telefone, CPF ou e-mail…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+            />
+          </div>
+          <ul className="max-h-64 overflow-y-auto overscroll-contain p-1">
+            {query.trim().length < 2 ? (
+              <li className="px-3 py-6 text-center text-sm text-stone-400">
+                Digite pelo menos 2 caracteres para buscar.
+              </li>
+            ) : loading ? (
+              <li className="px-3 py-6 text-center text-sm text-stone-400">Buscando…</li>
+            ) : customers.length === 0 ? (
+              <li className="px-3 py-6 text-center text-sm text-stone-400">
+                Nenhum cliente encontrado.
+              </li>
+            ) : (
+              customers.map((c) => (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSelect(c);
+                      setOpen(false);
+                      setQuery("");
+                    }}
+                    className="flex w-full flex-col gap-0.5 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-stone-50"
+                  >
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-medium text-stone-900">{c.name}</span>
+                      {c.orderCount != null && c.orderCount > 0 && (
+                        <span className="shrink-0 text-[11px] text-stone-400">
+                          {c.orderCount} {c.orderCount === 1 ? "compra" : "compras"}
+                        </span>
+                      )}
+                    </span>
+                    <span className="truncate text-xs text-stone-500">
+                      {[
+                        c.phone ? phoneFmt(c.phone) : null,
+                        c.email || null,
+                        c.lastAddress?.city || null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  </button>
+                </li>
+              ))
+            )}
+          </ul>
         </div>
       )}
     </div>
@@ -516,6 +667,9 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
   const [deliveryNotes, setDeliveryNotes] = useState("");
   const [internalNotes, setInternalNotes] = useState("");
   const [customerData, setCustomerData] = useState<"now" | "later">("now");
+  const [customerEntryMode, setCustomerEntryMode] = useState<"search" | "new">("search");
+  const [selectedCustomer, setSelectedCustomer] = useState<SaleCustomer | null>(null);
+  const [addressFromLastOrder, setAddressFromLastOrder] = useState(false);
   const [contact, setContact] = useState({ name: "", email: "", phone: "", cpf: "" });
   const [address, setAddress] = useState({
     destinationCep: "",
@@ -651,11 +805,12 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
   }
 
   useEffect(() => {
+    if (addressFromLastOrder) return;
     const digits = onlyDigits(address.destinationCep, 8);
     if (digits.length !== 8) return;
     const t = setTimeout(() => void lookupAddressCep(digits), 400);
     return () => clearTimeout(t);
-  }, [address.destinationCep]);
+  }, [address.destinationCep, addressFromLastOrder]);
 
   function updateLine(idx: number, patch: Partial<WizardLine>) {
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
@@ -747,7 +902,69 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
     }
   }, [fulfillmentType, customerData]);
 
+  function clearCustomerForm() {
+    setSelectedCustomer(null);
+    setAddressFromLastOrder(false);
+    setContact({ name: "", email: "", phone: "", cpf: "" });
+    setAddress({
+      destinationCep: "",
+      street: "",
+      number: "",
+      complement: "",
+      neighborhood: "",
+      city: "",
+      state: "",
+    });
+    setCepLookupError(null);
+  }
+
+  function applyCustomer(customer: SaleCustomer) {
+    setSelectedCustomer(customer);
+    setCustomerEntryMode("search");
+    setCustomerData("now");
+    setContact({
+      name: customer.name,
+      email: customer.email,
+      phone: onlyDigits(customer.phone, 11),
+      cpf: onlyDigits(customer.cpf ?? "", 11),
+    });
+    if (customer.lastAddress) {
+      setAddress({
+        destinationCep: onlyDigits(customer.lastAddress.destinationCep, 8),
+        street: customer.lastAddress.street,
+        number: customer.lastAddress.number,
+        complement: customer.lastAddress.complement,
+        neighborhood: customer.lastAddress.neighborhood,
+        city: customer.lastAddress.city,
+        state: customer.lastAddress.state.toUpperCase().slice(0, 2),
+      });
+      setAddressFromLastOrder(true);
+      setCepLookupError(null);
+      if (fulfillmentType === "CARRIER") {
+        setDestinationCep(onlyDigits(customer.lastAddress.destinationCep, 8));
+      }
+    } else {
+      setAddress({
+        destinationCep: "",
+        street: "",
+        number: "",
+        complement: "",
+        neighborhood: "",
+        city: "",
+        state: "",
+      });
+      setAddressFromLastOrder(false);
+    }
+  }
+
+  function startNewCustomer() {
+    clearCustomerForm();
+    setCustomerEntryMode("new");
+    setCustomerData("now");
+  }
+
   const customerStepComplete = useMemo(() => {
+    if (!selectedCustomer && customerEntryMode !== "new") return false;
     if (fulfillmentType === "ARRANGED") {
       return isCustomerNamePhoneComplete({
         name: contact.name,
@@ -768,7 +985,14 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
       city: address.city,
       state: address.state,
     });
-  }, [address, contact, customerData, fulfillmentType]);
+  }, [
+    address,
+    contact,
+    customerData,
+    customerEntryMode,
+    fulfillmentType,
+    selectedCustomer,
+  ]);
 
   const canGoNext =
     step === 0
@@ -1166,7 +1390,25 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
             {/* Step 2 — Cliente */}
             {step === 2 && (
               <div className="space-y-6">
-                {fulfillmentType === "CARRIER" && (
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <CustomerSearchSelect
+                    selected={selectedCustomer}
+                    onSelect={applyCustomer}
+                  />
+                  <button
+                    type="button"
+                    onClick={startNewCustomer}
+                    className={`shrink-0 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
+                      customerEntryMode === "new"
+                        ? "border-stone-900 bg-stone-900 text-white"
+                        : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
+                    }`}
+                  >
+                    Novo cliente
+                  </button>
+                </div>
+
+                {fulfillmentType === "CARRIER" && customerEntryMode === "new" && !selectedCustomer && (
                   <div className="space-y-2">
                     <CheckboxOption
                       checked={customerData === "now"}
@@ -1183,7 +1425,8 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                   </div>
                 )}
 
-                {fulfillmentType === "ARRANGED" && (
+                {(selectedCustomer || customerEntryMode === "new") &&
+                  fulfillmentType === "ARRANGED" && (
                   <div className="rounded-xl border border-stone-200 p-5">
                     <p className="mb-3 text-xs text-stone-500">
                       Entrega a combinar — informe nome e telefone. Localização e detalhes ficam nas observações da entrega ou no WhatsApp.
@@ -1214,7 +1457,9 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                   </div>
                 )}
 
-                {customerData === "now" && fulfillmentType === "CARRIER" && (
+                {(selectedCustomer || customerEntryMode === "new") &&
+                  customerData === "now" &&
+                  fulfillmentType === "CARRIER" && (
                   <div className="space-y-5 rounded-xl border border-stone-200 p-5">
                     <div>
                       <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-stone-400">
@@ -1246,13 +1491,25 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                             value={cpfFmt(contact.cpf)}
                             onChange={(e) => setContact((c) => ({ ...c, cpf: e.target.value.replace(/\D/g, "").slice(0, 11) }))}
                           />
+                          {(() => {
+                            if (contact.cpf.length !== 11) return null;
+                            const err = cpfValidationError(contact.cpf);
+                            return err ? <p className="mt-1 text-xs text-red-500">{err}</p> : null;
+                          })()}
                         </div>
                       </div>
                     </div>
                     <div>
-                      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-stone-400">
-                        Endereço
-                      </p>
+                      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-stone-400">
+                          Endereço
+                        </p>
+                        {addressFromLastOrder && (
+                          <p className="text-[11px] text-stone-400">
+                            Endereço preenchido com base na última compra. Confira antes de finalizar.
+                          </p>
+                        )}
+                      </div>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <div>
                           <FieldLabel>CEP</FieldLabel>
@@ -1263,6 +1520,7 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                             onChange={(e) => {
                               const digits = onlyDigits(e.target.value, 8);
                               setAddress((a) => ({ ...a, destinationCep: digits }));
+                              setAddressFromLastOrder(false);
                               if (digits.length < 8) setCepLookupError(null);
                             }}
                           />
@@ -1272,27 +1530,64 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                         </div>
                         <div className="sm:col-span-2">
                           <FieldLabel>Rua</FieldLabel>
-                          <TextInput value={address.street} onChange={(e) => setAddress((a) => ({ ...a, street: e.target.value }))} />
+                          <TextInput
+                            value={address.street}
+                            onChange={(e) => {
+                              setAddressFromLastOrder(false);
+                              setAddress((a) => ({ ...a, street: e.target.value }));
+                            }}
+                          />
                         </div>
                         <div>
                           <FieldLabel>Número</FieldLabel>
-                          <TextInput value={address.number} onChange={(e) => setAddress((a) => ({ ...a, number: e.target.value }))} />
+                          <TextInput
+                            value={address.number}
+                            onChange={(e) => {
+                              setAddressFromLastOrder(false);
+                              setAddress((a) => ({ ...a, number: e.target.value }));
+                            }}
+                          />
                         </div>
                         <div>
                           <FieldLabel optional>Complemento</FieldLabel>
-                          <TextInput value={address.complement} onChange={(e) => setAddress((a) => ({ ...a, complement: e.target.value }))} />
+                          <TextInput
+                            value={address.complement}
+                            onChange={(e) => {
+                              setAddressFromLastOrder(false);
+                              setAddress((a) => ({ ...a, complement: e.target.value }));
+                            }}
+                          />
                         </div>
                         <div>
                           <FieldLabel>Bairro</FieldLabel>
-                          <TextInput value={address.neighborhood} onChange={(e) => setAddress((a) => ({ ...a, neighborhood: e.target.value }))} />
+                          <TextInput
+                            value={address.neighborhood}
+                            onChange={(e) => {
+                              setAddressFromLastOrder(false);
+                              setAddress((a) => ({ ...a, neighborhood: e.target.value }));
+                            }}
+                          />
                         </div>
                         <div>
                           <FieldLabel>Cidade</FieldLabel>
-                          <TextInput value={address.city} onChange={(e) => setAddress((a) => ({ ...a, city: e.target.value }))} />
+                          <TextInput
+                            value={address.city}
+                            onChange={(e) => {
+                              setAddressFromLastOrder(false);
+                              setAddress((a) => ({ ...a, city: e.target.value }));
+                            }}
+                          />
                         </div>
                         <div>
                           <FieldLabel>Estado</FieldLabel>
-                          <TextInput maxLength={2} value={address.state} onChange={(e) => setAddress((a) => ({ ...a, state: e.target.value.toUpperCase() }))} />
+                          <TextInput
+                            maxLength={2}
+                            value={address.state}
+                            onChange={(e) => {
+                              setAddressFromLastOrder(false);
+                              setAddress((a) => ({ ...a, state: e.target.value.toUpperCase() }));
+                            }}
+                          />
                         </div>
                       </div>
                     </div>

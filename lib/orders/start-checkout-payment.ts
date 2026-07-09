@@ -76,6 +76,12 @@ function normalizePhone(phone: string): string | undefined {
 export async function startCheckoutPayment(
   input: StartCheckoutPaymentInput
 ): Promise<StartCheckoutPaymentResult> {
+  const { cpfValidationError } = await import("@/lib/validation/cpf");
+  const cpfError = cpfValidationError(input.cpf ?? input.contact?.cpf ?? "");
+  if (cpfError) {
+    return { ok: false, error: cpfError };
+  }
+
   const upsert = await upsertPendingOrderFromCheckout({
     email: input.email,
     userId: input.userId,

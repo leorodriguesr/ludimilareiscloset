@@ -12,6 +12,7 @@ import {
   startCheckoutPayment,
   type StartCheckoutPaymentSuccess,
 } from "@/lib/orders/start-checkout-payment";
+import { cpfDigits, cpfValidationError } from "@/lib/validation/cpf";
 
 export type PlaceOrderState =
   | StartCheckoutPaymentSuccess
@@ -28,19 +29,18 @@ export async function updateUserCheckoutContactAction(input: {
 
   const name = input.name.trim();
   const phoneDigits = input.phone.replace(/\D/g, "");
-  const cpfDigits = input.cpf.replace(/\D/g, "");
+  const cpf = cpfDigits(input.cpf);
+  const cpfError = cpfValidationError(cpf);
 
   if (!name) return { ok: false, error: "Informe seu nome." };
   if (phoneDigits.length < 10) {
     return { ok: false, error: "Informe um telefone válido com DDD." };
   }
-  if (cpfDigits.length !== 11) {
-    return { ok: false, error: "Informe um CPF válido (11 dígitos)." };
-  }
+  if (cpfError) return { ok: false, error: cpfError };
 
   await prisma.user.update({
     where: { id: session.user.userId },
-    data: { name, phone: phoneDigits, cpf: cpfDigits },
+    data: { name, phone: phoneDigits, cpf },
   });
   return { ok: true };
 }
@@ -73,6 +73,10 @@ export async function placeOrderAction(input: {
     return { ok: false, error: "Informe um e-mail para continuar." };
   }
 
+  const cpf = input.cpf ? cpfDigits(input.cpf) : "";
+  const cpfError = cpfValidationError(cpf);
+  if (cpfError) return { ok: false, error: cpfError };
+
   try {
     return await startCheckoutPayment({
       email,
@@ -81,10 +85,10 @@ export async function placeOrderAction(input: {
       shipping: input.shipping,
       contact: {
         ...input.contact,
-        cpf: input.cpf ?? undefined,
+        cpf,
       },
       address: input.address,
-      cpf: input.cpf,
+      cpf,
       paymentMethod: input.paymentMethod,
     });
   } catch (e) {

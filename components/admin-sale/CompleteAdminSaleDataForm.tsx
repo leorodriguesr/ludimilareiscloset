@@ -12,6 +12,7 @@ import {
   onlyDigits,
   phoneFmt,
 } from "@/lib/admin-sale/customer-form-input";
+import { cpfValidationError } from "@/lib/validation/cpf";
 
 type Props = { token: string };
 
@@ -278,6 +279,11 @@ export function CompleteAdminSaleDataForm({ token }: Props) {
                     }))
                   }
                 />
+                {(() => {
+                  if (form.cpf.length !== 11) return null;
+                  const err = cpfValidationError(form.cpf);
+                  return err ? <p className="mt-1 text-xs text-red-500">{err}</p> : null;
+                })()}
               </div>
             </div>
           </div>
