@@ -12,11 +12,32 @@ export type CustomerContactAddressFields = {
   state: string;
 };
 
+export type CustomerNamePhoneFields = {
+  name: string;
+  phone: string;
+};
+
 function digits(value: string): string {
   return value.replace(/\D/g, "");
 }
 
-/** Todos os campos de contato e endereço preenchidos (venda avulsa). */
+/** Nome + telefone — entrega a combinar (loja, retirada, Uber). */
+export function isCustomerNamePhoneComplete(
+  data: CustomerNamePhoneFields
+): boolean {
+  if (!data.name.trim()) return false;
+  if (digits(data.phone).length < 10) return false;
+  return true;
+}
+
+export function customerNamePhoneValidationError(
+  data: CustomerNamePhoneFields
+): string | null {
+  if (isCustomerNamePhoneComplete(data)) return null;
+  return "Informe o nome e o telefone do cliente.";
+}
+
+/** Todos os campos de contato e endereço preenchidos (transportadora). */
 export function isCustomerContactAddressComplete(
   data: CustomerContactAddressFields
 ): boolean {

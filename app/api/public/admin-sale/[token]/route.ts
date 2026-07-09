@@ -17,6 +17,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     select: {
       orderNumber: true,
       total: true,
+      fulfillmentType: true,
       items: {
         select: {
           quantity: true,
@@ -35,6 +36,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     orderNumber: order.orderNumber,
     total: order.total,
     totalFormatted: formatPrice(order.total),
+    fulfillmentType: order.fulfillmentType,
     items: order.items.map((i) => ({
       name: i.product.name,
       quantity: i.quantity,

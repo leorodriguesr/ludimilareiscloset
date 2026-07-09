@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { isCustomerContactAddressComplete } from "@/lib/admin-sale/customer-form-complete";
+import {
+  isCustomerContactAddressComplete,
+  isCustomerNamePhoneComplete,
+} from "@/lib/admin-sale/customer-form-complete";
 import {
   cepMask,
   cpfFmt,
@@ -33,6 +36,8 @@ function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
 }
 
 export function CompleteAdminSaleDataForm({ token }: Props) {
+  const [fulfillmentType, setFulfillmentType] = useState<"CARRIER" | "ARRANGED" | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -51,25 +56,55 @@ export function CompleteAdminSaleDataForm({ token }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
-  const isComplete = useMemo(
-    () =>
-      isCustomerContactAddressComplete({
+  const isArranged = fulfillmentType === "ARRANGED";
+
+  const isComplete = useMemo(() => {
+    if (isArranged) {
+      return isCustomerNamePhoneComplete({
         name: form.name,
-        email: form.email,
         phone: form.phone,
-        cpf: form.cpf,
-        destinationCep: form.destinationCep,
-        street: form.addressStreet,
-        number: form.addressNumber,
-        complement: form.addressComplement,
-        neighborhood: form.addressNeighborhood,
-        city: form.addressCity,
-        state: form.addressState,
-      }),
-    [form]
-  );
+      });
+    }
+    return isCustomerContactAddressComplete({
+      name: form.name,
+      email: form.email,
+      phone: form.phone,
+      cpf: form.cpf,
+      destinationCep: form.destinationCep,
+      street: form.addressStreet,
+      number: form.addressNumber,
+      complement: form.addressComplement,
+      neighborhood: form.addressNeighborhood,
+      city: form.addressCity,
+      state: form.addressState,
+    });
+  }, [form, isArranged]);
 
   useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/public/admin-sale/${token}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Link inválido.");
+        if (!cancelled) {
+          setFulfillmentType(
+            data.fulfillmentType === "ARRANGED" ? "ARRANGED" : "CARRIER"
+          );
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setLoadError(err instanceof Error ? err.message : "Erro ao carregar.");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  useEffect(() => {
+    if (isArranged) return;
     const digits = onlyDigits(form.destinationCep, 8);
     if (digits.length !== 8) return;
 
@@ -94,7 +129,7 @@ export function CompleteAdminSaleDataForm({ token }: Props) {
     }, 400);
 
     return () => clearTimeout(timeout);
-  }, [form.destinationCep]);
+  }, [form.destinationCep, isArranged]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -102,10 +137,13 @@ export function CompleteAdminSaleDataForm({ token }: Props) {
     setLoading(true);
     setError(null);
     try {
+      const body = isArranged
+        ? { name: form.name, phone: form.phone }
+        : form;
       const res = await fetch(`/api/public/admin-sale/${token}/customer-data`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Erro ao enviar.");
@@ -128,6 +166,22 @@ export function CompleteAdminSaleDataForm({ token }: Props) {
     );
   }
 
+  if (loadError) {
+    return (
+      <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+        {loadError}
+      </div>
+    );
+  }
+
+  if (fulfillmentType == null) {
+    return (
+      <div className="rounded-xl border border-stone-200 bg-white p-6 text-sm text-stone-500">
+        Carregando…
+      </div>
+    );
+  }
+
   return (
     <form
       onSubmit={(e) => void handleSubmit(e)}
@@ -136,7 +190,9 @@ export function CompleteAdminSaleDataForm({ token }: Props) {
       <div>
         <h2 className="text-lg font-semibold text-stone-900">Complete seus dados</h2>
         <p className="mt-1 text-sm text-stone-500">
-          Preencha contato e endereço para finalizar sua compra.
+          {isArranged
+            ? "Informe seu nome e telefone para finalizarmos o atendimento."
+            : "Preencha contato e endereço para finalizar sua compra."}
         </p>
       </div>
 
@@ -144,147 +200,175 @@ export function CompleteAdminSaleDataForm({ token }: Props) {
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
       )}
 
-      <div className="space-y-5">
-        <div>
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-stone-400">
-            Contato
-          </p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="sm:col-span-2">
-              <FieldLabel>Nome completo</FieldLabel>
-              <TextInput
-                autoComplete="name"
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              />
-            </div>
-            <div>
-              <FieldLabel>E-mail</FieldLabel>
-              <TextInput
-                type="email"
-                autoComplete="email"
-                value={form.email}
-                onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-              />
-            </div>
-            <div>
-              <FieldLabel>Telefone</FieldLabel>
-              <TextInput
-                inputMode="numeric"
-                autoComplete="tel"
-                placeholder="(00) 00000-0000"
-                value={phoneFmt(form.phone)}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    phone: onlyDigits(e.target.value, 11),
-                  }))
-                }
-              />
-            </div>
-            <div className="sm:col-span-2">
-              <FieldLabel>CPF</FieldLabel>
-              <TextInput
-                inputMode="numeric"
-                placeholder="000.000.000-00"
-                value={cpfFmt(form.cpf)}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    cpf: onlyDigits(e.target.value, 11),
-                  }))
-                }
-              />
-            </div>
+      {isArranged ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <FieldLabel>Nome</FieldLabel>
+            <TextInput
+              autoComplete="name"
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            />
+          </div>
+          <div>
+            <FieldLabel>Telefone</FieldLabel>
+            <TextInput
+              inputMode="numeric"
+              autoComplete="tel"
+              placeholder="(00) 00000-0000"
+              value={phoneFmt(form.phone)}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  phone: onlyDigits(e.target.value, 11),
+                }))
+              }
+            />
           </div>
         </div>
+      ) : (
+        <div className="space-y-5">
+          <div>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-stone-400">
+              Contato
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <FieldLabel>Nome completo</FieldLabel>
+                <TextInput
+                  autoComplete="name"
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                />
+              </div>
+              <div>
+                <FieldLabel>E-mail</FieldLabel>
+                <TextInput
+                  type="email"
+                  autoComplete="email"
+                  value={form.email}
+                  onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                />
+              </div>
+              <div>
+                <FieldLabel>Telefone</FieldLabel>
+                <TextInput
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  placeholder="(00) 00000-0000"
+                  value={phoneFmt(form.phone)}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      phone: onlyDigits(e.target.value, 11),
+                    }))
+                  }
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <FieldLabel>CPF</FieldLabel>
+                <TextInput
+                  inputMode="numeric"
+                  placeholder="000.000.000-00"
+                  value={cpfFmt(form.cpf)}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      cpf: onlyDigits(e.target.value, 11),
+                    }))
+                  }
+                />
+              </div>
+            </div>
+          </div>
 
-        <div>
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-stone-400">
-            Endereço
-          </p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <FieldLabel>CEP</FieldLabel>
-              <TextInput
-                inputMode="numeric"
-                autoComplete="postal-code"
-                placeholder="00000-000"
-                value={cepMask(onlyDigits(form.destinationCep, 8))}
-                onChange={(e) => {
-                  const digits = onlyDigits(e.target.value, 8);
-                  setForm((f) => ({ ...f, destinationCep: digits }));
-                  if (digits.length < 8) setCepLookupError(null);
-                }}
-              />
-              {cepLookupError && (
-                <p className="mt-1 text-xs text-red-500">{cepLookupError}</p>
-              )}
-            </div>
-            <div className="sm:col-span-2">
-              <FieldLabel>Rua</FieldLabel>
-              <TextInput
-                autoComplete="street-address"
-                value={form.addressStreet}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, addressStreet: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <FieldLabel>Número</FieldLabel>
-              <TextInput
-                value={form.addressNumber}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, addressNumber: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <FieldLabel optional>Complemento</FieldLabel>
-              <TextInput
-                value={form.addressComplement}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, addressComplement: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <FieldLabel>Bairro</FieldLabel>
-              <TextInput
-                value={form.addressNeighborhood}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, addressNeighborhood: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <FieldLabel>Cidade</FieldLabel>
-              <TextInput
-                autoComplete="address-level2"
-                value={form.addressCity}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, addressCity: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <FieldLabel>Estado</FieldLabel>
-              <TextInput
-                maxLength={2}
-                autoComplete="address-level1"
-                value={form.addressState}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    addressState: e.target.value.toUpperCase(),
-                  }))
-                }
-              />
+          <div>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-stone-400">
+              Endereço
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <FieldLabel>CEP</FieldLabel>
+                <TextInput
+                  inputMode="numeric"
+                  autoComplete="postal-code"
+                  placeholder="00000-000"
+                  value={cepMask(onlyDigits(form.destinationCep, 8))}
+                  onChange={(e) => {
+                    const digits = onlyDigits(e.target.value, 8);
+                    setForm((f) => ({ ...f, destinationCep: digits }));
+                    if (digits.length < 8) setCepLookupError(null);
+                  }}
+                />
+                {cepLookupError && (
+                  <p className="mt-1 text-xs text-red-500">{cepLookupError}</p>
+                )}
+              </div>
+              <div className="sm:col-span-2">
+                <FieldLabel>Rua</FieldLabel>
+                <TextInput
+                  autoComplete="street-address"
+                  value={form.addressStreet}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, addressStreet: e.target.value }))
+                  }
+                />
+              </div>
+              <div>
+                <FieldLabel>Número</FieldLabel>
+                <TextInput
+                  value={form.addressNumber}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, addressNumber: e.target.value }))
+                  }
+                />
+              </div>
+              <div>
+                <FieldLabel optional>Complemento</FieldLabel>
+                <TextInput
+                  value={form.addressComplement}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, addressComplement: e.target.value }))
+                  }
+                />
+              </div>
+              <div>
+                <FieldLabel>Bairro</FieldLabel>
+                <TextInput
+                  value={form.addressNeighborhood}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, addressNeighborhood: e.target.value }))
+                  }
+                />
+              </div>
+              <div>
+                <FieldLabel>Cidade</FieldLabel>
+                <TextInput
+                  autoComplete="address-level2"
+                  value={form.addressCity}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, addressCity: e.target.value }))
+                  }
+                />
+              </div>
+              <div>
+                <FieldLabel>Estado</FieldLabel>
+                <TextInput
+                  maxLength={2}
+                  autoComplete="address-level1"
+                  value={form.addressState}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      addressState: e.target.value.toUpperCase(),
+                    }))
+                  }
+                />
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       <button
         type="submit"

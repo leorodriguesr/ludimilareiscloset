@@ -14,7 +14,10 @@ import {
 import type { Product } from "@/lib/types";
 import type { NormalizedShippingOption } from "@/lib/shipping/types";
 import { parseDiscountInputValue } from "@/lib/admin-sale/parse-discount-value";
-import { isCustomerContactAddressComplete } from "@/lib/admin-sale/customer-form-complete";
+import {
+  isCustomerContactAddressComplete,
+  isCustomerNamePhoneComplete,
+} from "@/lib/admin-sale/customer-form-complete";
 import {
   cepMask,
   cpfFmt,
@@ -283,80 +286,74 @@ function ProductSearchSelect({
 function PaymentMethodSelector({
   paymentMethod,
   onChange,
-  pixTotal,
-  cardTotal,
-  maxInstallments,
+  alreadyPaid = false,
 }: {
-  paymentMethod: "pix" | "card";
+  paymentMethod: "pix" | "card" | null;
   onChange: (m: "pix" | "card") => void;
-  pixTotal: number;
-  cardTotal: number;
-  maxInstallments: number;
+  alreadyPaid?: boolean;
 }) {
-  const cardInstallmentValue = installmentValueEqualParts(cardTotal, maxInstallments);
-
   return (
-    <div className="overflow-hidden rounded-xl border-2 border-stone-200 bg-white shadow-sm">
-      <div className="border-b border-stone-100 px-4 py-3">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">
-          Forma de pagamento
-        </p>
-      </div>
-      <div className="grid grid-cols-2 gap-3 p-4">
+    <div className="rounded-xl border border-stone-200 bg-white p-3">
+      <p className="mb-2.5 px-0.5 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
+        {alreadyPaid ? "Como foi pago" : "Forma de pagamento"}
+      </p>
+      <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
           onClick={() => onChange("pix")}
-          className={`flex flex-col items-start gap-2 rounded-xl border-2 p-4 text-left transition-all ${
+          className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors ${
             paymentMethod === "pix"
-              ? "border-stone-900 bg-stone-50 shadow-sm"
-              : "border-stone-200 opacity-60 hover:border-stone-300 hover:opacity-100"
+              ? "border-stone-900 bg-stone-100"
+              : "border-stone-200 bg-white text-stone-500 hover:border-stone-300"
           }`}
         >
-          <div className="flex w-full items-center gap-2">
-            <Image src="/pix-icon.svg" alt="Pix" width={18} height={18} unoptimized className="h-[18px] w-[18px] shrink-0 object-contain" />
-            <span className="text-sm font-semibold text-stone-900">Pix</span>
-            <span className={`ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 transition-all ${paymentMethod === "pix" ? "border-stone-900 bg-stone-900" : "border-stone-300 bg-white"}`}>
-              {paymentMethod === "pix" && (
-                <svg className="h-2.5 w-2.5 text-white" viewBox="0 0 12 12" fill="none">
-                  <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              )}
-            </span>
-          </div>
-          <div>
-            <p className="text-base font-bold tabular-nums text-stone-900">{formatPrice(pixTotal)}</p>
-            <p className="text-[11px] text-stone-400">à vista</p>
-          </div>
+          <Image
+            src="/pix-icon.svg"
+            alt=""
+            width={16}
+            height={16}
+            unoptimized
+            className="h-4 w-4 shrink-0 object-contain"
+          />
+          <span
+            className={`text-sm font-medium ${
+              paymentMethod === "pix" ? "text-stone-900" : "text-stone-500"
+            }`}
+          >
+            Pix
+          </span>
         </button>
 
         <button
           type="button"
           onClick={() => onChange("card")}
-          className={`flex flex-col items-start gap-2 rounded-xl border-2 p-4 text-left transition-all ${
+          className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors ${
             paymentMethod === "card"
-              ? "border-stone-900 bg-stone-50 shadow-sm"
-              : "border-stone-200 opacity-60 hover:border-stone-300 hover:opacity-100"
+              ? "border-stone-900 bg-stone-100"
+              : "border-stone-200 bg-white text-stone-500 hover:border-stone-300"
           }`}
         >
-          <div className="flex w-full items-center gap-2">
-            <svg className="h-[18px] w-[18px] shrink-0 text-stone-600" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24" aria-hidden>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-            </svg>
-            <span className="text-sm font-semibold text-stone-900">Cartão</span>
-            <span className={`ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 transition-all ${paymentMethod === "card" ? "border-stone-900 bg-stone-900" : "border-stone-300 bg-white"}`}>
-              {paymentMethod === "card" && (
-                <svg className="h-2.5 w-2.5 text-white" viewBox="0 0 12 12" fill="none">
-                  <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              )}
-            </span>
-          </div>
-          <div>
-            <p className="text-base font-bold tabular-nums text-stone-900">{formatPrice(cardTotal)}</p>
-            <p className="text-[11px] text-stone-400">
-              {maxInstallments}× {formatPrice(cardInstallmentValue)} s/ juros
-            </p>
-          </div>
+          <svg
+            className="h-4 w-4 shrink-0 text-stone-600"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.5}
+            viewBox="0 0 24 24"
+            aria-hidden
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
+            />
+          </svg>
+          <span
+            className={`text-sm font-medium ${
+              paymentMethod === "card" ? "text-stone-900" : "text-stone-500"
+            }`}
+          >
+            Cartão
+          </span>
         </button>
       </div>
     </div>
@@ -390,43 +387,117 @@ function CopyBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
-function OrderSummary({ pricing }: { pricing: PricingPreview | null }) {
-  if (!pricing) {
+function OrderSummary({
+  pricing,
+  paymentMethod,
+  maxInstallments,
+}: {
+  pricing: { pix: PricingPreview | null; card: PricingPreview | null };
+  paymentMethod: "pix" | "card" | null;
+  maxInstallments: number;
+}) {
+  // Breakdown usa cartão como base até o método ser escolhido (preço de lista).
+  const active = paymentMethod ? pricing[paymentMethod] : pricing.card ?? pricing.pix;
+  if (!active) {
     return (
       <div className="rounded-xl border border-dashed border-stone-200 bg-stone-50/80 p-5 text-sm text-stone-400">
         Adicione produtos para ver o resumo.
       </div>
     );
   }
+
+  const pixTotal = pricing.pix?.total ?? null;
+  const cardTotal = pricing.card?.total ?? null;
+  const cardInstallment =
+    cardTotal != null ? installmentValueEqualParts(cardTotal, maxInstallments) : null;
+  const selectedClass = "border border-stone-900 bg-stone-100";
+  const idleClass = "border border-transparent bg-stone-50";
+
   return (
     <div className="rounded-xl border border-stone-200 bg-white p-5">
       <p className="text-xs font-semibold uppercase tracking-wide text-stone-400">Resumo</p>
       <dl className="mt-4 space-y-2 text-sm">
         <div className="flex justify-between text-stone-600">
           <dt>Produtos</dt>
-          <dd className="tabular-nums">{formatPrice(pricing.subtotalOriginal)}</dd>
+          <dd className="tabular-nums">{formatPrice(active.subtotalOriginal)}</dd>
         </div>
-        {pricing.itemsDiscountTotal > 0 && (
+        {active.itemsDiscountTotal > 0 && (
           <div className="flex justify-between text-red-600">
             <dt>Descontos por item</dt>
-            <dd className="tabular-nums">-{formatPrice(pricing.itemsDiscountTotal)}</dd>
+            <dd className="tabular-nums">-{formatPrice(active.itemsDiscountTotal)}</dd>
           </div>
         )}
-        {pricing.orderDiscountAmount > 0 && (
+        {active.orderDiscountAmount > 0 && (
           <div className="flex justify-between text-red-600">
             <dt>Desconto geral</dt>
-            <dd className="tabular-nums">-{formatPrice(pricing.orderDiscountAmount)}</dd>
+            <dd className="tabular-nums">-{formatPrice(active.orderDiscountAmount)}</dd>
           </div>
         )}
         <div className="flex justify-between text-stone-600">
           <dt>Entrega / frete</dt>
-          <dd className="tabular-nums">{formatPrice(pricing.shippingAmount)}</dd>
-        </div>
-        <div className="flex justify-between border-t border-stone-100 pt-3 text-base font-semibold text-stone-900">
-          <dt>Total</dt>
-          <dd className="tabular-nums">{formatPrice(pricing.total)}</dd>
+          <dd className="tabular-nums">{formatPrice(active.shippingAmount)}</dd>
         </div>
       </dl>
+
+      <div className="mt-4 space-y-2 border-t border-stone-100 pt-4">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-400">
+          Total por pagamento
+        </p>
+        <div
+          className={`flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 ${
+            paymentMethod === "pix" ? selectedClass : idleClass
+          }`}
+        >
+          <div className="flex min-w-0 items-center gap-1.5">
+            <Image
+              src="/pix-icon.svg"
+              alt=""
+              width={14}
+              height={14}
+              unoptimized
+              className="h-3.5 w-3.5 shrink-0 object-contain"
+            />
+            <span className="text-sm font-medium text-stone-700">Pix</span>
+            <span className="text-[11px] text-stone-400">à vista</span>
+          </div>
+          <span className="text-sm font-semibold tabular-nums text-stone-900">
+            {pixTotal != null ? formatPrice(pixTotal) : "—"}
+          </span>
+        </div>
+        <div
+          className={`rounded-lg px-3 py-2.5 ${
+            paymentMethod === "card" ? selectedClass : idleClass
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <svg
+                className="h-3.5 w-3.5 shrink-0 text-stone-500"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.5}
+                viewBox="0 0 24 24"
+                aria-hidden
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
+                />
+              </svg>
+              <span className="text-sm font-medium text-stone-700">Cartão</span>
+            </div>
+            <span className="text-sm font-semibold tabular-nums text-stone-900">
+              {cardTotal != null ? formatPrice(cardTotal) : "—"}
+            </span>
+          </div>
+          {cardInstallment != null && maxInstallments > 0 && (
+            <p className="mt-0.5 text-right text-[11px] tabular-nums text-stone-400">
+              {maxInstallments}× {formatPrice(cardInstallment)} s/ juros
+            </p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -442,7 +513,6 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
   const [destinationCep, setDestinationCep] = useState("");
   const [shippingOptions, setShippingOptions] = useState<NormalizedShippingOption[]>([]);
   const [selectedShippingId, setSelectedShippingId] = useState("");
-  const [arrangedAmount, setArrangedAmount] = useState("");
   const [deliveryNotes, setDeliveryNotes] = useState("");
   const [internalNotes, setInternalNotes] = useState("");
   const [customerData, setCustomerData] = useState<"now" | "later">("now");
@@ -458,9 +528,12 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
   });
   const [cepLookupError, setCepLookupError] = useState<string | null>(null);
   const [paymentAlreadyPaid, setPaymentAlreadyPaid] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<"pix" | "card">("pix");
+  const [paymentMethod, setPaymentMethod] = useState<"pix" | "card" | null>(null);
   const [orderDiscount, setOrderDiscount] = useState<DiscountForm | null>(null);
-  const [pricing, setPricing] = useState<PricingPreview | null>(null);
+  const [pricingByMethod, setPricingByMethod] = useState<{
+    pix: PricingPreview | null;
+    card: PricingPreview | null;
+  }>({ pix: null, card: null });
   const [loadingQuote, setLoadingQuote] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -481,29 +554,14 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
   );
 
   const shippingAmount = useMemo(() => {
-    if (fulfillmentType === "ARRANGED") {
-      if (arrangedMode !== "store_delivery") return 0;
-      const n = Number(arrangedAmount.replace(",", "."));
-      return Number.isFinite(n) ? Math.max(0, n) : 0;
-    }
+    if (fulfillmentType === "ARRANGED") return 0;
     const opt = shippingOptions.find((o) => o.id === selectedShippingId);
     return opt?.price ?? 0;
-  }, [fulfillmentType, arrangedMode, arrangedAmount, shippingOptions, selectedShippingId]);
+  }, [fulfillmentType, shippingOptions, selectedShippingId]);
 
-  const paymentTotals = useMemo(() => {
-    const cardSubtotal = lines.reduce((s, l) => s + l.product.price * l.quantity, 0);
-    const pixSubtotal = lines.reduce((s, l) => {
-      const px =
-        l.product.pixPrice != null && l.product.pixPrice > 0
-          ? l.product.pixPrice
-          : l.product.price;
-      return s + px * l.quantity;
-    }, 0);
-    return {
-      card: cardSubtotal + shippingAmount,
-      pix: pixSubtotal + shippingAmount,
-    };
-  }, [lines, shippingAmount]);
+  const activePricing = paymentMethod
+    ? pricingByMethod[paymentMethod]
+    : pricingByMethod.card ?? pricingByMethod.pix;
 
   const linesPayload = useCallback(
     () =>
@@ -518,26 +576,43 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
 
   const refreshPricing = useCallback(async () => {
     if (lines.length === 0) {
-      setPricing(null);
+      setPricingByMethod({ pix: null, card: null });
       return;
     }
+    const payloadLines = linesPayload();
+    const discount = buildDiscountPayload(orderDiscount);
     try {
-      const res = await fetch("/api/admin/sales/preview-pricing", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          lines: linesPayload(),
-          paymentMethod,
-          shippingAmount,
-          orderDiscount: buildDiscountPayload(orderDiscount),
+      const [pixRes, cardRes] = await Promise.all([
+        fetch("/api/admin/sales/preview-pricing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            lines: payloadLines,
+            paymentMethod: "pix",
+            shippingAmount,
+            orderDiscount: discount,
+          }),
         }),
+        fetch("/api/admin/sales/preview-pricing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            lines: payloadLines,
+            paymentMethod: "card",
+            shippingAmount,
+            orderDiscount: discount,
+          }),
+        }),
+      ]);
+      const [pixData, cardData] = await Promise.all([pixRes.json(), cardRes.json()]);
+      setPricingByMethod({
+        pix: pixRes.ok ? pixData : null,
+        card: cardRes.ok ? cardData : null,
       });
-      const data = await res.json();
-      if (res.ok) setPricing(data);
     } catch {
       /* ignore */
     }
-  }, [lines.length, linesPayload, paymentMethod, shippingAmount, orderDiscount]);
+  }, [lines.length, linesPayload, shippingAmount, orderDiscount]);
 
   useEffect(() => {
     void refreshPricing();
@@ -613,6 +688,10 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
   }
 
   async function handleSubmit() {
+    if (!paymentMethod) {
+      setError("Selecione a forma de pagamento.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -627,23 +706,23 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
               ? { destinationCep: onlyDigits(destinationCep, 8), optionId: selectedShippingId }
               : undefined,
           arrangedShippingAmount:
-            fulfillmentType === "ARRANGED" && arrangedMode === "store_delivery"
-              ? parseDiscountInputValue(arrangedAmount) ?? 0
-              : undefined,
+            fulfillmentType === "ARRANGED" ? 0 : undefined,
           arrangedMode:
             fulfillmentType === "ARRANGED" ? arrangedMode ?? undefined : undefined,
           deliveryNotes: deliveryNotes.trim() || undefined,
           internalNotes: internalNotes || undefined,
-          customerData,
-          contact: customerData === "now" ? contact : undefined,
+          customerData: fulfillmentType === "ARRANGED" ? "now" : customerData,
+          contact:
+            fulfillmentType === "ARRANGED"
+              ? { name: contact.name, phone: contact.phone }
+              : customerData === "now"
+                ? contact
+                : undefined,
           address:
-            customerData === "now"
+            customerData === "now" && fulfillmentType === "CARRIER"
               ? {
                   ...address,
-                  destinationCep:
-                    fulfillmentType === "CARRIER"
-                      ? onlyDigits(destinationCep, 8)
-                      : onlyDigits(address.destinationCep, 8),
+                  destinationCep: onlyDigits(destinationCep, 8) || onlyDigits(address.destinationCep, 8),
                 }
               : undefined,
           paymentAlreadyPaid,
@@ -662,7 +741,19 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
     }
   }
 
+  useEffect(() => {
+    if (fulfillmentType === "ARRANGED" && customerData !== "now") {
+      setCustomerData("now");
+    }
+  }, [fulfillmentType, customerData]);
+
   const customerStepComplete = useMemo(() => {
+    if (fulfillmentType === "ARRANGED") {
+      return isCustomerNamePhoneComplete({
+        name: contact.name,
+        phone: contact.phone,
+      });
+    }
     if (customerData === "later") return true;
     return isCustomerContactAddressComplete({
       name: contact.name,
@@ -677,7 +768,7 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
       city: address.city,
       state: address.state,
     });
-  }, [address, contact, customerData]);
+  }, [address, contact, customerData, fulfillmentType]);
 
   const canGoNext =
     step === 0
@@ -685,12 +776,11 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
         lines.every((l) => pieceSelectionsAreComplete(l.product.pieces, l.selections))
       : step === 1
         ? fulfillmentType === "ARRANGED"
-          ? arrangedMode !== null &&
-            (arrangedMode !== "store_delivery" || arrangedAmount.trim() !== "")
+          ? arrangedMode !== null
           : Boolean(selectedShippingId)
         : step === 2
           ? customerStepComplete
-          : true;
+          : paymentMethod != null;
 
   /* ─── Success screen ───────────────────────────────────────── */
 
@@ -761,17 +851,21 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
           </button>
         </div>
 
-        {/* Stepper */}
+        {/* Stepper — sem stretch; em tela estreita rola na horizontal */}
         <div className="shrink-0 border-b border-stone-100 bg-stone-50/80 px-3 py-3 sm:px-6">
-          <ol className="flex gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:gap-3">
+          <ol className="flex gap-1.5 overflow-x-auto overscroll-x-contain p-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {STEPS.map((s, i) => {
               const active = i === step;
               const done = i < step;
               return (
                 <li
                   key={s.id}
-                  className={`flex min-w-[4.75rem] shrink-0 items-center gap-2 rounded-lg px-2 py-1.5 sm:min-w-[5.5rem] lg:min-w-0 lg:flex-1 lg:px-3 ${
-                    active ? "bg-white ring-1 ring-stone-200" : ""
+                  className={`flex shrink-0 items-center gap-2 rounded-lg border px-2.5 py-2 whitespace-nowrap ${
+                    active
+                      ? "border-stone-300 bg-white shadow-sm"
+                      : done
+                        ? "border-transparent bg-stone-100/80"
+                        : "border-transparent"
                   }`}
                 >
                   <span
@@ -779,15 +873,15 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                       active
                         ? "bg-stone-900 text-white"
                         : done
-                          ? "bg-stone-200 text-stone-700"
-                          : "bg-white text-stone-400 ring-1 ring-stone-200"
+                          ? "bg-stone-300 text-stone-800"
+                          : "border border-stone-200 bg-white text-stone-400"
                     }`}
                   >
                     {done ? "✓" : i + 1}
                   </span>
                   <span
-                    className={`truncate text-[11px] font-medium sm:text-xs ${
-                      active ? "text-stone-900" : "text-stone-500"
+                    className={`text-[11px] font-medium sm:text-xs ${
+                      active ? "text-stone-900" : done ? "text-stone-600" : "text-stone-400"
                     }`}
                   >
                     {s.label}
@@ -809,53 +903,55 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
 
             {/* Step 0 — Produtos */}
             {step === 0 && (
-              <div className="space-y-6">
-                <section className="rounded-xl border border-stone-200 bg-stone-50/50 p-5">
-                  <h3 className="text-sm font-semibold text-stone-900">Adicionar produto</h3>
-                  <p className="mt-1 text-xs text-stone-500">
-                    Selecione o produto e configure cor e tamanho nos itens da venda.
-                  </p>
-
-                  <div className="mt-4">
-                    <FieldLabel>Produto</FieldLabel>
-                    <ProductSearchSelect products={products} onSelect={addProduct} />
+              <div className="space-y-5">
+                <section className="space-y-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-stone-900">Produtos</h3>
+                    <p className="mt-0.5 text-xs text-stone-500">
+                      Adicione itens e configure cor, tamanho e desconto em cada um.
+                    </p>
                   </div>
-
-                  <div className="mt-5">
-                    <FieldLabel>Observações internas</FieldLabel>
-                    <TextArea
-                      rows={2}
-                      placeholder="Visível apenas para admin e gestor…"
-                      value={internalNotes}
-                      onChange={(e) => setInternalNotes(e.target.value)}
-                    />
-                  </div>
+                  <ProductSearchSelect products={products} onSelect={addProduct} />
                 </section>
 
-                {lines.length > 0 && (
-                  <section>
-                    <h3 className="mb-3 text-sm font-semibold text-stone-900">
-                      Itens da venda ({lines.length})
+                <section className="space-y-3">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <h3 className="text-sm font-semibold text-stone-900">
+                      Itens da venda
+                      {lines.length > 0 ? (
+                        <span className="ml-1.5 font-normal text-stone-400">({lines.length})</span>
+                      ) : null}
                     </h3>
-                    <div className="max-h-[min(42vh,22rem)] space-y-3 overflow-y-auto overscroll-contain pr-0.5">
+                  </div>
+
+                  {lines.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-stone-200 px-4 py-8 text-center">
+                      <p className="text-sm text-stone-500">Nenhum produto adicionado ainda.</p>
+                      <p className="mt-1 text-xs text-stone-400">
+                        Use o seletor acima para incluir o primeiro item.
+                      </p>
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white">
                       {lines.map((line, idx) => (
-                        <div key={line.key} className="rounded-xl border border-stone-200 bg-white p-3 sm:p-4">
-                          <div className="flex items-start gap-3 sm:gap-4">
-                            <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-stone-100 sm:h-14 sm:w-14">
+                        <li key={line.key} className="p-4 sm:p-5">
+                          <div className="flex gap-3 sm:gap-4">
+                            <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-stone-100 sm:h-16 sm:w-16">
                               {line.product.images[0]?.url && (
                                 <Image
                                   src={line.product.images[0].url}
                                   alt=""
                                   fill
                                   className="object-cover"
-                                  sizes="56px"
+                                  sizes="64px"
                                 />
                               )}
                             </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-start justify-between gap-2">
+
+                            <div className="min-w-0 flex-1 space-y-3">
+                              <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
-                                  <p className="break-words text-sm font-medium leading-snug text-stone-900 sm:text-base">
+                                  <p className="text-sm font-medium leading-snug text-stone-900 sm:text-[15px]">
                                     {line.product.name}
                                   </p>
                                   <ProductPrices product={line.product} quantity={line.quantity} />
@@ -863,13 +959,14 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                                 <button
                                   type="button"
                                   onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))}
-                                  className="shrink-0 text-xs text-red-600 hover:text-red-800"
+                                  className="shrink-0 rounded-md px-1.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 hover:text-red-800"
                                 >
                                   Remover
                                 </button>
                               </div>
-                              <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-end sm:gap-3">
-                                <div className="col-span-1">
+
+                              <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2 sm:grid-cols-[6rem_minmax(0,12rem)] sm:gap-3">
+                                <div>
                                   <FieldLabel>Qtd</FieldLabel>
                                   <TextInput
                                     type="number"
@@ -882,9 +979,9 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                                     }
                                   />
                                 </div>
-                                <div className="col-span-1">
-                                  <FieldLabel>Desc. item</FieldLabel>
-                                  <div className="flex gap-1">
+                                <div>
+                                  <FieldLabel>Desconto</FieldLabel>
+                                  <div className="flex gap-1.5">
                                     <select
                                       value={line.itemDiscount?.mode ?? "FIXED"}
                                       onChange={(e) =>
@@ -895,7 +992,7 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                                           },
                                         })
                                       }
-                                      className="w-14 rounded-lg border border-stone-200 px-2 py-2.5 text-sm"
+                                      className="w-14 shrink-0 rounded-lg border border-stone-200 bg-white px-2 py-2.5 text-sm text-stone-700 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
                                     >
                                       <option value="FIXED">R$</option>
                                       <option value="PERCENT">%</option>
@@ -916,24 +1013,36 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                                   </div>
                                 </div>
                               </div>
+
+                              {line.product.pieces.length > 0 && (
+                                <div className="border-t border-stone-100 pt-3">
+                                  <FieldLabel>Variantes</FieldLabel>
+                                  <PieceSelector
+                                    pieces={line.product.pieces}
+                                    selections={line.selections}
+                                    onSelectionsChange={(next) =>
+                                      updateLine(idx, { selections: next })
+                                    }
+                                  />
+                                </div>
+                              )}
                             </div>
                           </div>
-
-                          {line.product.pieces.length > 0 && (
-                            <div className="mt-4 border-t border-stone-100 pt-4">
-                              <FieldLabel>Variantes</FieldLabel>
-                              <PieceSelector
-                                pieces={line.product.pieces}
-                                selections={line.selections}
-                                onSelectionsChange={(next) => updateLine(idx, { selections: next })}
-                              />
-                            </div>
-                          )}
-                        </div>
+                        </li>
                       ))}
-                    </div>
-                  </section>
-                )}
+                    </ul>
+                  )}
+                </section>
+
+                <section>
+                  <FieldLabel optional>Observações internas</FieldLabel>
+                  <TextArea
+                    rows={2}
+                    placeholder="Visível apenas para admin e gestor…"
+                    value={internalNotes}
+                    onChange={(e) => setInternalNotes(e.target.value)}
+                  />
+                </section>
               </div>
             )}
 
@@ -1030,32 +1139,15 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                       />
                       <CheckboxOption
                         checked={arrangedMode === "pickup"}
-                        onChange={() => {
-                          setArrangedMode("pickup");
-                          setArrangedAmount("");
-                        }}
+                        onChange={() => setArrangedMode("pickup")}
                         label="Retirada"
                       />
                       <CheckboxOption
                         checked={arrangedMode === "uber"}
-                        onChange={() => {
-                          setArrangedMode("uber");
-                          setArrangedAmount("");
-                        }}
+                        onChange={() => setArrangedMode("uber")}
                         label="Uber"
                       />
                     </div>
-
-                    {arrangedMode === "store_delivery" && (
-                      <div className="pt-2">
-                        <FieldLabel>Valor da entrega (R$)</FieldLabel>
-                        <TextInput
-                          placeholder="Ex.: 25,00"
-                          value={arrangedAmount}
-                          onChange={(e) => setArrangedAmount(e.target.value)}
-                        />
-                      </div>
-                    )}
                   </div>
                 )}
 
@@ -1074,22 +1166,55 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
             {/* Step 2 — Cliente */}
             {step === 2 && (
               <div className="space-y-6">
-                <div className="space-y-2">
-                  <CheckboxOption
-                    checked={customerData === "now"}
-                    onChange={() => setCustomerData("now")}
-                    label="Preencher agora"
-                    description="Informar dados do cliente nesta etapa"
-                  />
-                  <CheckboxOption
-                    checked={customerData === "later"}
-                    onChange={() => setCustomerData("later")}
-                    label="Adicionar depois"
-                    description="Gerar link para o cliente preencher"
-                  />
-                </div>
+                {fulfillmentType === "CARRIER" && (
+                  <div className="space-y-2">
+                    <CheckboxOption
+                      checked={customerData === "now"}
+                      onChange={() => setCustomerData("now")}
+                      label="Preencher agora"
+                      description="Informar dados do cliente nesta etapa"
+                    />
+                    <CheckboxOption
+                      checked={customerData === "later"}
+                      onChange={() => setCustomerData("later")}
+                      label="Adicionar depois"
+                      description="Gerar link para o cliente preencher"
+                    />
+                  </div>
+                )}
 
-                {customerData === "now" && (
+                {fulfillmentType === "ARRANGED" && (
+                  <div className="rounded-xl border border-stone-200 p-5">
+                    <p className="mb-3 text-xs text-stone-500">
+                      Entrega a combinar — informe nome e telefone. Localização e detalhes ficam nas observações da entrega ou no WhatsApp.
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <FieldLabel>Nome</FieldLabel>
+                        <TextInput
+                          value={contact.name}
+                          onChange={(e) => setContact((c) => ({ ...c, name: e.target.value }))}
+                        />
+                      </div>
+                      <div>
+                        <FieldLabel>Telefone</FieldLabel>
+                        <TextInput
+                          inputMode="numeric"
+                          placeholder="(00) 00000-0000"
+                          value={phoneFmt(contact.phone)}
+                          onChange={(e) =>
+                            setContact((c) => ({
+                              ...c,
+                              phone: e.target.value.replace(/\D/g, "").slice(0, 11),
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {customerData === "now" && fulfillmentType === "CARRIER" && (
                   <div className="space-y-5 rounded-xl border border-stone-200 p-5">
                     <div>
                       <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-stone-400">
@@ -1194,15 +1319,11 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                   />
                 </div>
 
-                {!paymentAlreadyPaid && (
-                  <PaymentMethodSelector
-                    paymentMethod={paymentMethod}
-                    onChange={setPaymentMethod}
-                    pixTotal={paymentTotals.pix}
-                    cardTotal={paymentTotals.card}
-                    maxInstallments={maxInstallments}
-                  />
-                )}
+                <PaymentMethodSelector
+                  paymentMethod={paymentMethod}
+                  onChange={setPaymentMethod}
+                  alreadyPaid={paymentAlreadyPaid}
+                />
 
                 <div className="rounded-xl border border-stone-200 p-5">
                   <FieldLabel>Desconto na venda inteira</FieldLabel>
@@ -1240,24 +1361,89 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
 
           {/* Summary — desktop sidebar */}
           <aside className="hidden shrink-0 border-t border-stone-100 bg-stone-50/50 px-6 py-5 lg:block lg:w-72 lg:border-l lg:border-t-0">
-            <OrderSummary pricing={pricing} />
+            <OrderSummary
+              pricing={pricingByMethod}
+              paymentMethod={paymentMethod}
+              maxInstallments={maxInstallments}
+            />
           </aside>
         </div>
 
         {/* Summary — mobile sticky bar */}
         <div className="shrink-0 border-t border-stone-100 bg-stone-50 px-4 py-3 lg:hidden">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-400">Total da venda</p>
-              <p className="truncate text-lg font-semibold tabular-nums text-stone-900">
-                {pricing ? formatPrice(pricing.total) : "—"}
-              </p>
+          <div className="space-y-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-400">
+              Total da venda
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <div
+                className={`rounded-lg px-2.5 py-2 ${
+                  paymentMethod === "pix"
+                    ? "border border-stone-900 bg-stone-100"
+                    : "border border-transparent bg-white/70"
+                }`}
+              >
+                <div className="flex items-center gap-1">
+                  <Image
+                    src="/pix-icon.svg"
+                    alt=""
+                    width={12}
+                    height={12}
+                    unoptimized
+                    className="h-3 w-3 shrink-0 object-contain"
+                  />
+                  <span className="text-[10px] font-medium text-stone-500">Pix</span>
+                </div>
+                <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-stone-900">
+                  {pricingByMethod.pix ? formatPrice(pricingByMethod.pix.total) : "—"}
+                </p>
+              </div>
+              <div
+                className={`rounded-lg px-2.5 py-2 ${
+                  paymentMethod === "card"
+                    ? "border border-stone-900 bg-stone-100"
+                    : "border border-transparent bg-white/70"
+                }`}
+              >
+                <div className="flex items-center gap-1">
+                  <svg
+                    className="h-3 w-3 shrink-0 text-stone-500"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={1.5}
+                    viewBox="0 0 24 24"
+                    aria-hidden
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
+                    />
+                  </svg>
+                  <span className="text-[10px] font-medium text-stone-500">Cartão</span>
+                </div>
+                <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-stone-900">
+                  {pricingByMethod.card ? formatPrice(pricingByMethod.card.total) : "—"}
+                </p>
+                {pricingByMethod.card && maxInstallments > 0 && (
+                  <p className="truncate text-[10px] tabular-nums text-stone-400">
+                    {maxInstallments}×{" "}
+                    {formatPrice(
+                      installmentValueEqualParts(pricingByMethod.card.total, maxInstallments)
+                    )}
+                  </p>
+                )}
+              </div>
             </div>
-            {pricing && pricing.itemsDiscountTotal + pricing.orderDiscountAmount > 0 && (
-              <p className="shrink-0 text-xs text-red-600">
-                Desc. -{formatPrice(pricing.itemsDiscountTotal + pricing.orderDiscountAmount)}
-              </p>
-            )}
+            {activePricing &&
+              activePricing.itemsDiscountTotal + activePricing.orderDiscountAmount > 0 && (
+                <p className="text-xs text-red-600">
+                  Desc. -
+                  {formatPrice(
+                    activePricing.itemsDiscountTotal + activePricing.orderDiscountAmount
+                  )}
+                </p>
+              )}
           </div>
         </div>
 

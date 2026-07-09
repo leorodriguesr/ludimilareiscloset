@@ -20,6 +20,7 @@ import {
 } from "@/lib/admin-sale/complete-customer-data";
 import {
   customerContactAddressValidationError,
+  customerNamePhoneValidationError,
 } from "@/lib/admin-sale/customer-form-complete";
 import { getFulfillmentStrategy } from "@/lib/fulfillment/fulfillment-types";
 import { initiateOrderPayment } from "@/lib/order/payment/initiate-payment";
@@ -34,7 +35,7 @@ import { normalizePostalCode } from "@/lib/shipping/superfrete";
 
 export type AdminSaleContactInput = {
   name: string;
-  email: string;
+  email?: string;
   phone: string;
   cpf?: string;
 };
@@ -196,29 +197,52 @@ export async function createAdminSale(
     };
   }
 
-  const fillNow = input.customerData === "now";
-  if (fillNow) {
-    const contactFields = {
-      name: input.contact?.name ?? "",
-      email: input.contact?.email ?? "",
-      phone: input.contact?.phone ?? "",
-      cpf: input.contact?.cpf ?? "",
-      destinationCep: input.address?.destinationCep ?? "",
-      street: input.address?.street ?? "",
-      number: input.address?.number ?? "",
-      complement: input.address?.complement ?? "",
-      neighborhood: input.address?.neighborhood ?? "",
-      city: input.address?.city ?? "",
-      state: input.address?.state ?? "",
+  const isArranged = input.fulfillmentType === FulfillmentType.ARRANGED;
+  // Entrega a combinar exige nome/telefone na criação — sem link "depois".
+  const fillNow = isArranged || input.customerData === "now";
+
+  if (isArranged && input.customerData === "later") {
+    return {
+      ok: false,
+      error: "Na entrega a combinar, informe nome e telefone do cliente agora.",
     };
-    const validationError = customerContactAddressValidationError(contactFields);
-    if (validationError) {
-      return { ok: false, error: validationError };
+  }
+
+  if (fillNow) {
+    if (isArranged) {
+      const validationError = customerNamePhoneValidationError({
+        name: input.contact?.name ?? "",
+        phone: input.contact?.phone ?? "",
+      });
+      if (validationError) {
+        return { ok: false, error: validationError };
+      }
+    } else {
+      const contactFields = {
+        name: input.contact?.name ?? "",
+        email: input.contact?.email ?? "",
+        phone: input.contact?.phone ?? "",
+        cpf: input.contact?.cpf ?? "",
+        destinationCep: input.address?.destinationCep ?? "",
+        street: input.address?.street ?? "",
+        number: input.address?.number ?? "",
+        complement: input.address?.complement ?? "",
+        neighborhood: input.address?.neighborhood ?? "",
+        city: input.address?.city ?? "",
+        state: input.address?.state ?? "",
+      };
+      const validationError = customerContactAddressValidationError(contactFields);
+      if (validationError) {
+        return { ok: false, error: validationError };
+      }
     }
   }
 
   const tokenData = fillNow ? null : generateCustomerDataToken();
   const placeholderEmail = `pendente-${Date.now()}@venda-avulsa.local`;
+  const contactEmail = input.contact?.email?.trim().toLowerCase() ?? "";
+  const orderEmail =
+    fillNow && contactEmail ? contactEmail : placeholderEmail;
 
   const created = await prisma.$transaction(async (tx) => {
     const maxRow = await tx.$queryRawUnsafe<Array<{ max: number | null }>>(
@@ -229,9 +253,7 @@ export async function createAdminSale(
     const order = await tx.order.create({
       data: {
         orderNumber: nextOrderNumber,
-        email: fillNow
-          ? input.contact!.email.trim().toLowerCase()
-          : placeholderEmail,
+        email: orderEmail,
         status: input.paymentAlreadyPaid
           ? ORDER_STATUS.PAID
           : ORDER_STATUS.PENDING_PAYMENT,
@@ -267,7 +289,7 @@ export async function createAdminSale(
         shippingServiceId: shipping.shippingServiceId,
         destinationCep:
           shipping.destinationCep ??
-          (fillNow && input.address
+          (fillNow && !isArranged && input.address
             ? normalizePostalCode(input.address.destinationCep)
             : null),
         packageHeightCm: shipping.packageHeightCm,
@@ -276,17 +298,25 @@ export async function createAdminSale(
         packageWeightKg: shipping.packageWeightKg,
         recipientName: fillNow ? input.contact!.name.trim() : null,
         phone: fillNow ? input.contact!.phone.trim() : null,
-        cpf: fillNow ? input.contact!.cpf?.trim() || null : null,
-        addressStreet: fillNow ? input.address?.street.trim() || null : null,
-        addressNumber: fillNow ? input.address?.number.trim() || null : null,
+        cpf: fillNow && !isArranged ? input.contact!.cpf?.trim() || null : null,
+        addressStreet:
+          fillNow && !isArranged ? input.address?.street.trim() || null : null,
+        addressNumber:
+          fillNow && !isArranged ? input.address?.number.trim() || null : null,
         addressComplement:
-          fillNow ? input.address?.complement?.trim() || null : null,
+          fillNow && !isArranged
+            ? input.address?.complement?.trim() || null
+            : null,
         addressNeighborhood:
-          fillNow ? input.address?.neighborhood.trim() || null : null,
-        addressCity: fillNow ? input.address?.city.trim() || null : null,
-        addressState: fillNow
-          ? input.address?.state.trim().toUpperCase().slice(0, 2) || null
-          : null,
+          fillNow && !isArranged
+            ? input.address?.neighborhood.trim() || null
+            : null,
+        addressCity:
+          fillNow && !isArranged ? input.address?.city.trim() || null : null,
+        addressState:
+          fillNow && !isArranged
+            ? input.address?.state.trim().toUpperCase().slice(0, 2) || null
+            : null,
         expiresAt: null,
         items: {
           create: pricing.lines.map((line) => ({

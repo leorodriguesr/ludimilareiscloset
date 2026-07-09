@@ -1,9 +1,13 @@
 import { randomBytes } from "crypto";
 import {
   CustomerDataStatus,
+  FulfillmentType,
   OrderSource,
 } from "@/app/generated/prisma/client";
-import { customerContactAddressValidationError } from "@/lib/admin-sale/customer-form-complete";
+import {
+  customerContactAddressValidationError,
+  customerNamePhoneValidationError,
+} from "@/lib/admin-sale/customer-form-complete";
 import { getAppBaseUrl } from "@/lib/site-url";
 
 const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -57,16 +61,16 @@ export async function validateCustomerDataToken(token: string): Promise<
 
 export type CustomerDataInput = {
   name: string;
-  email: string;
+  email?: string;
   phone: string;
   cpf?: string;
-  destinationCep: string;
-  addressStreet: string;
-  addressNumber: string;
+  destinationCep?: string;
+  addressStreet?: string;
+  addressNumber?: string;
   addressComplement?: string;
-  addressNeighborhood: string;
-  addressCity: string;
-  addressState: string;
+  addressNeighborhood?: string;
+  addressCity?: string;
+  addressState?: string;
 };
 
 export async function submitCustomerData(
@@ -76,49 +80,77 @@ export async function submitCustomerData(
   const validation = await validateCustomerDataToken(token);
   if (!validation.ok) return validation;
 
-  const validationError = customerContactAddressValidationError({
-    name: data.name,
-    email: data.email,
-    phone: data.phone,
-    cpf: data.cpf ?? "",
-    destinationCep: data.destinationCep,
-    street: data.addressStreet,
-    number: data.addressNumber,
-    complement: data.addressComplement ?? "",
-    neighborhood: data.addressNeighborhood,
-    city: data.addressCity,
-    state: data.addressState,
+  const { prisma } = await import("@/lib/prisma");
+  const existing = await prisma.order.findUnique({
+    where: { id: validation.orderId },
+    select: { fulfillmentType: true },
   });
-  if (validationError) {
-    return { ok: false, error: validationError };
+  if (!existing) {
+    return { ok: false, error: "Venda não encontrada." };
   }
 
-  const { prisma } = await import("@/lib/prisma");
+  const isArranged = existing.fulfillmentType === FulfillmentType.ARRANGED;
+
+  if (isArranged) {
+    const validationError = customerNamePhoneValidationError({
+      name: data.name,
+      phone: data.phone,
+    });
+    if (validationError) {
+      return { ok: false, error: validationError };
+    }
+  } else {
+    const validationError = customerContactAddressValidationError({
+      name: data.name,
+      email: data.email ?? "",
+      phone: data.phone,
+      cpf: data.cpf ?? "",
+      destinationCep: data.destinationCep ?? "",
+      street: data.addressStreet ?? "",
+      number: data.addressNumber ?? "",
+      complement: data.addressComplement ?? "",
+      neighborhood: data.addressNeighborhood ?? "",
+      city: data.addressCity ?? "",
+      state: data.addressState ?? "",
+    });
+    if (validationError) {
+      return { ok: false, error: validationError };
+    }
+  }
+
   const { onOrderPaymentConfirmed } = await import(
     "@/lib/fulfillment/fulfillment-service"
   );
   const { ORDER_STATUS } = await import("@/lib/orders/constants");
   const { normalizePostalCode } = await import("@/lib/shipping/superfrete");
 
-  const cep = normalizePostalCode(data.destinationCep);
-  if (!cep) {
-    return { ok: false, error: "CEP inválido." };
+  const contactEmail = data.email?.trim().toLowerCase() ?? "";
+  let destinationCep: string | null = null;
+  if (!isArranged) {
+    destinationCep = normalizePostalCode(data.destinationCep ?? "");
+    if (!destinationCep) {
+      return { ok: false, error: "CEP inválido." };
+    }
   }
 
   const order = await prisma.order.update({
     where: { id: validation.orderId },
     data: {
       recipientName: data.name.trim(),
-      email: data.email.trim().toLowerCase(),
+      ...(contactEmail ? { email: contactEmail } : {}),
       phone: data.phone.trim(),
-      cpf: data.cpf?.trim() || null,
-      destinationCep: cep,
-      addressStreet: data.addressStreet.trim(),
-      addressNumber: data.addressNumber.trim(),
-      addressComplement: data.addressComplement?.trim() || null,
-      addressNeighborhood: data.addressNeighborhood.trim(),
-      addressCity: data.addressCity.trim(),
-      addressState: data.addressState.trim().toUpperCase().slice(0, 2),
+      ...(isArranged
+        ? {}
+        : {
+            cpf: data.cpf?.trim() || null,
+            destinationCep,
+            addressStreet: data.addressStreet!.trim(),
+            addressNumber: data.addressNumber!.trim(),
+            addressComplement: data.addressComplement?.trim() || null,
+            addressNeighborhood: data.addressNeighborhood!.trim(),
+            addressCity: data.addressCity!.trim(),
+            addressState: data.addressState!.trim().toUpperCase().slice(0, 2),
+          }),
       customerDataStatus: CustomerDataStatus.COMPLETE,
     },
     select: {
