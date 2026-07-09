@@ -15,6 +15,10 @@ export const metadata: Metadata = {
   title: "Ludimila Reis Closet | Moda Feminina",
   description:
     "Loja de moda feminina com peças selecionadas com estilo e elegância.",
+  icons: {
+    icon: [{ url: "/favicon-lr.png", type: "image/png" }],
+    apple: [{ url: "/favicon-lr.png", type: "image/png" }],
+  },
 };
 
 export default function RootLayout({
