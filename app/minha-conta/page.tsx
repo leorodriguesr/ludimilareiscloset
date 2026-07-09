@@ -21,40 +21,44 @@ export default async function MinhaContaPage() {
     redirect(`/api/auth/logout?next=${encodeURIComponent("/login?next=/minha-conta")}`);
   }
 
-  await expirePendingOrdersForCustomer({
-    userId: user.id,
-    email: user.email,
-  });
+  const isStaff = user.role === "ADMIN" || user.role === "GESTOR";
 
-  const orders = await prisma.order.findMany({
-    where: {
-      OR: [
-        { userId: user.id },
-        { email: user.email, userId: null },
-      ],
-    },
-    orderBy: { createdAt: "desc" },
-    include: {
-      items: {
-        orderBy: { id: "asc" },
+  if (!isStaff) {
+    await expirePendingOrdersForCustomer({
+      userId: user.id,
+      email: user.email,
+    });
+  }
+
+  const orders = isStaff
+    ? []
+    : await prisma.order.findMany({
+        where: {
+          OR: [
+            { userId: user.id },
+            { email: user.email, userId: null },
+          ],
+        },
+        orderBy: { createdAt: "desc" },
         include: {
-          product: {
-            select: {
-              id: true,
-              name: true,
-              images: {
-                orderBy: { order: "asc" },
-                take: 1,
-                select: { url: true },
+          items: {
+            orderBy: { id: "asc" },
+            include: {
+              product: {
+                select: {
+                  id: true,
+                  name: true,
+                  images: {
+                    orderBy: { order: "asc" },
+                    take: 1,
+                    select: { url: true },
+                  },
+                },
               },
             },
           },
         },
-      },
-    },
-  });
-
-  const isStaff = user.role === "ADMIN" || user.role === "GESTOR";
+      });
 
   const paidOrders = orders.filter((o) => o.status === "paid");
   const totalSpent = paidOrders.reduce((acc, o) => acc + o.total, 0);
@@ -149,61 +153,68 @@ export default async function MinhaContaPage() {
           </dl>
         </div>
 
-        {/* ── Orders ── */}
-        <section>
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-stone-900">Meus Pedidos</h2>
-            {orders.length > 0 && (
-              <p className="text-xs text-stone-400">{orders.length} {orders.length === 1 ? "pedido" : "pedidos"}</p>
-            )}
-          </div>
-          <AccountOrders
-            orders={orders.map((o) => ({
-              id: o.id,
-              orderNumber: o.orderNumber,
-              createdAt: o.createdAt,
-              status: o.status,
-              expiresAt: o.expiresAt,
-              paymentMethod: o.paymentMethod,
-              total: o.total,
-              shippingAmount: o.shippingAmount,
-              shippingServiceName: o.shippingServiceName,
-              shippingServiceId: o.shippingServiceId,
-              shippingStatus: o.shippingStatus,
-              shippingDeliveryDaysMin: o.shippingDeliveryDaysMin,
-              shippingDeliveryDaysMax: o.shippingDeliveryDaysMax,
-              superfreteShipmentId: o.superfreteShipmentId,
-              trackingCode: o.trackingCode,
-              superfreteStatus: o.superfreteStatus,
-              recipientName: o.recipientName,
-              addressStreet: o.addressStreet,
-              addressNumber: o.addressNumber,
-              addressComplement: o.addressComplement,
-              addressNeighborhood: o.addressNeighborhood,
-              addressCity: o.addressCity,
-              addressState: o.addressState,
-              destinationCep: o.destinationCep,
-              items: o.items.map((it) => ({
-                id: it.id,
-                quantity: it.quantity,
-                price: it.price,
-                pieceSelectionsJson: it.pieceSelectionsJson,
-                product: {
-                  id: it.product.id,
-                  name: it.product.name,
-                  images: it.product.images,
-                },
-              })),
-            }))}
-          />
-        </section>
-
-        {isStaff && (
-          <p className="mt-10 text-center text-sm text-stone-500">
-            <Link href="/admin" className="font-medium text-stone-900 underline underline-offset-2">
-              Ir ao painel administrativo →
-            </Link>
-          </p>
+        {isStaff ? (
+          <Link
+            href="/admin"
+            className="flex items-center justify-between gap-4 rounded-xl border border-stone-900 bg-stone-900 px-5 py-3 text-white shadow-sm transition-colors hover:bg-stone-800"
+          >
+            <div>
+              <p className="text-sm font-semibold">Painel administrativo</p>
+              <p className="mt-0.5 text-xs text-stone-300">
+                Gerencie vendas, envios e produtos
+              </p>
+            </div>
+          </Link>
+        ) : (
+          <section>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-stone-900">Meus Pedidos</h2>
+              {orders.length > 0 && (
+                <p className="text-xs text-stone-400">
+                  {orders.length} {orders.length === 1 ? "pedido" : "pedidos"}
+                </p>
+              )}
+            </div>
+            <AccountOrders
+              orders={orders.map((o) => ({
+                id: o.id,
+                orderNumber: o.orderNumber,
+                createdAt: o.createdAt,
+                status: o.status,
+                expiresAt: o.expiresAt,
+                paymentMethod: o.paymentMethod,
+                total: o.total,
+                shippingAmount: o.shippingAmount,
+                shippingServiceName: o.shippingServiceName,
+                shippingServiceId: o.shippingServiceId,
+                shippingStatus: o.shippingStatus,
+                shippingDeliveryDaysMin: o.shippingDeliveryDaysMin,
+                shippingDeliveryDaysMax: o.shippingDeliveryDaysMax,
+                superfreteShipmentId: o.superfreteShipmentId,
+                trackingCode: o.trackingCode,
+                superfreteStatus: o.superfreteStatus,
+                recipientName: o.recipientName,
+                addressStreet: o.addressStreet,
+                addressNumber: o.addressNumber,
+                addressComplement: o.addressComplement,
+                addressNeighborhood: o.addressNeighborhood,
+                addressCity: o.addressCity,
+                addressState: o.addressState,
+                destinationCep: o.destinationCep,
+                items: o.items.map((it) => ({
+                  id: it.id,
+                  quantity: it.quantity,
+                  price: it.price,
+                  pieceSelectionsJson: it.pieceSelectionsJson,
+                  product: {
+                    id: it.product.id,
+                    name: it.product.name,
+                    images: it.product.images,
+                  },
+                })),
+              }))}
+            />
+          </section>
         )}
 
       </div>
