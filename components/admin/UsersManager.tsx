@@ -382,14 +382,12 @@ export function UsersManager() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-stone-900">Usuários</h2>
-          <p className="mt-0.5 text-sm text-stone-500">
-            Gerencie contas de admin e gestor.
-          </p>
+          <p className="mt-0.5 text-sm text-stone-500">Gerencie contas</p>
         </div>
         <button
           type="button"
           onClick={() => setModal("create")}
-          className={`inline-flex items-center gap-1.5 rounded-lg bg-blue-500 px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-600 ${TOOLBAR_SIZE}`}
+          className={`inline-flex items-center gap-1.5 rounded-lg bg-sky-100 px-3 text-xs font-semibold text-sky-900 shadow-sm ring-1 ring-sky-200/80 transition-colors hover:bg-sky-200 ${TOOLBAR_SIZE}`}
         >
           Cadastrar usuário
         </button>

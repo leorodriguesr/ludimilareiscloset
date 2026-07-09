@@ -2055,7 +2055,7 @@ export function SalesManager() {
           <button
             type="button"
             onClick={() => setShowWizard(true)}
-            className={`inline-flex items-center gap-1.5 rounded-lg bg-blue-500 px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-600 ${SALES_TOOLBAR_SIZE}`}
+            className={`inline-flex items-center gap-1.5 rounded-lg bg-sky-100 px-3 text-xs font-semibold text-sky-900 shadow-sm ring-1 ring-sky-200/80 transition-colors hover:bg-sky-200 ${SALES_TOOLBAR_SIZE}`}
           >
             Criar Venda Avulsa
           </button>

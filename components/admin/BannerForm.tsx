@@ -62,19 +62,19 @@ export function BannerForm({ currentUrl, onSuccess }: BannerFormProps) {
         </div>
       )}
 
-      <div className="flex items-center gap-3">
-        <button
-          type="submit"
-          disabled={loading}
-          className="rounded-lg bg-stone-900 px-8 py-2.5 text-sm font-medium text-white hover:bg-stone-800 focus:outline-none focus:ring-2 focus:ring-stone-900 focus:ring-offset-2 disabled:opacity-50 transition-colors"
-        >
-          {loading ? "Salvando..." : "Salvar Banner"}
-        </button>
+      <div className="flex flex-wrap items-center justify-end gap-3">
         {saved && (
-          <span className="text-sm text-emerald-600 font-medium">
+          <span className="text-sm font-medium text-emerald-600">
             Banner atualizado!
           </span>
         )}
+        <button
+          type="submit"
+          disabled={loading}
+          className="rounded-lg bg-sky-100 px-8 py-2.5 text-sm font-semibold text-sky-900 shadow-sm ring-1 ring-sky-200/80 transition-colors hover:bg-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-300 focus:ring-offset-2 disabled:opacity-50"
+        >
+          {loading ? "Salvando..." : "Salvar Banner"}
+        </button>
       </div>
     </form>
   );

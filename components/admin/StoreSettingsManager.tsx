@@ -232,15 +232,7 @@ export function StoreSettingsManager() {
       </section>
 
       {/* Ações */}
-      <div className="flex items-center gap-4">
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving}
-          className="rounded-lg bg-stone-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:opacity-50"
-        >
-          {saving ? "Salvando…" : "Salvar configurações"}
-        </button>
+      <div className="flex flex-wrap items-center justify-end gap-4">
         {saved && (
           <span className="flex items-center gap-1.5 text-sm text-emerald-600">
             <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -250,6 +242,14 @@ export function StoreSettingsManager() {
           </span>
         )}
         {error && <p className="text-sm text-red-600">{error}</p>}
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className="rounded-lg bg-sky-100 px-5 py-2.5 text-sm font-semibold text-sky-900 shadow-sm ring-1 ring-sky-200/80 transition-colors hover:bg-sky-200 disabled:opacity-50"
+        >
+          {saving ? "Salvando…" : "Salvar configurações"}
+        </button>
       </div>
     </div>
   );

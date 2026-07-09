@@ -136,13 +136,15 @@ export function SectionManager({ onSectionsChange }: SectionManagerProps) {
             placeholder="Ex: Lançamentos, Promoção, Mais Vendidos"
           />
         </div>
-        <button
-          type="submit"
-          disabled={loading}
-          className="rounded-lg bg-stone-900 px-6 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50"
-        >
-          {loading ? "Salvando..." : "Criar seção"}
-        </button>
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            disabled={loading}
+            className="rounded-lg bg-sky-100 px-6 py-2 text-sm font-semibold text-sky-900 shadow-sm ring-1 ring-sky-200/80 transition-colors hover:bg-sky-200 disabled:opacity-50"
+          >
+            {loading ? "Salvando..." : "Criar seção"}
+          </button>
+        </div>
       </form>
 
       <div>

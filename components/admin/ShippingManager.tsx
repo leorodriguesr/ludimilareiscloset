@@ -1197,13 +1197,13 @@ export function ShippingManager() {
               </>
             ) : null}
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             {wallet?.walletUrl ? (
               <a
                 href={wallet.walletUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={`inline-flex items-center justify-center rounded-lg bg-stone-900 px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-stone-800 ${SHIPPING_TOOLBAR_SIZE}`}
+                className={`inline-flex items-center justify-center rounded-lg bg-sky-100 px-3 text-xs font-semibold text-sky-900 shadow-sm ring-1 ring-sky-200/80 transition-colors hover:bg-sky-200 ${SHIPPING_TOOLBAR_SIZE}`}
               >
                 Adicionar saldo
               </a>

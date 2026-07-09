@@ -220,236 +220,233 @@ export default function AdminPage() {
         </h1>
       </div>
 
-      <aside className="sticky top-14 z-40 w-full shrink-0 border-b border-stone-200 bg-white/95 backdrop-blur-sm sm:top-16 md:fixed md:left-0 md:top-16 md:z-30 md:h-[calc(100dvh-4rem)] md:w-56 md:overflow-y-auto md:border-b-0 md:border-r md:border-stone-200 md:bg-white md:px-0 md:py-8 md:backdrop-blur-none">
-          <div className="hidden md:px-4 md:pb-8 md:block">
-            <h1 className="text-xl font-semibold leading-tight text-stone-900">
-              Painel Admin
-            </h1>
-          </div>
-          <nav
-            className="flex gap-0 overflow-x-auto px-4 pb-2 md:flex-col md:gap-0 md:overflow-visible md:border-t-0 md:pl-2 md:pr-0 md:pb-0 md:pt-0 md:px-0"
-            aria-label="Seções do painel"
-          >
-            {navGroups.map((group, groupIndex) => (
-              <div
-                key={group.title}
-                className="flex shrink-0 items-center md:block md:shrink md:pb-4 md:last:pb-0"
-              >
-                {groupIndex > 0 && (
-                  <div
-                    className="mx-1.5 h-6 w-px shrink-0 bg-stone-200 md:hidden"
-                    aria-hidden
-                  />
-                )}
-                <div className="md:px-1">
-                  <p className="hidden px-2 pb-1.5 text-[11px] font-medium uppercase tracking-wide text-stone-400 md:block">
-                    {group.title}
-                  </p>
-                  <div className="flex gap-1 md:flex-col md:gap-0.5">
-                    {group.items.map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => setActiveSection(item.id)}
-                        aria-current={activeSection === item.id ? "page" : undefined}
-                        className={`flex shrink-0 items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition-colors md:w-full ${
-                          activeSection === item.id
-                            ? "relative bg-stone-100 text-stone-900 after:absolute after:bottom-0 after:left-3 after:right-3 after:h-0.5 after:rounded-full after:bg-stone-900 md:after:bottom-auto md:after:left-auto md:after:right-0 md:after:top-1/2 md:after:h-8 md:after:w-1 md:after:-translate-y-1/2 md:after:rounded-l-full"
-                            : "text-stone-600 hover:bg-stone-50 hover:text-stone-900"
+      <aside className="sticky top-14 z-40 flex w-full shrink-0 items-center border-b border-stone-200 bg-white/95 backdrop-blur-sm sm:top-16 md:fixed md:left-0 md:top-16 md:z-30 md:block md:h-[calc(100dvh-4rem)] md:w-56 md:items-stretch md:overflow-y-auto md:border-b-0 md:border-r md:border-stone-200 md:bg-white md:px-0 md:py-8 md:backdrop-blur-none">
+        <div className="hidden md:block md:px-4 md:pb-8">
+          <h1 className="text-xl font-semibold leading-tight text-stone-900">
+            Painel Admin
+          </h1>
+        </div>
+        <nav
+          className="flex w-full items-center gap-0 overflow-x-auto px-4 py-2.5 md:block md:overflow-visible md:border-t-0 md:px-0 md:py-0"
+          aria-label="Seções do painel"
+        >
+          {navGroups.map((group, groupIndex) => (
+            <div
+              key={group.title}
+              className="flex shrink-0 items-center md:block md:shrink md:pb-4 md:last:pb-0"
+            >
+              {groupIndex > 0 && (
+                <div
+                  className="mx-1.5 h-6 w-px shrink-0 bg-stone-200 md:hidden"
+                  aria-hidden
+                />
+              )}
+              <div className="md:px-1">
+                <p className="hidden px-2 pb-1.5 text-[11px] font-medium uppercase tracking-wide text-stone-400 md:block">
+                  {group.title}
+                </p>
+                <div className="flex gap-1 md:flex-col md:gap-0.5">
+                  {group.items.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setActiveSection(item.id)}
+                      aria-current={activeSection === item.id ? "page" : undefined}
+                      className={`flex shrink-0 items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors md:w-full md:py-2.5 ${activeSection === item.id
+                          ? "bg-emerald-100 text-emerald-900 shadow-sm ring-1 ring-emerald-200/80 md:relative md:bg-slate-100 md:text-stone-900 md:shadow-none md:ring-0 md:after:absolute md:after:right-0 md:after:top-1/2 md:after:h-9 md:after:w-1 md:after:-translate-y-1/2 md:after:bg-stone-900"
+                          : "text-stone-600 hover:bg-stone-50 hover:text-stone-900"
                         }`}
-                      >
-                        <AdminNavIcon id={item.id} />
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
+                    >
+                      <AdminNavIcon id={item.id} />
+                      {item.label}
+                    </button>
+                  ))}
                 </div>
               </div>
-            ))}
-          </nav>
+            </div>
+          ))}
+        </nav>
       </aside>
 
       <main className="min-w-0 px-4 py-8 md:ml-56 md:px-10 ">
-          {activeSection === "products" && (
-            <div>
-              <div className="mb-6 flex flex-col gap-4 sm:mb-8">
-                <div>
-                  <h2 className="text-lg font-semibold text-stone-900">
-                    Produtos cadastrados
-                  </h2>
-                  <p className="mt-1 text-sm text-stone-500">
-                    {productSearchQuery.trim()
-                      ? `${filteredProducts.length} de ${products.length} ${
-                          products.length === 1 ? "produto" : "produtos"
-                        }`
-                      : `${products.length} ${
-                          products.length === 1 ? "produto" : "produtos"
-                        } no catálogo`}
-                  </p>
-                </div>
+        {activeSection === "products" && (
+          <div>
+            <div className="mb-6 flex flex-col gap-4 sm:mb-8">
+              <div>
+                <h2 className="text-lg font-semibold text-stone-900">
+                  Produtos cadastrados
+                </h2>
+                <p className="mt-1 text-sm text-stone-500">
+                  {productSearchQuery.trim()
+                    ? `${filteredProducts.length} de ${products.length} ${products.length === 1 ? "produto" : "produtos"
+                    }`
+                    : `${products.length} ${products.length === 1 ? "produto" : "produtos"
+                    } no catálogo`}
+                </p>
+              </div>
 
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-                  <label className="relative w-full min-w-[9.5rem] shrink-0 sm:w-72 lg:w-90">
-                    <span className="sr-only">Buscar produtos</span>
-                    <svg
-                      className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-400"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={1.75}
-                      viewBox="0 0 24 24"
-                      aria-hidden
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
-                      />
-                    </svg>
-                    <input
-                      type="text"
-                      inputMode="search"
-                      value={productSearchQuery}
-                      onChange={(event) =>
-                        setProductSearchQuery(event.target.value)
-                      }
-                      placeholder="Buscar produto por nome, categoria ou seção"
-                      className={`w-full rounded-lg border border-stone-200 bg-white text-stone-900 placeholder:text-stone-400 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-100 ${ADMIN_SEARCH_INPUT_SIZE} pl-8 ${productSearchQuery.trim() ? "pr-8" : "pr-3"}`}
-                    />
-                    {productSearchQuery.trim() ? (
-                      <button
-                        type="button"
-                        onClick={() => setProductSearchQuery("")}
-                        aria-label="Limpar busca"
-                        className="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600"
-                      >
-                        <svg
-                          className="h-3.5 w-3.5"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth={2}
-                          viewBox="0 0 24 24"
-                          aria-hidden
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M6 18 18 6M6 6l12 12"
-                          />
-                        </svg>
-                      </button>
-                    ) : null}
-                  </label>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowProductModal(true)}
-                    className={`inline-flex w-full shrink-0 items-center justify-center gap-1.5 rounded-lg bg-blue-500 px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-600 sm:w-auto ${ADMIN_SEARCH_INPUT_SIZE}`}
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+                <label className="relative w-full min-w-[9.5rem] shrink-0 sm:w-72 lg:w-90">
+                  <span className="sr-only">Buscar produtos</span>
+                  <svg
+                    className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-400"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={1.75}
+                    viewBox="0 0 24 24"
+                    aria-hidden
                   >
-                    <svg
-                      className="h-3.5 w-3.5"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      viewBox="0 0 24 24"
-                      aria-hidden
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+                    />
+                  </svg>
+                  <input
+                    type="text"
+                    inputMode="search"
+                    value={productSearchQuery}
+                    onChange={(event) =>
+                      setProductSearchQuery(event.target.value)
+                    }
+                    placeholder="Buscar produto por nome, categoria ou seção"
+                    className={`w-full rounded-lg border border-stone-200 bg-white text-stone-900 placeholder:text-stone-400 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-100 ${ADMIN_SEARCH_INPUT_SIZE} pl-8 ${productSearchQuery.trim() ? "pr-8" : "pr-3"}`}
+                  />
+                  {productSearchQuery.trim() ? (
+                    <button
+                      type="button"
+                      onClick={() => setProductSearchQuery("")}
+                      aria-label="Limpar busca"
+                      className="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600"
                     >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M12 4.5v15m7.5-7.5h-15"
-                      />
-                    </svg>
-                    Adicionar produto
-                  </button>
-                </div>
+                      <svg
+                        className="h-3.5 w-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        viewBox="0 0 24 24"
+                        aria-hidden
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M6 18 18 6M6 6l12 12"
+                        />
+                      </svg>
+                    </button>
+                  ) : null}
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => setShowProductModal(true)}
+                  className={`inline-flex w-full shrink-0 items-center justify-center gap-1.5 rounded-lg bg-sky-100 px-3 text-xs font-semibold text-sky-900 shadow-sm ring-1 ring-sky-200/80 transition-colors hover:bg-sky-200 sm:w-auto ${ADMIN_SEARCH_INPUT_SIZE}`}
+                >
+                  <svg
+                    className="h-3.5 w-3.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    viewBox="0 0 24 24"
+                    aria-hidden
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M12 4.5v15m7.5-7.5h-15"
+                    />
+                  </svg>
+                  Adicionar produto
+                </button>
               </div>
-
-              <ProductList
-                products={filteredProducts}
-                onRefresh={fetchProducts}
-                emptyKind={
-                  products.length > 0 && productSearchQuery.trim()
-                    ? "search"
-                    : "catalog"
-                }
-                searchQuery={productSearchQuery.trim()}
-              />
-
-              <ProductFormModal
-                open={showProductModal}
-                onClose={() => setShowProductModal(false)}
-                onSuccess={fetchProducts}
-              />
             </div>
-          )}
 
-          {activeSection === "sales" && (
-            <section>
-              <SalesManager />
-            </section>
-          )}
+            <ProductList
+              products={filteredProducts}
+              onRefresh={fetchProducts}
+              emptyKind={
+                products.length > 0 && productSearchQuery.trim()
+                  ? "search"
+                  : "catalog"
+              }
+              searchQuery={productSearchQuery.trim()}
+            />
 
-          {activeSection === "shipping" && (
-            <section>
-              <ShippingManager />
-            </section>
-          )}
+            <ProductFormModal
+              open={showProductModal}
+              onClose={() => setShowProductModal(false)}
+              onSuccess={fetchProducts}
+            />
+          </div>
+        )}
 
-          {activeSection === "sections" && (
-            <section>
-              <h2 className="text-lg font-medium text-stone-900 mb-4">
-                Seções da vitrine
-              </h2>
-              <p className="text-sm text-stone-500 mb-6">
-                Seções são vitrines temáticas exibidas na página inicial (ex:
-                Promoção, Lançamentos, Mais Vendidos). Reordene-as para
-                controlar a ordem de exibição.
-              </p>
-              <SectionManager onSectionsChange={fetchProducts} />
-            </section>
-          )}
+        {activeSection === "sales" && (
+          <section>
+            <SalesManager />
+          </section>
+        )}
 
-          {activeSection === "categories" && (
-            <section>
-              <h2 className="text-lg font-medium text-stone-900 mb-4">
-                Categorias da loja
-              </h2>
-              <p className="text-sm text-stone-500 mb-6">
-                As categorias aparecem como filtro na página inicial. Ao
-                cadastrar um produto, marque em quais categorias ele entra.
-              </p>
-              <CategoryManager onCategoriesChange={fetchProducts} />
-            </section>
-          )}
+        {activeSection === "shipping" && (
+          <section>
+            <ShippingManager />
+          </section>
+        )}
 
-          {activeSection === "banner" && (
-            <section>
-              <h2 className="text-lg font-medium text-stone-900 mb-4">
-                Configuração do Banner
-              </h2>
-              <div className="rounded-xl border border-stone-200 bg-white p-6">
-                <BannerForm currentUrl={bannerUrl} onSuccess={fetchSettings} />
-              </div>
-            </section>
-          )}
+        {activeSection === "sections" && (
+          <section>
+            <h2 className="text-lg font-medium text-stone-900 mb-4">
+              Seções da vitrine
+            </h2>
+            <p className="text-sm text-stone-500 mb-6">
+              Seções são vitrines temáticas exibidas na página inicial (ex:
+              Promoção, Lançamentos, Mais Vendidos). Reordene-as para
+              controlar a ordem de exibição.
+            </p>
+            <SectionManager onSectionsChange={fetchProducts} />
+          </section>
+        )}
 
-          {activeSection === "settings" && (
-            <section>
-              <h2 className="text-lg font-medium text-stone-900 mb-2">
-                Configurações da loja
-              </h2>
-              <p className="text-sm text-stone-500 mb-6">
-                Defina regras de frete grátis, prazo de embalagem e outras preferências gerais da loja.
-              </p>
-              <StoreSettingsManager />
-            </section>
-          )}
+        {activeSection === "categories" && (
+          <section>
+            <h2 className="text-lg font-medium text-stone-900 mb-4">
+              Categorias da loja
+            </h2>
+            <p className="text-sm text-stone-500 mb-6">
+              As categorias aparecem como filtro na página inicial. Ao
+              cadastrar um produto, marque em quais categorias ele entra.
+            </p>
+            <CategoryManager onCategoriesChange={fetchProducts} />
+          </section>
+        )}
 
-          {activeSection === "users" && (
-            <section>
-              <UsersManager />
-            </section>
-          )}
+        {activeSection === "banner" && (
+          <section>
+            <h2 className="text-lg font-medium text-stone-900 mb-4">
+              Configuração do Banner
+            </h2>
+            <div className="rounded-xl border border-stone-200 bg-white p-6">
+              <BannerForm currentUrl={bannerUrl} onSuccess={fetchSettings} />
+            </div>
+          </section>
+        )}
+
+        {activeSection === "settings" && (
+          <section>
+            <h2 className="text-lg font-medium text-stone-900 mb-2">
+              Configurações da loja
+            </h2>
+            <p className="text-sm text-stone-500 mb-6">
+              Defina regras de frete grátis, prazo de embalagem e outras preferências gerais da loja.
+            </p>
+            <StoreSettingsManager />
+          </section>
+        )}
+
+        {activeSection === "users" && (
+          <section>
+            <UsersManager />
+          </section>
+        )}
       </main>
     </div>
   );
