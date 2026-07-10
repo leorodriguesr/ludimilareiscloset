@@ -6,6 +6,7 @@ import { invalidateSettingsCache } from "@/lib/hooks/use-store-settings";
 
 interface StoreSettings {
   bannerImageUrl: string;
+  bannerMobileImageUrl: string;
   freeShippingEnabled: boolean;
   freeShippingType: string;
   freeShippingMinValue: number;

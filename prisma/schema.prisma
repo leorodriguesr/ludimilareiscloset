@@ -419,8 +419,9 @@ model PieceVariant {
 }
 
 model StoreSettings {
-  id             String @id @default("default")
-  bannerImageUrl String @default("")
+  id                   String @id @default("default")
+  bannerImageUrl       String @default("")
+  bannerMobileImageUrl String @default("")
 
   /** Frete grátis habilitado na loja */
   freeShippingEnabled  Boolean @default(false)

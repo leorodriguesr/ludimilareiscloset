@@ -5,6 +5,7 @@ import { FooterGate } from "@/components/FooterGate";
 import { AppProviders } from "@/components/providers/AppProviders";
 import { GoogleOneTapGate } from "@/components/GoogleOneTapGate";
 import { PwaRegister } from "@/components/PwaRegister";
+import { WhatsAppButtonGate } from "@/components/WhatsAppButtonGate";
 import "./globals.css";
 
 const inter = Inter({
@@ -56,6 +57,7 @@ export default function RootLayout({
           <GoogleOneTapGate />
           <main className="min-w-0 w-full flex-1">{children}</main>
           <FooterGate />
+          <WhatsAppButtonGate />
         </AppProviders>
       </body>
     </html>

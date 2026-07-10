@@ -69,7 +69,10 @@ export default async function Home({ searchParams }: HomeProps) {
 
   return (
     <>
-      <Banner imageUrl={settings?.bannerImageUrl ?? ""} />
+      <Banner
+        imageUrl={settings?.bannerImageUrl ?? ""}
+        mobileImageUrl={settings?.bannerMobileImageUrl ?? ""}
+      />
       <TrustBar
         freeShippingEnabled={settings?.freeShippingEnabled ?? false}
         freeShippingType={settings?.freeShippingType ?? "minimum_value"}

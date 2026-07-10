@@ -5,6 +5,7 @@ import { requireAdminApi } from "@/lib/require-admin-api";
 const DEFAULT_SETTINGS = {
   id: "default",
   bannerImageUrl: "",
+  bannerMobileImageUrl: "",
   freeShippingEnabled: false,
   freeShippingType: "minimum_value",
   freeShippingMinValue: 0,
@@ -30,6 +31,7 @@ export async function PUT(request: NextRequest) {
   const body = await request.json();
   const {
     bannerImageUrl,
+    bannerMobileImageUrl,
     freeShippingEnabled,
     freeShippingType,
     freeShippingMinValue,
@@ -40,6 +42,9 @@ export async function PUT(request: NextRequest) {
     where: { id: "default" },
     update: {
       ...(bannerImageUrl !== undefined && { bannerImageUrl: bannerImageUrl ?? "" }),
+      ...(bannerMobileImageUrl !== undefined && {
+        bannerMobileImageUrl: bannerMobileImageUrl ?? "",
+      }),
       ...(freeShippingEnabled !== undefined && { freeShippingEnabled: Boolean(freeShippingEnabled) }),
       ...(freeShippingType !== undefined && { freeShippingType: freeShippingType ?? "minimum_value" }),
       ...(freeShippingMinValue !== undefined && { freeShippingMinValue: Number(freeShippingMinValue) ?? 0 }),

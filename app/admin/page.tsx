@@ -149,6 +149,7 @@ function AdminNavIcon({ id }: { id: AdminSection }) {
 export default function AdminPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [bannerUrl, setBannerUrl] = useState("");
+  const [bannerMobileUrl, setBannerMobileUrl] = useState("");
   const [activeSection, setActiveSection] = useState<AdminSection>("products");
   const [showProductModal, setShowProductModal] = useState(false);
   const [productSearchQuery, setProductSearchQuery] = useState("");
@@ -174,6 +175,7 @@ export default function AdminPage() {
     const res = await fetch("/api/settings");
     const data = await res.json();
     setBannerUrl(data.bannerImageUrl ?? "");
+    setBannerMobileUrl(data.bannerMobileImageUrl ?? "");
   }, []);
 
   useEffect(() => {
@@ -425,7 +427,11 @@ export default function AdminPage() {
               Configuração do Banner
             </h2>
             <div className="rounded-xl border border-stone-200 bg-white p-6">
-              <BannerForm currentUrl={bannerUrl} onSuccess={fetchSettings} />
+              <BannerForm
+                currentUrl={bannerUrl}
+                currentMobileUrl={bannerMobileUrl}
+                onSuccess={fetchSettings}
+              />
             </div>
           </section>
         )}

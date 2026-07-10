@@ -1,17 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ImageUpload } from "./ImageUpload";
 
 interface BannerFormProps {
   currentUrl: string;
+  currentMobileUrl: string;
   onSuccess: () => void;
 }
 
-export function BannerForm({ currentUrl, onSuccess }: BannerFormProps) {
+export function BannerForm({
+  currentUrl,
+  currentMobileUrl,
+  onSuccess,
+}: BannerFormProps) {
   const [url, setUrl] = useState(currentUrl);
+  const [mobileUrl, setMobileUrl] = useState(currentMobileUrl);
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setUrl(currentUrl);
+    setMobileUrl(currentMobileUrl);
+  }, [currentUrl, currentMobileUrl]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -22,7 +33,10 @@ export function BannerForm({ currentUrl, onSuccess }: BannerFormProps) {
       const res = await fetch("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bannerImageUrl: url }),
+        body: JSON.stringify({
+          bannerImageUrl: url,
+          bannerMobileImageUrl: mobileUrl,
+        }),
       });
 
       if (res.ok) {
@@ -36,31 +50,62 @@ export function BannerForm({ currentUrl, onSuccess }: BannerFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <label className="block text-sm font-medium text-stone-700 mb-1">
-          Imagem do banner
-        </label>
-        <ImageUpload
-          value={url}
-          onChange={setUrl}
-          folder="ludimila-reis-closet/banners"
-          maxFilesPerBatch={1}
-        />
-        <p className="mt-1 text-xs text-stone-500">
-          Deixe vazio para usar o banner padrão com gradiente.
-        </p>
+    <form onSubmit={handleSubmit} className="space-y-8">
+      <div className="space-y-4">
+        <div>
+          <label className="mb-1 block text-sm font-medium text-stone-700">
+            Banner desktop
+          </label>
+          <ImageUpload
+            value={url}
+            onChange={setUrl}
+            folder="ludimila-reis-closet/banners"
+            maxFilesPerBatch={1}
+          />
+          <p className="mt-1 text-xs text-stone-500">
+            Recomendado em formato paisagem (ex.: 21:9). Deixe vazio para o
+            placeholder padrão.
+          </p>
+        </div>
+
+        {url && (
+          <div className="relative aspect-[21/9] w-full overflow-hidden rounded-lg bg-stone-100">
+            <img
+              src={url}
+              alt="Preview do banner desktop"
+              className="h-full w-full object-cover"
+            />
+          </div>
+        )}
       </div>
 
-      {url && (
-        <div className="relative aspect-[21/9] w-full overflow-hidden rounded-lg bg-stone-100">
-          <img
-            src={url}
-            alt="Preview do banner"
-            className="h-full w-full object-cover"
+      <div className="space-y-4 border-t border-stone-100 pt-8">
+        <div>
+          <label className="mb-1 block text-sm font-medium text-stone-700">
+            Banner mobile
+          </label>
+          <ImageUpload
+            value={mobileUrl}
+            onChange={setMobileUrl}
+            folder="ludimila-reis-closet/banners"
+            maxFilesPerBatch={1}
           />
+          <p className="mt-1 text-xs text-stone-500">
+            Recomendado em formato mais vertical (ex.: 4:5 ou 9:16). Se vazio,
+            o banner desktop será usado no celular.
+          </p>
         </div>
-      )}
+
+        {mobileUrl && (
+          <div className="relative mx-auto aspect-[4/5] w-full max-w-xs overflow-hidden rounded-lg bg-stone-100">
+            <img
+              src={mobileUrl}
+              alt="Preview do banner mobile"
+              className="h-full w-full object-cover"
+            />
+          </div>
+        )}
+      </div>
 
       <div className="flex flex-wrap items-center justify-end gap-3">
         {saved && (
