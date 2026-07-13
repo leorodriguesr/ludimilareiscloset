@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS = {
   freeShippingType: "minimum_value",
   freeShippingMinValue: 0,
   packagingDays: 0,
+  storeDeliveryFee: 0,
 };
 
 export async function GET() {
@@ -36,6 +37,7 @@ export async function PUT(request: NextRequest) {
     freeShippingType,
     freeShippingMinValue,
     packagingDays,
+    storeDeliveryFee,
   } = body;
 
   const settings = await prisma.storeSettings.upsert({
@@ -49,6 +51,9 @@ export async function PUT(request: NextRequest) {
       ...(freeShippingType !== undefined && { freeShippingType: freeShippingType ?? "minimum_value" }),
       ...(freeShippingMinValue !== undefined && { freeShippingMinValue: Number(freeShippingMinValue) ?? 0 }),
       ...(packagingDays !== undefined && { packagingDays: Math.max(0, Math.floor(Number(packagingDays) || 0)) }),
+      ...(storeDeliveryFee !== undefined && {
+        storeDeliveryFee: Math.max(0, Math.round((Number(storeDeliveryFee) || 0) * 100) / 100),
+      }),
     },
     create: DEFAULT_SETTINGS,
   });

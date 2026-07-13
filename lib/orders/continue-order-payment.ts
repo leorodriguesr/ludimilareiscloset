@@ -54,21 +54,30 @@ export type ContinueOrderPaymentResult =
   | ContinueOrderPaymentSuccess
   | { ok: false; error: string; code?: "expired" | "not_pending" | "forbidden" | "not_found" };
 
-function guestDisplayName(email: string): string {
-  const local = email.split("@")[0]?.trim();
+function guestDisplayName(email: string | null | undefined): string {
+  const local = email?.split("@")[0]?.trim();
   if (local && local.length > 0) return local.slice(0, 80);
   return "Cliente";
 }
 
+function paymentGatewayEmail(email: string | null | undefined): string {
+  const trimmed = email?.trim();
+  if (trimmed && trimmed.includes("@") && !trimmed.endsWith("@venda-avulsa.local")) {
+    return trimmed;
+  }
+  return process.env.STORE_EMAIL?.trim() || "pedidos@ludimilareiscloset.com.br";
+}
+
 function isOrderOwner(
-  order: { userId: string | null; email: string },
+  order: { userId: string | null; email: string | null },
   userId: string,
   userEmail: string
 ): boolean {
   return (
     order.userId === userId ||
     (order.userId == null &&
-      order.email.trim().toLowerCase() === userEmail.trim().toLowerCase())
+      Boolean(order.email) &&
+      order.email!.trim().toLowerCase() === userEmail.trim().toLowerCase())
   );
 }
 
@@ -78,7 +87,7 @@ function resolvePaymentMethod(raw: string | null | undefined): PaymentMethod {
 
 async function restartPixPayment(input: {
   orderId: string;
-  email: string;
+  email: string | null;
   total: number;
   recipientName: string | null;
   cpf: string | null;
@@ -109,7 +118,7 @@ async function restartPixPayment(input: {
       paymentAttemptId: attemptId,
       amount: input.total,
       description: "Pedido Ludimila Reis Closet",
-      payerEmail: input.email,
+      payerEmail: paymentGatewayEmail(input.email),
       payerName: input.recipientName ?? guestDisplayName(input.email),
       payerCpf: input.cpf ?? undefined,
     });
@@ -148,7 +157,7 @@ async function restartPixPayment(input: {
 async function restartCardPayment(
   order: {
     id: string;
-    email: string;
+    email: string | null;
     customerDataStatus: CustomerDataStatus | null;
     destinationCep: string | null;
     recipientName: string | null;

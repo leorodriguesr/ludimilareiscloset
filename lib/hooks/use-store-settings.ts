@@ -6,6 +6,7 @@ import type { FreeShippingSettings } from "@/lib/shipping/free-shipping";
 export interface StoreSettingsPublic extends FreeShippingSettings {
   bannerImageUrl: string;
   bannerMobileImageUrl: string;
+  storeDeliveryFee?: number;
 }
 
 let cache: StoreSettingsPublic | null = null;
@@ -29,6 +30,7 @@ async function fetchSettings(): Promise<StoreSettingsPublic> {
         freeShippingEnabled: false,
         freeShippingType: "minimum_value",
         freeShippingMinValue: 0,
+        storeDeliveryFee: 0,
       } as StoreSettingsPublic;
     });
   return fetchPromise;

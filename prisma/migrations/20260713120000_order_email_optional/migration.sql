@@ -1,0 +1,82 @@
+-- SQLite: recreate Order table to make email nullable.
+PRAGMA foreign_keys=OFF;
+CREATE TABLE "new_Order" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "userId" TEXT,
+    "email" TEXT,
+    "status" TEXT NOT NULL DEFAULT 'pending_payment',
+    "total" REAL NOT NULL,
+    "shippingAmount" REAL NOT NULL DEFAULT 0,
+    "shippingServiceName" TEXT,
+    "destinationCep" TEXT,
+    "paidAt" DATETIME,
+    "infinitePayTransactionNsu" TEXT,
+    "infinitePayInvoiceSlug" TEXT,
+    "paymentCaptureMethod" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    "addressCity" TEXT,
+    "addressComplement" TEXT,
+    "addressNeighborhood" TEXT,
+    "addressNumber" TEXT,
+    "addressState" TEXT,
+    "addressStreet" TEXT,
+    "phone" TEXT,
+    "recipientName" TEXT,
+    "shippingStatus" TEXT NOT NULL DEFAULT 'to_pack',
+    "superfreteShipmentId" TEXT,
+    "labelUrl" TEXT,
+    "orderNumber" INTEGER,
+    "cpf" TEXT,
+    "shippingServiceId" INTEGER,
+    "superfreteStatus" TEXT,
+    "trackingCode" TEXT,
+    "packageHeightCm" REAL,
+    "packageWidthCm" REAL,
+    "packageLengthCm" REAL,
+    "packageWeightKg" REAL,
+    "labelGeneratedAt" DATETIME,
+    "shippingQuotedPrice" REAL,
+    "superfreteShippingPrice" REAL,
+    "shippingDeliveryDaysMin" INTEGER,
+    "shippingDeliveryDaysMax" INTEGER,
+    "paymentMethod" TEXT,
+    "mercadoPagoPaymentId" TEXT,
+    "shippingProvider" TEXT,
+    "melhorEnvioShipmentId" TEXT,
+    "melhorEnvioStatus" TEXT,
+    "cancellationReason" TEXT,
+    "cancelledAt" DATETIME,
+    "labelAutoGenerateError" TEXT,
+    "expiresAt" DATETIME,
+    "expiredAt" DATETIME,
+    "lastRecalculatedAt" DATETIME,
+    "orderSource" TEXT NOT NULL DEFAULT 'CHECKOUT',
+    "createdByUserId" TEXT,
+    "fulfillmentType" TEXT NOT NULL DEFAULT 'CARRIER',
+    "customerDataStatus" TEXT,
+    "customerDataToken" TEXT,
+    "customerDataTokenExpiresAt" DATETIME,
+    "paymentChannel" TEXT,
+    "manualPaidByUserId" TEXT,
+    "deliveryNotes" TEXT,
+    "internalNotes" TEXT,
+    "arrangedShippedAt" DATETIME,
+    "arrangedShippedByUserId" TEXT,
+    "subtotalOriginal" REAL,
+    "itemsDiscountTotal" REAL NOT NULL DEFAULT 0,
+    "orderDiscountMode" TEXT,
+    "orderDiscountValue" REAL,
+    "orderDiscountAmount" REAL NOT NULL DEFAULT 0,
+    CONSTRAINT "Order_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+INSERT INTO "new_Order" SELECT * FROM "Order";
+DROP TABLE "Order";
+ALTER TABLE "new_Order" RENAME TO "Order";
+CREATE INDEX "Order_userId_status_idx" ON "Order"("userId", "status");
+CREATE INDEX "Order_email_status_idx" ON "Order"("email", "status");
+CREATE INDEX "Order_status_expiresAt_idx" ON "Order"("status", "expiresAt");
+CREATE UNIQUE INDEX "Order_customerDataToken_key" ON "Order"("customerDataToken");
+CREATE INDEX "Order_orderSource_idx" ON "Order"("orderSource");
+CREATE INDEX "Order_fulfillmentType_idx" ON "Order"("fulfillmentType");
+PRAGMA foreign_keys=ON;

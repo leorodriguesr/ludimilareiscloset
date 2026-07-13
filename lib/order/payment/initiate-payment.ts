@@ -40,10 +40,19 @@ export type InitiatePaymentResult =
   | InitiatePaymentSuccess
   | { ok: false; error: string };
 
-function guestDisplayName(email: string): string {
-  const local = email.split("@")[0]?.trim();
+function guestDisplayName(email: string | null | undefined): string {
+  const local = email?.split("@")[0]?.trim();
   if (local && local.length > 0) return local.slice(0, 80);
   return "Cliente";
+}
+
+/** E-mail enviado ao gateway quando o pedido ainda não tem e-mail do cliente. */
+function paymentGatewayEmail(email: string | null | undefined): string {
+  const trimmed = email?.trim();
+  if (trimmed && trimmed.includes("@") && !trimmed.endsWith("@venda-avulsa.local")) {
+    return trimmed;
+  }
+  return process.env.STORE_EMAIL?.trim() || "pedidos@ludimilareiscloset.com.br";
 }
 
 async function loadOrderForPayment(orderId: string) {
@@ -100,7 +109,7 @@ async function processPix(
       paymentAttemptId: attemptId,
       amount: order.total,
       description: "Pedido Ludimila Reis Closet",
-      payerEmail: order.email,
+      payerEmail: paymentGatewayEmail(order.email),
       payerName: order.recipientName ?? guestDisplayName(order.email),
       payerCpf: order.cpf ?? undefined,
     });

@@ -10,8 +10,8 @@ function digitsOnly(value: string): string {
   return value.replace(/\D/g, "");
 }
 
-function isPlaceholderEmail(email: string): boolean {
-  const e = email.trim().toLowerCase();
+function isPlaceholderEmail(email: string | null | undefined): boolean {
+  const e = (email ?? "").trim().toLowerCase();
   return !e || e.endsWith("@venda-avulsa.local") || e.startsWith("pendente-");
 }
 
@@ -26,7 +26,7 @@ function hasUsableAddress(order: {
 function customerKey(order: {
   phone: string | null;
   cpf: string | null;
-  email: string;
+  email: string | null;
 }): string | null {
   const phone = digitsOnly(order.phone ?? "");
   if (phone.length >= 10) return `phone:${phone}`;
@@ -34,7 +34,7 @@ function customerKey(order: {
   const cpf = digitsOnly(order.cpf ?? "");
   if (cpf.length === 11) return `cpf:${cpf}`;
 
-  const email = order.email.trim().toLowerCase();
+  const email = (order.email ?? "").trim().toLowerCase();
   if (!isPlaceholderEmail(email)) return `email:${email}`;
 
   return null;
@@ -45,7 +45,7 @@ type OrderRow = {
   recipientName: string | null;
   phone: string | null;
   cpf: string | null;
-  email: string;
+  email: string | null;
   destinationCep: string | null;
   addressStreet: string | null;
   addressNumber: string | null;
@@ -114,7 +114,10 @@ export async function GET(request: NextRequest) {
   const filtered = orders.filter((o) => {
     const name = (o.recipientName ?? "").toLowerCase();
     if (name.includes(qLower)) return true;
-    if (!isPlaceholderEmail(o.email) && o.email.toLowerCase().includes(qLower)) {
+    if (
+      !isPlaceholderEmail(o.email) &&
+      (o.email ?? "").toLowerCase().includes(qLower)
+    ) {
       return true;
     }
     if (qDigits.length >= 3) {
@@ -153,7 +156,9 @@ export async function GET(request: NextRequest) {
     const name = order.recipientName?.trim() || "";
     const phone = digitsOnly(order.phone ?? "");
     const cpf = digitsOnly(order.cpf ?? "");
-    const email = isPlaceholderEmail(order.email) ? "" : order.email.trim().toLowerCase();
+    const email = isPlaceholderEmail(order.email)
+      ? ""
+      : (order.email ?? "").trim().toLowerCase();
     const created = order.createdAt.getTime();
 
     const existing = byKey.get(key);

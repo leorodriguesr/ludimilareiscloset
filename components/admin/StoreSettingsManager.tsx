@@ -11,6 +11,7 @@ interface StoreSettings {
   freeShippingType: string;
   freeShippingMinValue: number;
   packagingDays: number;
+  storeDeliveryFee: number;
 }
 
 export function StoreSettingsManager() {
@@ -24,6 +25,7 @@ export function StoreSettingsManager() {
   const [freeShippingType, setFreeShippingType] = useState<"always" | "minimum_value">("minimum_value");
   const [freeShippingMinValue, setFreeShippingMinValue] = useState("0");
   const [packagingDays, setPackagingDays] = useState("0");
+  const [storeDeliveryFee, setStoreDeliveryFee] = useState("0");
 
   const fetchSettings = useCallback(async () => {
     try {
@@ -34,6 +36,7 @@ export function StoreSettingsManager() {
       setFreeShippingType((data.freeShippingType as "always" | "minimum_value") ?? "minimum_value");
       setFreeShippingMinValue(String(data.freeShippingMinValue ?? 0));
       setPackagingDays(String(data.packagingDays ?? 0));
+      setStoreDeliveryFee(String(data.storeDeliveryFee ?? 0));
     } catch {
       setError("Não foi possível carregar as configurações.");
     } finally {
@@ -58,6 +61,7 @@ export function StoreSettingsManager() {
           freeShippingType,
           freeShippingMinValue: parseFloat(freeShippingMinValue.replace(",", ".")) || 0,
           packagingDays: Math.max(0, Math.floor(Number(packagingDays) || 0)),
+          storeDeliveryFee: parseFloat(storeDeliveryFee.replace(",", ".")) || 0,
         }),
       });
       if (!res.ok) throw new Error("Erro ao salvar.");
@@ -79,6 +83,7 @@ export function StoreSettingsManager() {
 
   const minVal = parseFloat(freeShippingMinValue.replace(",", ".")) || 0;
   const packagingDaysVal = Math.max(0, Math.floor(Number(packagingDays) || 0));
+  const storeDeliveryFeeVal = parseFloat(storeDeliveryFee.replace(",", ".")) || 0;
 
   return (
     <div className="space-y-8">
@@ -228,6 +233,39 @@ export function StoreSettingsManager() {
               : packagingDaysVal === 1
               ? "Será adicionado 1 dia útil ao prazo de todas as opções de frete."
               : `Serão adicionados ${packagingDaysVal} dias úteis ao prazo de todas as opções de frete.`}
+          </p>
+        </div>
+      </section>
+
+      {/* Entrega pelo entregador da loja */}
+      <section className="rounded-xl border border-stone-200 bg-white p-6">
+        <h3 className="text-base font-semibold text-stone-900">Entregador da loja</h3>
+        <p className="mt-1 text-sm text-stone-500">
+          Valor cobrado como frete nas vendas avulsas quando a entrega é feita pelo entregador da loja.
+        </p>
+        <div className="mt-5 max-w-xs">
+          <label htmlFor="storeDeliveryFee" className="mb-1.5 block text-sm font-medium text-stone-700">
+            Valor da entrega
+          </label>
+          <div className="relative">
+            <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-sm text-stone-400">
+              R$
+            </span>
+            <input
+              id="storeDeliveryFee"
+              type="number"
+              min="0"
+              step="0.01"
+              value={storeDeliveryFee}
+              onChange={(e) => setStoreDeliveryFee(e.target.value)}
+              className="w-full rounded-lg border border-stone-200 bg-white py-3 pl-10 pr-4 text-sm text-stone-900 shadow-sm placeholder:text-stone-300 transition-colors focus:border-stone-900 focus:outline-none focus:ring-1 focus:ring-stone-900"
+              placeholder="0,00"
+            />
+          </div>
+          <p className="mt-2 text-xs text-stone-500">
+            {storeDeliveryFeeVal > 0
+              ? `Nas vendas avulsas com entregador da loja, o frete será ${formatPrice(storeDeliveryFeeVal)}.`
+              : "Com valor zero, a entrega pelo entregador da loja será gratuita."}
           </p>
         </div>
       </section>

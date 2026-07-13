@@ -26,6 +26,7 @@ import {
   phoneFmt,
 } from "@/lib/admin-sale/customer-form-input";
 import { cpfValidationError } from "@/lib/validation/cpf";
+import { useStoreSettings } from "@/lib/hooks/use-store-settings";
 
 type DiscountForm = { mode: "FIXED" | "PERCENT"; value: string };
 
@@ -578,16 +579,16 @@ function OrderSummary({
             <dd className="tabular-nums">-{formatPrice(active.itemsDiscountTotal)}</dd>
           </div>
         )}
+        <div className="flex justify-between text-stone-600">
+          <dt>Entrega / frete</dt>
+          <dd className="tabular-nums">{formatPrice(active.shippingAmount)}</dd>
+        </div>
         {active.orderDiscountAmount > 0 && (
           <div className="flex justify-between text-red-600">
             <dt>Desconto geral</dt>
             <dd className="tabular-nums">-{formatPrice(active.orderDiscountAmount)}</dd>
           </div>
         )}
-        <div className="flex justify-between text-stone-600">
-          <dt>Entrega / frete</dt>
-          <dd className="tabular-nums">{formatPrice(active.shippingAmount)}</dd>
-        </div>
       </dl>
 
       <div className="mt-4 space-y-2 border-t border-stone-100 pt-4">
@@ -656,6 +657,7 @@ function OrderSummary({
 /* ─── Main wizard ────────────────────────────────────────────── */
 
 export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
+  const { settings } = useStoreSettings();
   const [step, setStep] = useState(0);
   const [lines, setLines] = useState<WizardLine[]>([]);
 
@@ -707,11 +709,21 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
     [lines]
   );
 
+  const storeDeliveryFee = Math.max(0, Number(settings?.storeDeliveryFee ?? 0) || 0);
+
   const shippingAmount = useMemo(() => {
-    if (fulfillmentType === "ARRANGED") return 0;
+    if (fulfillmentType === "ARRANGED") {
+      return arrangedMode === "store_delivery" ? storeDeliveryFee : 0;
+    }
     const opt = shippingOptions.find((o) => o.id === selectedShippingId);
     return opt?.price ?? 0;
-  }, [fulfillmentType, shippingOptions, selectedShippingId]);
+  }, [
+    fulfillmentType,
+    arrangedMode,
+    storeDeliveryFee,
+    shippingOptions,
+    selectedShippingId,
+  ]);
 
   const activePricing = paymentMethod
     ? pricingByMethod[paymentMethod]
@@ -1360,6 +1372,11 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                         checked={arrangedMode === "store_delivery"}
                         onChange={() => setArrangedMode("store_delivery")}
                         label="Entregador da loja"
+                        description={
+                          storeDeliveryFee > 0
+                            ? `Frete: ${formatPrice(storeDeliveryFee)}`
+                            : "Frete grátis"
+                        }
                       />
                       <CheckboxOption
                         checked={arrangedMode === "pickup"}
@@ -1471,7 +1488,7 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                           <TextInput value={contact.name} onChange={(e) => setContact((c) => ({ ...c, name: e.target.value }))} />
                         </div>
                         <div>
-                          <FieldLabel>E-mail</FieldLabel>
+                          <FieldLabel optional>E-mail</FieldLabel>
                           <TextInput type="email" value={contact.email} onChange={(e) => setContact((c) => ({ ...c, email: e.target.value }))} />
                         </div>
                         <div>

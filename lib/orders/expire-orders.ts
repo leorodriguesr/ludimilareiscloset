@@ -75,9 +75,11 @@ export async function expireOrdersBatch(
 /** Expira pendentes vencidas de um cliente antes de buscar/reutilizar Order. */
 export async function expirePendingOrdersForCustomer(input: {
   userId: string | null;
-  email: string;
+  email: string | null;
 }): Promise<void> {
-  const normalizedEmail = input.email.trim().toLowerCase();
+  const normalizedEmail = (input.email ?? "").trim().toLowerCase();
+  if (!input.userId && !normalizedEmail) return;
+
   const now = new Date();
 
   const due = await prisma.order.findMany({

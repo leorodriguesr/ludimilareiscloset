@@ -39,13 +39,13 @@ export function customerNamePhoneValidationError(
   return "Informe o nome e o telefone do cliente.";
 }
 
-/** Todos os campos de contato e endereço preenchidos (transportadora). */
+/** Contato + endereço (transportadora). E-mail e complemento são opcionais. */
 export function isCustomerContactAddressComplete(
   data: CustomerContactAddressFields
 ): boolean {
   const email = data.email.trim();
   if (!data.name.trim()) return false;
-  if (!email || !email.includes("@") || !email.includes(".")) return false;
+  if (email && (!email.includes("@") || !email.includes("."))) return false;
   if (digits(data.phone).length < 10) return false;
   if (!isValidCpf(data.cpf)) return false;
   if (digits(data.destinationCep).length !== 8) return false;
@@ -62,8 +62,8 @@ export function customerContactAddressValidationError(
 ): string | null {
   if (!data.name.trim()) return "Preencha todos os dados de contato e endereço.";
   const email = data.email.trim();
-  if (!email || !email.includes("@") || !email.includes(".")) {
-    return "Preencha todos os dados de contato e endereço.";
+  if (email && (!email.includes("@") || !email.includes("."))) {
+    return "Informe um e-mail válido.";
   }
   if (digits(data.phone).length < 10) {
     return "Preencha todos os dados de contato e endereço.";

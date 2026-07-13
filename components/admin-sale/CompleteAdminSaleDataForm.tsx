@@ -243,7 +243,7 @@ export function CompleteAdminSaleDataForm({ token }: Props) {
                 />
               </div>
               <div>
-                <FieldLabel>E-mail</FieldLabel>
+                <FieldLabel optional>E-mail</FieldLabel>
                 <TextInput
                   type="email"
                   autoComplete="email"

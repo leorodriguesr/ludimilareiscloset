@@ -22,6 +22,7 @@ import {
   customerContactAddressValidationError,
   customerNamePhoneValidationError,
 } from "@/lib/admin-sale/customer-form-complete";
+import { getStoreDeliveryFee } from "@/lib/admin-sale/store-delivery-fee";
 import { getFulfillmentStrategy } from "@/lib/fulfillment/fulfillment-types";
 import { initiateOrderPayment } from "@/lib/order/payment/initiate-payment";
 import { ORDER_STATUS, type PaymentMethod } from "@/lib/orders/constants";
@@ -138,7 +139,10 @@ async function resolveShipping(input: CreateAdminSaleInput) {
     };
   }
 
-  const arrangedAmount = Math.max(0, Number(input.arrangedShippingAmount ?? 0));
+  const arrangedAmount =
+    input.arrangedMode === "store_delivery"
+      ? await getStoreDeliveryFee()
+      : Math.max(0, Number(input.arrangedShippingAmount ?? 0));
   if (!Number.isFinite(arrangedAmount)) {
     throw new Error("Valor da entrega inválido.");
   }
@@ -239,10 +243,9 @@ export async function createAdminSale(
   }
 
   const tokenData = fillNow ? null : generateCustomerDataToken();
-  const placeholderEmail = `pendente-${Date.now()}@venda-avulsa.local`;
-  const contactEmail = input.contact?.email?.trim().toLowerCase() ?? "";
-  const orderEmail =
-    fillNow && contactEmail ? contactEmail : placeholderEmail;
+  const contactEmail = input.contact?.email?.trim().toLowerCase() || null;
+  // E-mail só é gravado quando informado; sem placeholder em "preencher depois" / entrega a combinar.
+  const orderEmail = contactEmail;
 
   const created = await prisma.$transaction(async (tx) => {
     const maxRow = await tx.$queryRawUnsafe<Array<{ max: number | null }>>(

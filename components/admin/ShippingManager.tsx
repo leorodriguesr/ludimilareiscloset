@@ -567,12 +567,14 @@ function useShipmentActions(order: ShipmentOrder, onRefresh: () => void) {
 function shipmentCapabilities(order: ShipmentOrder) {
   const isArranged = order.fulfillmentType === "ARRANGED";
   const isSaleCancelled = order.status === "cancelled";
+  const isPaid = Boolean(order.paidAt);
 
   return {
     isArranged,
     isSaleCancelled,
     canSelectForBulk: !order.labelUrl && !isSaleCancelled && !isArranged,
     canChangeShipping: !order.labelUrl && !order.superfreteShipmentId && !isSaleCancelled && !isArranged,
+    canMarkPacked: isPaid && !isSaleCancelled && order.shippingStatus === "to_pack",
     canGenerateLabel: !order.labelUrl && !isSaleCancelled && !isArranged,
     labelAutoGenerateFailed: hasLabelAutoGenerateError(order),
     labelAutoGenerateTitle: labelAutoGenerateErrorTooltip(order),
@@ -663,6 +665,28 @@ function ShipmentRowActionsMenu({
       });
     }
 
+    if (caps.canMarkPacked) {
+      items.push({
+        id: "pack",
+        label: busy === "pack" ? "Salvando…" : "Marcar como embalada",
+        separatorBefore: items.length > 0,
+        disabled: busy === "pack",
+        icon: (
+          <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+          </svg>
+        ),
+        onClick: () =>
+          void runAction(
+            "pack",
+            `/api/admin/orders/${order.id}`,
+            "PATCH",
+            { shippingStatus: "packed" },
+            { openPdf: false }
+          ),
+      });
+    }
+
     if (caps.canGenerateLabel) {
       items.push({
         id: "label",
@@ -689,7 +713,7 @@ function ShipmentRowActionsMenu({
     if (order.labelUrl) {
       items.push({
         id: "pdf",
-        label: "Baixar etiqueta",
+        label: "Imprimir etiqueta",
         separatorBefore: items.length > 0,
         icon: (
           <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
@@ -772,6 +796,7 @@ function ShipmentRowActionsMenu({
     busy,
     caps.canChangeShipping,
     caps.canGenerateLabel,
+    caps.canMarkPacked,
     caps.isArranged,
     onChangeShipping,
     order.id,

@@ -126,15 +126,14 @@ export async function resolveAdminSalePricing(
     subtotalOriginal - itemsDiscountTotal
   );
 
+  const shippingAmount = round2(Math.max(input.shippingAmount, 0));
+  const orderDiscountBase = round2(subtotalAfterItemDiscounts + shippingAmount);
   const orderDiscountAmount = calculateDiscountAmount(
-    subtotalAfterItemDiscounts,
+    orderDiscountBase,
     input.orderDiscount
   );
 
-  const shippingAmount = round2(Math.max(input.shippingAmount, 0));
-  const total = round2(
-    subtotalAfterItemDiscounts - orderDiscountAmount + shippingAmount
-  );
+  const total = round2(orderDiscountBase - orderDiscountAmount);
 
   if (total < 0) {
     throw new Error("Total da venda não pode ser negativo.");

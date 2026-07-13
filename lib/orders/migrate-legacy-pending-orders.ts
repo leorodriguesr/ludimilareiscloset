@@ -17,10 +17,10 @@ export type MigrateLegacyPendingOrdersResult = {
 
 function customerKey(order: {
   userId: string | null;
-  email: string;
+  email: string | null;
 }): string | null {
   if (order.userId) return `user:${order.userId}`;
-  const email = order.email.trim().toLowerCase();
+  const email = (order.email ?? "").trim().toLowerCase();
   if (!email) return null;
   return `guest:${email}`;
 }

@@ -124,7 +124,7 @@ export async function submitCustomerData(
   const { ORDER_STATUS } = await import("@/lib/orders/constants");
   const { normalizePostalCode } = await import("@/lib/shipping/superfrete");
 
-  const contactEmail = data.email?.trim().toLowerCase() ?? "";
+  const contactEmail = data.email?.trim().toLowerCase() || null;
   let destinationCep: string | null = null;
   if (!isArranged) {
     destinationCep = normalizePostalCode(data.destinationCep ?? "");
@@ -137,7 +137,7 @@ export async function submitCustomerData(
     where: { id: validation.orderId },
     data: {
       recipientName: data.name.trim(),
-      ...(contactEmail ? { email: contactEmail } : {}),
+      email: contactEmail,
       phone: data.phone.trim(),
       ...(isArranged
         ? {}

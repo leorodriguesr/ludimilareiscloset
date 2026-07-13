@@ -1,13 +1,12 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import { formatPrice } from "@/lib/format";
 import type { CartPieceSelection } from "@/lib/cart/types";
 import type { Product } from "@/lib/types";
 import { StandaloneSaleWizard } from "@/components/admin/StandaloneSaleWizard";
-import { canManuallyChangeShippingStatus } from "@/lib/fulfillment/shipping-status-policy";
 import {
   orderCustomerDisplayEmail,
   orderCustomerDisplayName,
@@ -17,6 +16,14 @@ import {
   splitArrangedDeliveryNotes,
   arrangedDeliveryLabelFromServiceName,
 } from "@/lib/admin-sale/arranged-delivery";
+import {
+  cepMask,
+  cpfFmt,
+  lookupAddressByCep,
+  onlyDigits,
+  phoneFmt,
+} from "@/lib/admin-sale/customer-form-input";
+import { cpfValidationError } from "@/lib/validation/cpf";
 
 /* ─── Tipos ───────────────────────────────────────────────────────── */
 
@@ -37,7 +44,7 @@ type OrderItem = {
 type AdminOrder = {
   id: string;
   orderNumber: number | null;
-  email: string;
+  email: string | null;
   status: string;
   orderSource?: string;
   fulfillmentType?: string;
@@ -99,7 +106,7 @@ function orderMatchesCustomerSearch(order: AdminOrder, query: string): boolean {
 
   const haystack = [
     orderCustomerName(order),
-    order.email,
+    order.email ?? "",
     order.user?.name ?? "",
     order.recipientName ?? "",
   ]
@@ -617,17 +624,6 @@ const SHIPPING_STATUS = [
 ] as const;
 function sInfo(v: string) { return SHIPPING_STATUS.find((s) => s.value === v) ?? SHIPPING_STATUS[0]; }
 
-function manualShippingStatusOptions(order: AdminOrder) {
-  if (!canManuallyChangeShippingStatus(order)) return [];
-  if (order.fulfillmentType === "ARRANGED") return SHIPPING_STATUS;
-  return SHIPPING_STATUS.filter(
-    (option) =>
-      option.value === "to_pack" ||
-      option.value === "packed" ||
-      option.value === order.shippingStatus
-  );
-}
-
 function payBadge(order: AdminOrder) {
   if (order.paidAt) return { label: "Pago", cls: "bg-emerald-50 text-emerald-700 ring-emerald-200" };
   return { label: "Aguardando", cls: "bg-amber-50 text-amber-700 ring-amber-200" };
@@ -857,16 +853,92 @@ function ExpandedSection({
   title,
   children,
   className = "",
+  headerAction,
 }: {
   title: string;
   children: ReactNode;
   className?: string;
+  headerAction?: ReactNode;
 }) {
   return (
     <div className={`rounded-xl border border-stone-200 bg-white p-4 shadow-sm ${className}`}>
-      <h3 className="mb-4 text-sm font-semibold text-stone-900">{title}</h3>
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-stone-900">{title}</h3>
+        {headerAction}
+      </div>
       {children}
     </div>
+  );
+}
+
+function PencilIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"
+      />
+    </svg>
+  );
+}
+
+type CustomerEditForm = {
+  recipientName: string;
+  email: string;
+  phone: string;
+  cpf: string;
+  destinationCep: string;
+  addressStreet: string;
+  addressNumber: string;
+  addressComplement: string;
+  addressNeighborhood: string;
+  addressCity: string;
+  addressState: string;
+};
+
+function customerEditFormFromOrder(order: AdminOrder): CustomerEditForm {
+  return {
+    recipientName: order.recipientName ?? "",
+    email: order.email ?? "",
+    phone: phoneFmt(order.phone || order.user?.phone || ""),
+    cpf: cpfFmt(order.cpf ?? ""),
+    destinationCep: cepMask(onlyDigits(order.destinationCep ?? "", 8)),
+    addressStreet: order.addressStreet ?? "",
+    addressNumber: order.addressNumber ?? "",
+    addressComplement: order.addressComplement ?? "",
+    addressNeighborhood: order.addressNeighborhood ?? "",
+    addressCity: order.addressCity ?? "",
+    addressState: order.addressState ?? "",
+  };
+}
+
+function EditField({
+  label,
+  optional,
+  children,
+}: {
+  label: string;
+  optional?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <label className="mb-1 block text-xs font-medium text-stone-500">
+        {label}
+        {optional ? <span className="ml-1 font-normal text-stone-400">(opcional)</span> : null}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+function EditInput(props: InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      {...props}
+      className={`w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200 ${props.className ?? ""}`}
+    />
   );
 }
 
@@ -1089,40 +1161,6 @@ function OrderRowActionsMenu({
     setOpen(true);
   }
 
-  async function patchShipping(status: string) {
-    setBusy(status);
-    try {
-      await fetch(`/api/admin/orders/${order.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shippingStatus: status }),
-      });
-      onRefresh();
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function handleLabelAction() {
-    if (order.labelUrl) {
-      window.open(`/api/admin/orders/${order.id}/label/pdf`, "_blank");
-      return;
-    }
-    setBusy("label");
-    try {
-      const res = await fetch(`/api/admin/orders/${order.id}/label`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      const data = (await res.json()) as { error?: string };
-      if (!res.ok) return;
-      window.open(`/api/admin/orders/${order.id}/label/pdf`, "_blank");
-      onRefresh();
-    } finally {
-      setBusy(null);
-    }
-  }
-
   async function handleMarkShipped() {
     setBusy("shipped");
     try {
@@ -1167,36 +1205,6 @@ function OrderRowActionsMenu({
 
   const actions = useMemo(() => {
     const items: MenuAction[] = [];
-
-    if (!isCancelled && isPaid && order.shippingStatus === "to_pack") {
-      items.push({
-        id: "pack",
-        label: "Marcar como embalada",
-        separatorBefore: items.length > 0,
-        disabled: busy === "packed",
-        icon: (
-          <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
-            <path strokeLinecap="round" strokeLinejoin="round" d="m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
-          </svg>
-        ),
-        onClick: () => void patchShipping("packed"),
-      });
-    }
-
-    if (!isCancelled && isPaid && !isArranged && (order.labelUrl || order.shippingStatus === "packed")) {
-      items.push({
-        id: "label",
-        label: order.labelUrl ? "Imprimir etiqueta" : "Gerar etiqueta",
-        separatorBefore: items.length > 0,
-        disabled: busy === "label",
-        icon: (
-          <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0 1 10.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18M6.34 18H5.25A2.25 2.25 0 0 1 3 15.75V9.456c0-1.081.768-2.015 1.837-2.163a48.042 48.042 0 0 1 1.087-.128m12.725 0c.977.148 1.837 1.082 1.837 2.163V15.75A2.25 2.25 0 0 1 18.66 18h-1.08m-12.725 0h12.725" />
-          </svg>
-        ),
-        onClick: () => void handleLabelAction(),
-      });
-    }
 
     if (
       !isCancelled &&
@@ -1279,7 +1287,6 @@ function OrderRowActionsMenu({
     onRequestCancel,
     onToggleDetails,
     order.customerDataToken,
-    order.labelUrl,
     order.shippingStatus,
     showCustomerLink,
     showPaymentLink,
@@ -1407,13 +1414,17 @@ function OrderDetailsBody({
   openCancelForm?: boolean;
   onCancelIntentHandled?: () => void;
 }) {
-  const [updatingStatus, setUpdatingStatus] = useState(false);
-  const [generatingLabel, setGeneratingLabel] = useState(false);
-  const [labelError, setLabelError] = useState<string | null>(null);
   const [showCancelForm, setShowCancelForm] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [editingCustomer, setEditingCustomer] = useState(false);
+  const [customerForm, setCustomerForm] = useState<CustomerEditForm>(() =>
+    customerEditFormFromOrder(order)
+  );
+  const [savingCustomer, setSavingCustomer] = useState(false);
+  const [customerError, setCustomerError] = useState<string | null>(null);
+  const [cepLookupError, setCepLookupError] = useState<string | null>(null);
 
   useEffect(() => {
     if (openCancelForm) {
@@ -1422,35 +1433,43 @@ function OrderDetailsBody({
     }
   }, [openCancelForm]);
 
+  useEffect(() => {
+    if (!editingCustomer) {
+      setCustomerForm(customerEditFormFromOrder(order));
+      setCustomerError(null);
+      setCepLookupError(null);
+    }
+  }, [order, editingCustomer]);
+
+  useEffect(() => {
+    if (!editingCustomer) return;
+    const digits = onlyDigits(customerForm.destinationCep, 8);
+    if (digits.length !== 8) return;
+
+    const timeout = setTimeout(() => {
+      void (async () => {
+        setCepLookupError(null);
+        const result = await lookupAddressByCep(digits);
+        if (!result.ok) {
+          setCepLookupError(result.error);
+          return;
+        }
+        setCustomerForm((current) => ({
+          ...current,
+          destinationCep: cepMask(digits),
+          addressStreet: result.address.street || current.addressStreet,
+          addressNeighborhood: result.address.neighborhood || current.addressNeighborhood,
+          addressCity: result.address.city || current.addressCity,
+          addressState: result.address.state || current.addressState,
+        }));
+      })();
+    }, 400);
+
+    return () => clearTimeout(timeout);
+  }, [customerForm.destinationCep, editingCustomer]);
+
   const isCancelled = order.status === "cancelled";
   const hasActiveLabel = Boolean(order.labelUrl || order.superfreteShipmentId);
-
-  async function updateShippingStatus(v: string) {
-    setUpdatingStatus(true);
-    try {
-      await fetch(`/api/admin/orders/${order.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shippingStatus: v }),
-      });
-      onRefresh();
-    } finally { setUpdatingStatus(false); }
-  }
-
-  async function generateLabel() {
-    setGeneratingLabel(true); setLabelError(null);
-    try {
-      const res = await fetch(`/api/admin/orders/${order.id}/label`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      const data = (await res.json()) as { labelUrl?: string; error?: string };
-      if (!res.ok) { setLabelError(data.error ?? "Erro ao gerar etiqueta."); return; }
-      window.open(`/api/admin/orders/${order.id}/label/pdf`, "_blank");
-      onRefresh();
-    } catch { setLabelError("Erro de conexão."); }
-    finally { setGeneratingLabel(false); }
-  }
 
   async function cancelSale() {
     const reason = cancelReason.trim();
@@ -1480,6 +1499,84 @@ function OrderDetailsBody({
       setCancelError("Erro de conexão.");
     } finally {
       setCancelling(false);
+    }
+  }
+
+  async function saveCustomerData() {
+    if (!customerForm.recipientName.trim()) {
+      setCustomerError("Informe o nome.");
+      return;
+    }
+    if (onlyDigits(customerForm.phone).length < 10) {
+      setCustomerError("Informe um telefone válido.");
+      return;
+    }
+    const cpfError = cpfValidationError(customerForm.cpf);
+    if (cpfError) {
+      setCustomerError(cpfError);
+      return;
+    }
+    if (onlyDigits(customerForm.destinationCep, 8).length !== 8) {
+      setCustomerError("Informe um CEP válido.");
+      return;
+    }
+    if (!customerForm.addressStreet.trim()) {
+      setCustomerError("Informe a rua.");
+      return;
+    }
+    if (!customerForm.addressNumber.trim()) {
+      setCustomerError("Informe o número.");
+      return;
+    }
+    if (!customerForm.addressNeighborhood.trim()) {
+      setCustomerError("Informe o bairro.");
+      return;
+    }
+    if (!customerForm.addressCity.trim()) {
+      setCustomerError("Informe a cidade.");
+      return;
+    }
+    if (customerForm.addressState.trim().length !== 2) {
+      setCustomerError("Informe a UF.");
+      return;
+    }
+    const email = customerForm.email.trim();
+    if (email && (!email.includes("@") || !email.includes("."))) {
+      setCustomerError("Informe um e-mail válido.");
+      return;
+    }
+
+    setSavingCustomer(true);
+    setCustomerError(null);
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipientName: customerForm.recipientName,
+          email: email || null,
+          phone: customerForm.phone,
+          cpf: customerForm.cpf,
+          destinationCep: customerForm.destinationCep,
+          addressStreet: customerForm.addressStreet,
+          addressNumber: customerForm.addressNumber,
+          addressComplement: customerForm.addressComplement,
+          addressNeighborhood: customerForm.addressNeighborhood,
+          addressCity: customerForm.addressCity,
+          addressState: customerForm.addressState,
+        }),
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        setCustomerError(data.error ?? "Erro ao salvar dados.");
+        return;
+      }
+      setEditingCustomer(false);
+      onRefresh();
+    } catch {
+      setCustomerError("Erro de conexão.");
+    } finally {
+      setSavingCustomer(false);
     }
   }
 
@@ -1515,7 +1612,6 @@ function OrderDetailsBody({
     order.status !== "cancelled" &&
     order.paymentChannel !== "MANUAL";
   const hasAdminLinks = showCustomerLink || showPaymentLink;
-  const shippingStatusLocked = !canManuallyChangeShippingStatus(order);
   const shippingStatusInfo = sInfo(order.shippingStatus);
 
   return (
@@ -1524,56 +1620,227 @@ function OrderDetailsBody({
         <OrderProductsCards order={order} />
       </ExpandedSection>
 
-      <ExpandedSection title="Dados pessoais">
-        <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-stone-100 text-sm font-semibold text-stone-600">
-            {customerInitials(customerName)}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="font-semibold text-stone-900">{customerName}</p>
-            {customerEmail ? (
-              <p className="mt-1 text-sm text-stone-600">{customerEmail}</p>
-            ) : null}
-            {customerPhone ? <p className="text-sm text-stone-600">{customerPhone}</p> : null}
-            {customerCpf ? (
-              <p className="mt-1 text-xs text-stone-500">CPF {cpfDisplay(customerCpf)}</p>
-            ) : null}
-          </div>
-        </div>
+      <ExpandedSection
+        title="Dados pessoais"
+        headerAction={
+          !editingCustomer ? (
+            <button
+              type="button"
+              onClick={() => {
+                setCustomerForm(customerEditFormFromOrder(order));
+                setEditingCustomer(true);
+                setCustomerError(null);
+                setCepLookupError(null);
+              }}
+              aria-label="Editar dados pessoais"
+              className="flex h-8 w-8 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700"
+            >
+              <PencilIcon />
+            </button>
+          ) : null
+        }
+      >
+        {editingCustomer ? (
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <EditField label="Nome">
+                <EditInput
+                  value={customerForm.recipientName}
+                  onChange={(e) =>
+                    setCustomerForm((f) => ({ ...f, recipientName: e.target.value }))
+                  }
+                />
+              </EditField>
+              <EditField label="E-mail" optional>
+                <EditInput
+                  type="email"
+                  value={customerForm.email}
+                  onChange={(e) => setCustomerForm((f) => ({ ...f, email: e.target.value }))}
+                />
+              </EditField>
+              <EditField label="Telefone">
+                <EditInput
+                  inputMode="tel"
+                  value={customerForm.phone}
+                  onChange={(e) =>
+                    setCustomerForm((f) => ({ ...f, phone: phoneFmt(e.target.value) }))
+                  }
+                />
+              </EditField>
+              <EditField label="CPF">
+                <EditInput
+                  inputMode="numeric"
+                  value={customerForm.cpf}
+                  onChange={(e) =>
+                    setCustomerForm((f) => ({ ...f, cpf: cpfFmt(e.target.value) }))
+                  }
+                />
+              </EditField>
+            </div>
 
-        <div className="mt-4 border-t border-stone-100 pt-4">
-          <p className="mb-2 text-xs font-medium text-stone-500">Endereço de entrega</p>
-          {addressBlock ? (
-            <p className="whitespace-pre-line text-sm leading-relaxed text-stone-700">{addressBlock}</p>
-          ) : (
-            <p className="text-sm text-stone-400">Não informado</p>
-          )}
-          {arrangedDelivery ? (
-            <p className="mt-2 text-xs text-stone-500">
-              {arrangedDelivery.typeLabel}
-              {arrangedDelivery.showPrice
-                ? ` · ${order.shippingAmount > 0 ? formatPrice(order.shippingAmount) : "Grátis"}`
-                : null}
-            </p>
-          ) : shippingMethod ? (
-            <p className="mt-2 text-xs text-stone-500">
-              {shippingMethod}
-              {" · "}
-              {order.shippingAmount > 0 ? formatPrice(order.shippingAmount) : "Frete grátis"}
-            </p>
-          ) : null}
-        </div>
+            <div className="border-t border-stone-100 pt-4">
+              <p className="mb-3 text-xs font-medium text-stone-500">Endereço de entrega</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <EditField label="CEP">
+                  <EditInput
+                    inputMode="numeric"
+                    value={customerForm.destinationCep}
+                    onChange={(e) =>
+                      setCustomerForm((f) => ({
+                        ...f,
+                        destinationCep: cepMask(onlyDigits(e.target.value, 8)),
+                      }))
+                    }
+                  />
+                  {cepLookupError ? (
+                    <p className="mt-1 text-xs text-amber-700">{cepLookupError}</p>
+                  ) : null}
+                </EditField>
+                <EditField label="Número">
+                  <EditInput
+                    value={customerForm.addressNumber}
+                    onChange={(e) =>
+                      setCustomerForm((f) => ({ ...f, addressNumber: e.target.value }))
+                    }
+                  />
+                </EditField>
+                <div className="sm:col-span-2">
+                  <EditField label="Rua">
+                    <EditInput
+                      value={customerForm.addressStreet}
+                      onChange={(e) =>
+                        setCustomerForm((f) => ({ ...f, addressStreet: e.target.value }))
+                      }
+                    />
+                  </EditField>
+                </div>
+                <div className="sm:col-span-2">
+                  <EditField label="Complemento" optional>
+                    <EditInput
+                      value={customerForm.addressComplement}
+                      onChange={(e) =>
+                        setCustomerForm((f) => ({ ...f, addressComplement: e.target.value }))
+                      }
+                    />
+                  </EditField>
+                </div>
+                <EditField label="Bairro">
+                  <EditInput
+                    value={customerForm.addressNeighborhood}
+                    onChange={(e) =>
+                      setCustomerForm((f) => ({ ...f, addressNeighborhood: e.target.value }))
+                    }
+                  />
+                </EditField>
+                <EditField label="Cidade">
+                  <EditInput
+                    value={customerForm.addressCity}
+                    onChange={(e) =>
+                      setCustomerForm((f) => ({ ...f, addressCity: e.target.value }))
+                    }
+                  />
+                </EditField>
+                <EditField label="UF">
+                  <EditInput
+                    maxLength={2}
+                    value={customerForm.addressState}
+                    onChange={(e) =>
+                      setCustomerForm((f) => ({
+                        ...f,
+                        addressState: e.target.value.toUpperCase().slice(0, 2),
+                      }))
+                    }
+                  />
+                </EditField>
+              </div>
+            </div>
 
-        {(order.internalNotes?.trim() || deliveryUserNotes) ? (
-          <div className="mt-4 space-y-2 border-t border-stone-100 pt-4 text-sm text-stone-600">
-            {order.internalNotes?.trim() ? (
-              <p><span className="font-medium text-stone-800">Obs. internas:</span> {order.internalNotes}</p>
-            ) : null}
-            {deliveryUserNotes ? (
-              <p><span className="font-medium text-stone-800">Obs. entrega:</span> {deliveryUserNotes}</p>
-            ) : null}
+            {customerError ? <p className="text-xs text-red-600">{customerError}</p> : null}
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={savingCustomer}
+                onClick={() => void saveCustomerData()}
+                className="flex-1 rounded-lg bg-stone-900 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50"
+              >
+                {savingCustomer ? "Salvando…" : "Salvar"}
+              </button>
+              <button
+                type="button"
+                disabled={savingCustomer}
+                onClick={() => {
+                  setEditingCustomer(false);
+                  setCustomerError(null);
+                  setCepLookupError(null);
+                }}
+                className="rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-600 hover:bg-stone-50 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+            </div>
           </div>
-        ) : null}
+        ) : (
+          <>
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-stone-100 text-sm font-semibold text-stone-600">
+                {customerInitials(customerName)}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-stone-900">{customerName}</p>
+                {customerEmail ? (
+                  <p className="mt-1 text-sm text-stone-600">{customerEmail}</p>
+                ) : null}
+                {customerPhone ? <p className="text-sm text-stone-600">{customerPhone}</p> : null}
+                {customerCpf ? (
+                  <p className="mt-1 text-xs text-stone-500">CPF {cpfDisplay(customerCpf)}</p>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="mt-4 border-t border-stone-100 pt-4">
+              <p className="mb-2 text-xs font-medium text-stone-500">Endereço de entrega</p>
+              {addressBlock ? (
+                <p className="whitespace-pre-line text-sm leading-relaxed text-stone-700">
+                  {addressBlock}
+                </p>
+              ) : (
+                <p className="text-sm text-stone-400">Não informado</p>
+              )}
+              {arrangedDelivery ? (
+                <p className="mt-2 text-xs text-stone-500">
+                  {arrangedDelivery.typeLabel}
+                  {arrangedDelivery.showPrice
+                    ? ` · ${order.shippingAmount > 0 ? formatPrice(order.shippingAmount) : "Grátis"}`
+                    : null}
+                </p>
+              ) : shippingMethod ? (
+                <p className="mt-2 text-xs text-stone-500">
+                  {shippingMethod}
+                  {" · "}
+                  {order.shippingAmount > 0 ? formatPrice(order.shippingAmount) : "Frete grátis"}
+                </p>
+              ) : null}
+            </div>
+
+            {(order.internalNotes?.trim() || deliveryUserNotes) ? (
+              <div className="mt-4 space-y-2 border-t border-stone-100 pt-4 text-sm text-stone-600">
+                {order.internalNotes?.trim() ? (
+                  <p>
+                    <span className="font-medium text-stone-800">Obs. internas:</span>{" "}
+                    {order.internalNotes}
+                  </p>
+                ) : null}
+                {deliveryUserNotes ? (
+                  <p>
+                    <span className="font-medium text-stone-800">Obs. entrega:</span>{" "}
+                    {deliveryUserNotes}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        )}
       </ExpandedSection>
 
       <ExpandedSection title="Pagamento">
@@ -1591,13 +1858,13 @@ function OrderDetailsBody({
           {(order.itemsDiscountTotal ?? 0) > 0 ? (
             <ReceiptLine label="Desc. itens" value={`-${formatPrice(order.itemsDiscountTotal!)}`} />
           ) : null}
-          {(order.orderDiscountAmount ?? 0) > 0 ? (
-            <ReceiptLine label="Desc. geral" value={`-${formatPrice(order.orderDiscountAmount!)}`} />
-          ) : null}
           <ReceiptLine
             label="Frete"
             value={order.shippingAmount > 0 ? formatPrice(order.shippingAmount) : "Grátis"}
           />
+          {(order.orderDiscountAmount ?? 0) > 0 ? (
+            <ReceiptLine label="Desc. geral" value={`-${formatPrice(order.orderDiscountAmount!)}`} />
+          ) : null}
           <div className="border-t border-stone-200 pt-2">
             <ReceiptLine label="Total" value={formatPrice(order.total)} bold />
           </div>
@@ -1617,98 +1884,51 @@ function OrderDetailsBody({
           <div className="space-y-3">
             {order.paidAt ? (
               <>
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-stone-500">
-                    Status do envio
-                  </label>
-                  {shippingStatusLocked ? (
-                    <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2.5">
-                      {order.shippingStatus === "delivered" ? (
-                        <ShippingStatusBadge
-                          label={tableShippingLabel(order.shippingStatus)}
-                          tone="emerald"
-                        />
-                      ) : order.shippingStatus === "packed" ? (
-                        <ShippingStatusBadge
-                          label={tableShippingLabel(order.shippingStatus)}
-                          tone="blue"
-                        />
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-stone-800">
-                          <span className={`h-2 w-2 shrink-0 rounded-full ${shippingStatusInfo.dot}`} />
-                          {tableShippingLabel(order.shippingStatus)}
-                        </span>
-                      )}
-                      <p className="mt-1.5 text-xs text-stone-500">
-                        Atualizado automaticamente pela SuperFrete.
-                      </p>
-                    </div>
+                <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2.5">
+                  <p className="mb-1.5 text-xs font-medium text-stone-500">Status do envio</p>
+                  {order.shippingStatus === "delivered" ? (
+                    <ShippingStatusBadge
+                      label={tableShippingLabel(order.shippingStatus)}
+                      tone="emerald"
+                    />
+                  ) : order.shippingStatus === "packed" ? (
+                    <ShippingStatusBadge
+                      label={tableShippingLabel(order.shippingStatus)}
+                      tone="blue"
+                    />
                   ) : (
-                    <select
-                      className="w-full rounded-lg border border-stone-200 bg-white py-2 pl-3 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900 disabled:opacity-50"
-                      value={order.shippingStatus}
-                      disabled={updatingStatus}
-                      onChange={(e) => updateShippingStatus(e.target.value)}
-                    >
-                      {manualShippingStatusOptions(order).map((o) => (
-                        <option key={o.value} value={o.value}>{o.label}</option>
-                      ))}
-                    </select>
+                    <span className="inline-flex items-center gap-1.5 text-sm font-medium text-stone-800">
+                      <span className={`h-2 w-2 shrink-0 rounded-full ${shippingStatusInfo.dot}`} />
+                      {tableShippingLabel(order.shippingStatus)}
+                    </span>
                   )}
+                  <p className="mt-1.5 text-xs text-stone-500">
+                    Embalagem e etiqueta são gerenciadas em Envios.
+                  </p>
                 </div>
                 {order.trackingCode ? (
                   <p className="text-xs text-stone-500">
                     Rastreio: <span className="font-mono text-stone-700">{order.trackingCode}</span>
                   </p>
                 ) : null}
-                <div className="flex flex-col gap-2">
-                  {order.fulfillmentType !== "ARRANGED" ? (
-                    order.labelUrl ? (
-                      <a
-                        href={`/api/admin/orders/${order.id}/label/pdf`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex w-full items-center justify-center rounded-lg border border-stone-200 bg-white py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
-                      >
-                        Baixar etiqueta
-                      </a>
-                    ) : order.shippingStatus === "packed" ? (
-                      <button
-                        type="button"
-                        disabled={generatingLabel}
-                        onClick={generateLabel}
-                        className="flex w-full items-center justify-center rounded-lg bg-stone-900 py-2 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:opacity-50"
-                      >
-                        {generatingLabel ? "Gerando…" : "Gerar etiqueta"}
-                      </button>
-                    ) : (
-                      <p className="text-xs text-stone-500">
-                        Marque como embalada para gerar a etiqueta.
-                      </p>
-                    )
-                  ) : null}
-                  {order.fulfillmentType === "ARRANGED" &&
-                  order.shippingStatus !== "shipped" &&
-                  order.shippingStatus !== "delivered" ? (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        await fetch(`/api/admin/sales/${order.id}/mark-shipped`, { method: "POST" });
-                        onRefresh();
-                      }}
-                      className="flex w-full items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 py-2 text-sm font-medium text-emerald-800 transition-colors hover:bg-emerald-100"
-                    >
-                      Marcar enviado
-                    </button>
-                  ) : null}
-                </div>
-                {labelError ? (
-                  <p className="text-xs text-red-600">{labelError}</p>
+                {order.fulfillmentType === "ARRANGED" &&
+                order.shippingStatus !== "shipped" &&
+                order.shippingStatus !== "delivered" ? (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await fetch(`/api/admin/sales/${order.id}/mark-shipped`, { method: "POST" });
+                      onRefresh();
+                    }}
+                    className="flex w-full items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 py-2 text-sm font-medium text-emerald-800 transition-colors hover:bg-emerald-100"
+                  >
+                    Marcar enviado
+                  </button>
                 ) : null}
               </>
             ) : (
               <p className="text-xs text-stone-500">
-                Status de envio e etiqueta disponíveis após o pagamento.
+                Status de envio disponível após o pagamento.
               </p>
             )}
 
@@ -1774,6 +1994,7 @@ function OrderDetailsBody({
     </div>
   );
 }
+
 
 function SaleOrderDrawer({
   order,

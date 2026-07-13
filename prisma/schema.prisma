@@ -94,7 +94,7 @@ model Order {
   orderNumber Int?
   userId    String?
   user      User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
-  email     String
+  email     String?
   status    String      @default("pending_payment")
   /** Origem do pedido: checkout da loja ou venda avulsa do admin. */
   orderSource         OrderSource     @default(CHECKOUT)
@@ -431,4 +431,6 @@ model StoreSettings {
   freeShippingMinValue Float   @default(0)
   /** Dias úteis para embalar o pedido antes do envio (somados ao prazo do frete). */
   packagingDays        Int     @default(0)
+  /** Valor (R$) cobrado na venda avulsa quando a entrega é pelo entregador da loja. */
+  storeDeliveryFee     Float   @default(0)
 }

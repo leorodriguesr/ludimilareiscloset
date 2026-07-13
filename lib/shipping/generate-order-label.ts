@@ -209,9 +209,9 @@ function buildLabelInput(order: OrderForLabel): LabelInput {
   return {
     serviceId,
     to: {
-      name: order.recipientName || order.email.split("@")[0] || "Destinatário",
+      name: order.recipientName || order.email?.split("@")[0] || "Destinatário",
       phone: order.phone ?? undefined,
-      email: order.email,
+      email: order.email ?? undefined,
       document: order.cpf ?? undefined,
       address: order.addressStreet!,
       number: order.addressNumber ?? undefined,
