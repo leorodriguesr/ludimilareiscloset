@@ -263,12 +263,12 @@ export function ProductList({
               key={product.id}
               className="flex overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm transition-shadow hover:shadow-md"
             >
-              <div className="relative w-40 shrink-0 self-stretch overflow-hidden bg-stone-100 sm:w-44">
+              <div className="relative min-h-[9.5rem] w-40 shrink-0 self-stretch overflow-hidden bg-stone-100 sm:w-44">
                 {coverImage ? (
                   <img
                     src={coverImage}
                     alt={product.name}
-                    className="h-full min-h-[9.5rem] w-full object-cover"
+                    className="absolute inset-0 h-full w-full object-contain object-center"
                   />
                 ) : (
                   <div className="flex h-full min-h-[9.5rem] items-center justify-center px-1 text-center text-[9px] font-medium leading-tight text-stone-400">

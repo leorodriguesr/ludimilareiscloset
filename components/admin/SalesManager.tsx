@@ -8,6 +8,7 @@ import type { CartPieceSelection } from "@/lib/cart/types";
 import type { Product } from "@/lib/types";
 import { StandaloneSaleWizard } from "@/components/admin/StandaloneSaleWizard";
 import {
+  isPendingAdminSaleCustomer,
   orderCustomerDisplayEmail,
   orderCustomerDisplayName,
 } from "@/lib/admin-sale/customer-display";
@@ -368,11 +369,10 @@ function SaleDatePicker({
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         aria-haspopup="dialog"
-        className={`inline-flex shrink-0 items-center gap-2 transition-colors ${SALES_TOOLBAR_CONTROL} ${
-          hasSelection
+        className={`inline-flex shrink-0 items-center gap-2 transition-colors ${SALES_TOOLBAR_CONTROL} ${hasSelection
             ? "border-stone-900 bg-stone-900 text-white"
             : "border-stone-200 bg-white text-stone-600 hover:border-stone-300 hover:bg-stone-50"
-        }`}
+          }`}
       >
         <CalendarIcon className="h-4 w-4 shrink-0" />
         <span>Data</span>
@@ -380,147 +380,147 @@ function SaleDatePicker({
 
       {mounted && open
         ? createPortal(
-            <>
-              <button
-                type="button"
-                aria-label="Fechar calendário"
-                className="fixed inset-0 z-[100] bg-stone-900/25 backdrop-blur-[1px]"
-                onClick={() => setOpen(false)}
-              />
-              <div
-                role="dialog"
-                aria-modal="true"
-                aria-label="Selecionar intervalo de datas da venda"
-                className="fixed left-1/2 top-1/2 z-[101] w-[min(calc(100vw-2rem),19rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-stone-200 bg-white p-4 shadow-2xl"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={goToPreviousMonth}
-                    aria-label="Mês anterior"
-                    className="rounded-lg p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800"
+          <>
+            <button
+              type="button"
+              aria-label="Fechar calendário"
+              className="fixed inset-0 z-[100] bg-stone-900/25 backdrop-blur-[1px]"
+              onClick={() => setOpen(false)}
+            />
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Selecionar intervalo de datas da venda"
+              className="fixed left-1/2 top-1/2 z-[101] w-[min(calc(100vw-2rem),19rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-stone-200 bg-white p-4 shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={goToPreviousMonth}
+                  aria-label="Mês anterior"
+                  className="rounded-lg p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800"
+                >
+                  <svg
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    viewBox="0 0 24 24"
+                    aria-hidden
                   >
-                    <svg
-                      className="h-4 w-4"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      viewBox="0 0 24 24"
-                      aria-hidden
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M15 19 8 12l7-7"
-                      />
-                    </svg>
-                  </button>
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M15 19 8 12l7-7"
+                    />
+                  </svg>
+                </button>
 
-                  <p className="text-sm font-semibold capitalize text-stone-900">
-                    {monthLabel}
-                  </p>
+                <p className="text-sm font-semibold capitalize text-stone-900">
+                  {monthLabel}
+                </p>
 
-                  <button
-                    type="button"
-                    onClick={goToNextMonth}
-                    aria-label="Próximo mês"
-                    className="rounded-lg p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800"
+                <button
+                  type="button"
+                  onClick={goToNextMonth}
+                  aria-label="Próximo mês"
+                  className="rounded-lg p-1.5 text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800"
+                >
+                  <svg
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    viewBox="0 0 24 24"
+                    aria-hidden
                   >
-                    <svg
-                      className="h-4 w-4"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      viewBox="0 0 24 24"
-                      aria-hidden
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M9 5l7 7-7 7"
-                      />
-                    </svg>
-                  </button>
-                </div>
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M9 5l7 7-7 7"
+                    />
+                  </svg>
+                </button>
+              </div>
 
-                <div className="mb-1 grid grid-cols-7 gap-1">
-                  {CALENDAR_WEEKDAYS.map((weekday) => (
-                    <div
-                      key={weekday}
-                      className="py-1 text-center text-[10px] font-semibold uppercase tracking-wide text-stone-400"
-                    >
-                      {weekday}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="grid grid-cols-7 gap-1">
-                  {calendarCells.map((cell, index) =>
-                    cell ? (
-                      <button
-                        key={cell.key}
-                        type="button"
-                        onClick={() => selectDay(cell.key)}
-                        aria-pressed={getDayRangeState(cell.key, range, rangeAnchor) !== "none"}
-                        className={dayButtonClass(cell.key)}
-                      >
-                        {cell.day}
-                      </button>
-                    ) : (
-                      <div
-                        key={`blank-${index}`}
-                        className="h-9 w-9"
-                        aria-hidden
-                      />
-                    )
-                  )}
-                </div>
-
-                {hasSelection || isSelectingEnd ? (
-                  <div className="mt-3 border-t border-stone-100 pt-3">
-                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-stone-400">
-                      Período selecionado
-                    </p>
-                    <p className="text-sm font-medium text-stone-800">
-                      {isSelectingEnd
-                        ? `${formatDateFilterLabel(range.from)} – …`
-                        : rangeLabel}
-                    </p>
+              <div className="mb-1 grid grid-cols-7 gap-1">
+                {CALENDAR_WEEKDAYS.map((weekday) => (
+                  <div
+                    key={weekday}
+                    className="py-1 text-center text-[10px] font-semibold uppercase tracking-wide text-stone-400"
+                  >
+                    {weekday}
                   </div>
-                ) : null}
+                ))}
+              </div>
 
-                <div className="mt-4 flex items-center justify-between gap-2 border-t border-stone-100 pt-3">
-                  <p className="text-xs text-stone-500">
-                    {isSelectingEnd
-                      ? "Agora escolha o dia final"
-                      : hasSelection
-                        ? "Intervalo aplicado ao filtro"
-                        : "Escolha o dia inicial e depois o final"}
+              <div className="grid grid-cols-7 gap-1">
+                {calendarCells.map((cell, index) =>
+                  cell ? (
+                    <button
+                      key={cell.key}
+                      type="button"
+                      onClick={() => selectDay(cell.key)}
+                      aria-pressed={getDayRangeState(cell.key, range, rangeAnchor) !== "none"}
+                      className={dayButtonClass(cell.key)}
+                    >
+                      {cell.day}
+                    </button>
+                  ) : (
+                    <div
+                      key={`blank-${index}`}
+                      className="h-9 w-9"
+                      aria-hidden
+                    />
+                  )
+                )}
+              </div>
+
+              {hasSelection || isSelectingEnd ? (
+                <div className="mt-3 border-t border-stone-100 pt-3">
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-stone-400">
+                    Período selecionado
                   </p>
-                  <div className="flex items-center gap-2">
-                    {hasSelection ? (
-                      <button
-                        type="button"
-                        onClick={clearSelection}
-                        className="text-xs font-medium text-stone-500 transition-colors hover:text-stone-800"
-                      >
-                        Limpar
-                      </button>
-                    ) : null}
+                  <p className="text-sm font-medium text-stone-800">
+                    {isSelectingEnd
+                      ? `${formatDateFilterLabel(range.from)} – …`
+                      : rangeLabel}
+                  </p>
+                </div>
+              ) : null}
+
+              <div className="mt-4 flex items-center justify-between gap-2 border-t border-stone-100 pt-3">
+                <p className="text-xs text-stone-500">
+                  {isSelectingEnd
+                    ? "Agora escolha o dia final"
+                    : hasSelection
+                      ? "Intervalo aplicado ao filtro"
+                      : "Escolha o dia inicial e depois o final"}
+                </p>
+                <div className="flex items-center gap-2">
+                  {hasSelection ? (
                     <button
                       type="button"
-                      onClick={() => setOpen(false)}
-                      className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-stone-800"
+                      onClick={clearSelection}
+                      className="text-xs font-medium text-stone-500 transition-colors hover:text-stone-800"
                     >
-                      Ok
+                      Limpar
                     </button>
-                  </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-stone-800"
+                  >
+                    Ok
+                  </button>
                 </div>
               </div>
-            </>,
-            document.body
-          )
+            </div>
+          </>,
+          document.body
+        )
         : null}
     </div>
   );
@@ -589,13 +589,13 @@ function parsePieces(json: string | null): CartPieceSelection[] {
 function cpfDisplay(v: string | null): string {
   if (!v) return "—";
   const d = v.replace(/\D/g, "");
-  if (d.length === 11) return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9)}`;
+  if (d.length === 11) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
   return v;
 }
 function cepDisplay(v: string | null): string {
   if (!v) return "—";
   const d = v.replace(/\D/g, "");
-  return d.length === 8 ? `${d.slice(0,5)}-${d.slice(5)}` : v;
+  return d.length === 8 ? `${d.slice(0, 5)}-${d.slice(5)}` : v;
 }
 
 function hasOrderAddress(order: AdminOrder): boolean {
@@ -616,11 +616,11 @@ function displayOrDash(v: string | null | undefined): string {
 }
 
 const SHIPPING_STATUS = [
-  { value: "to_pack",    label: "Por embalar", dot: "bg-amber-400"   },
-  { value: "packed",     label: "Por enviar",  dot: "bg-blue-500"    },
-  { value: "shipped",    label: "Enviado",     dot: "bg-emerald-500" },
-  { value: "delivered",  label: "Entregue",    dot: "bg-emerald-500" },
-  { value: "cancelled",  label: "Cancelado",   dot: "bg-red-400"     },
+  { value: "to_pack", label: "Por embalar", dot: "bg-amber-400" },
+  { value: "packed", label: "Por enviar", dot: "bg-blue-500" },
+  { value: "shipped", label: "Enviado", dot: "bg-emerald-500" },
+  { value: "delivered", label: "Entregue", dot: "bg-emerald-500" },
+  { value: "cancelled", label: "Cancelado", dot: "bg-red-400" },
 ] as const;
 function sInfo(v: string) { return SHIPPING_STATUS.find((s) => s.value === v) ?? SHIPPING_STATUS[0]; }
 
@@ -975,6 +975,69 @@ type PaymentInfo =
   | { type: "card"; checkoutUrl: string }
   | { type: "paid" };
 
+function orderRefLabel(order: Pick<AdminOrder, "orderNumber">): string {
+  return order.orderNumber != null ? ` #${order.orderNumber}` : "";
+}
+
+function shareGreeting(order: AdminOrder): string {
+  if (isPendingAdminSaleCustomer(order)) return "Oi!";
+  const full =
+    order.recipientName?.trim() ||
+    order.user?.name?.trim() ||
+    "";
+  const first = full.split(/\s+/)[0];
+  return first ? `Oi, ${first}!` : "Oi!";
+}
+
+/** Mensagem pronta para WhatsApp (link de preenchimento de dados). */
+function buildCustomerDataShareMessage(order: AdminOrder, url: string): string {
+  return [
+    shareGreeting(order),
+    "",
+    `📦 Para prosseguirmos com a entrega do seu pedido${orderRefLabel(order)}, por favor, preencha seus dados neste link:`,
+    "",
+    url,
+    "",
+    "Qualquer dúvida, é só me chamar por aqui.",
+  ].join("\n");
+}
+
+/** Mensagem pronta para WhatsApp (pagamento Pix com código copia e cola). */
+function buildPixShareMessage(
+  order: AdminOrder,
+  pixCode: string,
+  amount: number
+): string {
+  return [
+    "",
+    `Seu pedido${orderRefLabel(order)} foi gerado com sucesso!`,
+    "",
+    `Valor: ${formatPrice(amount)}`,
+    "",
+    "Para realizar o pagamento, copie o código abaixo e cole na opção 'Pix Copia e Cola' do aplicativo do seu banco:",
+    "",
+    pixCode,
+    "",
+    "Assim que o pagamento for confirmado, avisaremos você por aqui. 😊",
+  ].join("\n");
+}
+
+/** Mensagem pronta para WhatsApp (pagamento com cartão). */
+function buildCardShareMessage(order: AdminOrder, checkoutUrl: string): string {
+  return [
+    "",
+    `Seu pedido${orderRefLabel(order)} foi gerado com sucesso!`,
+    "",
+    `Valor: ${formatPrice(order.total)}`,
+    "",
+    "Para realizar o pagamento, acesse o link abaixo e conclua com cartão de crédito:",
+    "",
+    checkoutUrl,
+    "",
+    "Assim que o pagamento for confirmado, avisaremos você por aqui. 😊",
+  ].join("\n");
+}
+
 function AdminSaleLinks({
   order,
 }: {
@@ -1048,19 +1111,29 @@ function AdminSaleLinks({
           {paymentInfo?.type === "pix" && (
             <button
               type="button"
-              onClick={() => void copyText(paymentInfo.pixCode, "pix")}
+              onClick={() =>
+                void copyText(
+                  buildPixShareMessage(order, paymentInfo.pixCode, paymentInfo.amount),
+                  "pix"
+                )
+              }
               className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
             >
-              {copied === "pix" ? "Código copiado!" : "Copiar código PIX"}
+              {copied === "pix" ? "Mensagem copiada!" : "Copiar mensagem PIX"}
             </button>
           )}
           {paymentInfo?.type === "card" && (
             <button
               type="button"
-              onClick={() => void copyText(paymentInfo.checkoutUrl, "card")}
+              onClick={() =>
+                void copyText(
+                  buildCardShareMessage(order, paymentInfo.checkoutUrl),
+                  "card"
+                )
+              }
               className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
             >
-              {copied === "card" ? "Link copiado!" : "Copiar link de pagamento"}
+              {copied === "card" ? "Mensagem copiada!" : "Copiar mensagem de pagamento"}
             </button>
           )}
           {paymentInfo?.type === "paid" && (
@@ -1072,10 +1145,12 @@ function AdminSaleLinks({
       {showCustomerLink && (
         <button
           type="button"
-          onClick={() => void copyText(customerUrl, "data")}
+          onClick={() =>
+            void copyText(buildCustomerDataShareMessage(order, customerUrl), "data")
+          }
           className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
         >
-          {copied === "data" ? "Link copiado!" : "Copiar link de preenchimento dos dados"}
+          {copied === "data" ? "Mensagem copiada!" : "Copiar mensagem de dados"}
         </button>
       )}
     </div>
@@ -1177,7 +1252,8 @@ function OrderRowActionsMenu({
 
   async function handleCopyCustomerLink() {
     if (!order.customerDataToken) return;
-    await copyText(`${window.location.origin}/venda-avulsa/completar/${order.customerDataToken}`);
+    const url = `${window.location.origin}/venda-avulsa/completar/${order.customerDataToken}`;
+    await copyText(buildCustomerDataShareMessage(order, url));
   }
 
   async function handleCopyPaymentLink() {
@@ -1186,8 +1262,12 @@ function OrderRowActionsMenu({
       const res = await fetch(`/api/admin/orders/${order.id}/payment-info`);
       const data = (await res.json()) as PaymentInfo & { error?: string };
       if (!res.ok) return;
-      if (data.type === "pix") await copyText(data.pixCode);
-      if (data.type === "card") await copyText(data.checkoutUrl);
+      if (data.type === "pix") {
+        await copyText(buildPixShareMessage(order, data.pixCode, data.amount));
+      }
+      if (data.type === "card") {
+        await copyText(buildCardShareMessage(order, data.checkoutUrl));
+      }
     } finally {
       setBusy(null);
     }
@@ -1238,7 +1318,7 @@ function OrderRowActionsMenu({
     if (showCustomerLink) {
       items.push({
         id: "customer-link",
-        label: "Copiar link de dados",
+        label: "Copiar mensagem de dados",
         icon: (
           <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m9.86-2.121a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
@@ -1302,9 +1382,8 @@ function OrderRowActionsMenu({
           aria-expanded={open}
           aria-haspopup="menu"
           onClick={toggleMenu}
-          className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
-            open ? "bg-blue-50 text-blue-600" : "text-stone-400 hover:bg-stone-100 hover:text-stone-600"
-          }`}
+          className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${open ? "bg-blue-50 text-blue-600" : "text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+            }`}
         >
           <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
             <circle cx="12" cy="5" r="1.75" />
@@ -1316,48 +1395,47 @@ function OrderRowActionsMenu({
 
       {mounted && open && menuPos
         ? createPortal(
-            <>
-              <button
-                type="button"
-                aria-label="Fechar menu de ações"
-                className="fixed inset-0 z-[90]"
-                onClick={closeMenu}
-              />
-              <div
-                role="menu"
-                aria-label="Ações do pedido"
-                className="fixed z-[91] overflow-hidden rounded-xl border border-stone-200 bg-white py-1.5 shadow-lg"
-                style={{ top: menuPos.top, left: menuPos.left, width: ORDER_ACTION_MENU_WIDTH }}
-                onClick={(event) => event.stopPropagation()}
-              >
-                {actions.map((action) => (
-                  <div key={action.id}>
-                    {action.separatorBefore ? (
-                      <div className="my-1 border-t border-stone-100" role="separator" />
-                    ) : null}
-                    <button
-                      type="button"
-                      role="menuitem"
-                      disabled={action.disabled}
-                      onClick={() => {
-                        void action.onClick();
-                        closeMenu();
-                      }}
-                      className={`flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-sm transition-colors disabled:opacity-50 ${
-                        action.danger
-                          ? "text-red-600 hover:bg-red-50"
-                          : "text-stone-700 hover:bg-stone-50"
+          <>
+            <button
+              type="button"
+              aria-label="Fechar menu de ações"
+              className="fixed inset-0 z-[90]"
+              onClick={closeMenu}
+            />
+            <div
+              role="menu"
+              aria-label="Ações do pedido"
+              className="fixed z-[91] overflow-hidden rounded-xl border border-stone-200 bg-white py-1.5 shadow-lg"
+              style={{ top: menuPos.top, left: menuPos.left, width: ORDER_ACTION_MENU_WIDTH }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {actions.map((action) => (
+                <div key={action.id}>
+                  {action.separatorBefore ? (
+                    <div className="my-1 border-t border-stone-100" role="separator" />
+                  ) : null}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={action.disabled}
+                    onClick={() => {
+                      void action.onClick();
+                      closeMenu();
+                    }}
+                    className={`flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-sm transition-colors disabled:opacity-50 ${action.danger
+                        ? "text-red-600 hover:bg-red-50"
+                        : "text-stone-700 hover:bg-stone-50"
                       }`}
-                    >
-                      <ActionMenuIcon>{action.icon}</ActionMenuIcon>
-                      <span>{action.label}</span>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </>,
-            document.body
-          )
+                  >
+                    <ActionMenuIcon>{action.icon}</ActionMenuIcon>
+                    <span>{action.label}</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>,
+          document.body
+        )
         : null}
     </td>
   );
@@ -1595,10 +1673,10 @@ function OrderDetailsBody({
   const arrangedDelivery =
     order.fulfillmentType === "ARRANGED"
       ? resolveArrangedDeliveryDisplay({
-          shippingServiceName: order.shippingServiceName,
-          deliveryNotes: order.deliveryNotes,
-          shippingAmount: order.shippingAmount,
-        })
+        shippingServiceName: order.shippingServiceName,
+        deliveryNotes: order.deliveryNotes,
+        shippingAmount: order.shippingAmount,
+      })
       : null;
   const deliveryUserNotes = arrangedDelivery?.userNotes ?? order.deliveryNotes?.trim() ?? null;
   const addressBlock = formatOrderAddressBlock(order);
@@ -1912,8 +1990,8 @@ function OrderDetailsBody({
                   </p>
                 ) : null}
                 {order.fulfillmentType === "ARRANGED" &&
-                order.shippingStatus !== "shipped" &&
-                order.shippingStatus !== "delivered" ? (
+                  order.shippingStatus !== "shipped" &&
+                  order.shippingStatus !== "delivered" ? (
                   <button
                     type="button"
                     onClick={async () => {
@@ -2067,16 +2145,14 @@ function SaleOrderDrawer({
     <div className="fixed inset-0 z-[100]">
       <button
         type="button"
-        className={`absolute inset-0 bg-black/40 backdrop-blur-[1px] transition-opacity duration-300 ease-out motion-reduce:transition-none ${
-          entered ? "opacity-100" : "opacity-0"
-        }`}
+        className={`absolute inset-0 bg-black/40 backdrop-blur-[1px] transition-opacity duration-300 ease-out motion-reduce:transition-none ${entered ? "opacity-100" : "opacity-0"
+          }`}
         aria-label="Fechar detalhes do pedido"
         onClick={onClose}
       />
       <aside
-        className={`absolute top-0 right-0 flex h-full w-full max-w-full flex-col bg-white shadow-2xl transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none sm:max-w-md sm:border-l sm:border-stone-200 ${
-          entered ? "translate-x-0" : "translate-x-full"
-        }`}
+        className={`absolute top-0 right-0 flex h-full w-full max-w-full flex-col bg-white shadow-2xl transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none sm:max-w-md sm:border-l sm:border-stone-200 ${entered ? "translate-x-0" : "translate-x-full"
+          }`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="sale-order-drawer-title"
@@ -2128,9 +2204,9 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 /* ─── Componente principal ────────────────────────────────────────── */
 
 export function SalesManager() {
-  const [orders, setOrders]       = useState<AdminOrder[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [filter, setFilter]       = useState<FilterKey | null>(null);
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<FilterKey | null>(null);
   const [customerSearchQuery, setCustomerSearchQuery] = useState("");
   const [saleDateRange, setSaleDateRange] = useState<SaleDateRange>(
     EMPTY_SALE_DATE_RANGE
@@ -2139,7 +2215,7 @@ export function SalesManager() {
   const [cancelFormOrderId, setCancelFormOrderId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
-  const [bulkMsg, setBulkMsg]         = useState<string | null>(null);
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
   const [showWizard, setShowWizard] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
 
@@ -2246,15 +2322,15 @@ export function SalesManager() {
   }
 
   const FILTERS: { key: FilterKey; label: string }[] = [
-    { key: "paid",    label: "Pagas" },
+    { key: "paid", label: "Pagas" },
     { key: "waiting", label: "Aguardando pagamento" },
     { key: "to_pack", label: "Por embalar" },
   ];
 
   const detailsOrder = detailsOrderId
     ? visibleOrders.find((order) => order.id === detailsOrderId) ??
-      orders.find((order) => order.id === detailsOrderId) ??
-      null
+    orders.find((order) => order.id === detailsOrderId) ??
+    null
     : null;
   const hasCustomerSearch = customerSearchQuery.trim().length > 0;
   const hasSaleDateFilter = hasSaleDateRangeSelection(saleDateRange);
@@ -2288,10 +2364,10 @@ export function SalesManager() {
             disabled={loading}
             className={`inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50 ${SALES_TOOLBAR_SIZE}`}
           >
-          <svg className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
-          </svg>
-        </button>
+            <svg className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -2309,19 +2385,17 @@ export function SalesManager() {
               key={key}
               type="button"
               onClick={() => toggleFilter(key)}
-              className={`inline-flex shrink-0 items-center gap-2 transition-colors ${SALES_TOOLBAR_CONTROL} ${
-                filter === key
+              className={`inline-flex shrink-0 items-center gap-2 transition-colors ${SALES_TOOLBAR_CONTROL} ${filter === key
                   ? "border-stone-900 bg-stone-900 text-white"
                   : "border-stone-200 bg-white text-stone-600 hover:border-stone-300 hover:bg-stone-50"
-              }`}
+                }`}
             >
               <span>{label}</span>
               <span
-                className={`inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-sm border px-1 text-[11px] font-semibold tabular-nums ${
-                  filter === key
+                className={`inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-sm border px-1 text-[11px] font-semibold tabular-nums ${filter === key
                     ? "border-white/25 bg-white/10 text-white"
                     : "border-stone-200 bg-stone-100 text-stone-700"
-                }`}
+                  }`}
               >
                 {filterCounts[key]}
               </span>
@@ -2389,9 +2463,9 @@ export function SalesManager() {
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-3 shadow-sm">
           <span className="text-sm font-medium text-stone-700">{selectedIds.size} selecionado{selectedIds.size !== 1 ? "s" : ""}</span>
           <div className="ml-2 flex flex-wrap gap-2">
-            <BulkBtn onClick={() => bulkShipping("to_pack",  "Por embalar")} disabled={bulkLoading}>Por embalar</BulkBtn>
-            <BulkBtn onClick={() => bulkShipping("packed",   "Por enviar")}   disabled={bulkLoading} cls="border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100">Marcar embalado</BulkBtn>
-            <BulkBtn onClick={() => bulkShipping("shipped",  "Enviado")}    disabled={bulkLoading} cls="border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100">Marcar enviado</BulkBtn>
+            <BulkBtn onClick={() => bulkShipping("to_pack", "Por embalar")} disabled={bulkLoading}>Por embalar</BulkBtn>
+            <BulkBtn onClick={() => bulkShipping("packed", "Por enviar")} disabled={bulkLoading} cls="border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100">Marcar embalado</BulkBtn>
+            <BulkBtn onClick={() => bulkShipping("shipped", "Enviado")} disabled={bulkLoading} cls="border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100">Marcar enviado</BulkBtn>
           </div>
           {bulkLoading && <span className="h-4 w-4 animate-spin rounded-full border-2 border-stone-300 border-t-stone-700" />}
           {bulkMsg && <span className="text-xs text-stone-500">{bulkMsg}</span>}
@@ -2412,12 +2486,12 @@ export function SalesManager() {
               : hasSaleDateFilter
                 ? `Nenhum pedido encontrado no período ${formatSaleDateRangeLabel(saleDateRange)}.`
                 : filter === "waiting"
-                ? "Nenhum pedido aguardando pagamento."
-                : filter === "paid"
-                  ? "Nenhum pedido pago encontrado."
-                  : filter === "to_pack"
-                    ? "Nenhum pedido por embalar."
-                    : "Nenhuma venda encontrada."}
+                  ? "Nenhum pedido aguardando pagamento."
+                  : filter === "paid"
+                    ? "Nenhum pedido pago encontrado."
+                    : filter === "to_pack"
+                      ? "Nenhum pedido por embalar."
+                      : "Nenhuma venda encontrada."}
           </p>
         </div>
       ) : (
@@ -2461,13 +2535,12 @@ export function SalesManager() {
                   return (
                     <Fragment key={order.id}>
                       <tr
-                        className={`border-b border-stone-100 transition-colors ${
-                          isSaleCancelled
+                        className={`border-b border-stone-100 transition-colors ${isSaleCancelled
                             ? "bg-stone-50"
                             : isDetailsOpen
                               ? "bg-stone-50/70"
                               : "hover:bg-stone-50/60"
-                        } ${isSelected ? "bg-stone-100/70" : ""}`}
+                          } ${isSelected ? "bg-stone-100/70" : ""}`}
                       >
                         <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
                           <input

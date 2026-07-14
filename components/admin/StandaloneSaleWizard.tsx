@@ -1618,16 +1618,16 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
               <div className="space-y-6">
                 <div className="space-y-2">
                   <CheckboxOption
-                    checked={paymentAlreadyPaid}
-                    onChange={() => setPaymentAlreadyPaid(true)}
-                    label="Já foi pago"
-                    description="Registrar pagamento manual"
-                  />
-                  <CheckboxOption
                     checked={!paymentAlreadyPaid}
                     onChange={() => setPaymentAlreadyPaid(false)}
                     label="Aguardando pagamento"
                     description="Gerar link PIX ou cartão"
+                  />
+                  <CheckboxOption
+                    checked={paymentAlreadyPaid}
+                    onChange={() => setPaymentAlreadyPaid(true)}
+                    label="Já foi pago"
+                    description="Registrar pagamento manual"
                   />
                 </div>
 
