@@ -6,6 +6,7 @@ import Link from "next/link";
 import { formatPrice } from "@/lib/format";
 import { installmentValueEqualParts } from "@/lib/product-pricing";
 import { FavoriteButton } from "@/components/favorites/FavoriteButton";
+import { colorSwatchStyle } from "@/lib/color-swatch";
 
 interface Color {
   id: string;
@@ -128,7 +129,7 @@ export function ProductCard({
                     ? "scale-110 ring-1 ring-stone-900 "
                     : "border-stone-200"
                 }`}
-                style={{ backgroundColor: color.hex ?? "#e7e5e4" }}
+                style={colorSwatchStyle(color.hex)}
               />
             ))}
             {colors.length > 6 && (

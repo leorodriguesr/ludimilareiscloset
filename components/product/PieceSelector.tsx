@@ -8,6 +8,7 @@ import {
   type PieceSelectionMap,
 } from "@/lib/product-piece-selection";
 import type { ProductPiece } from "@/lib/types";
+import { colorSwatchStyle } from "@/lib/color-swatch";
 
 interface PieceSelectorProps {
   pieces: ProductPiece[];
@@ -193,9 +194,7 @@ export function PieceSelector({
                           >
                             <span
                               className="block h-full w-full rounded-full border border-stone-200"
-                              style={{
-                                backgroundColor: color.hex || "#ccc",
-                              }}
+                              style={colorSwatchStyle(color.hex || "#ccc")}
                             />
                           </button>
                         );
@@ -314,9 +313,7 @@ export function PieceSelector({
                           >
                             <span
                               className="block h-full w-full rounded-full border border-stone-200"
-                              style={{
-                                backgroundColor: color.hex || "#ccc",
-                              }}
+                              style={colorSwatchStyle(color.hex || "#ccc")}
                             />
                           </button>
                         );

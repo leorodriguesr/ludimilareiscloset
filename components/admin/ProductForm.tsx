@@ -2,6 +2,11 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { Category, Section } from "@/lib/types";
+import {
+  MESCLADO_BW_HEX,
+  colorSwatchStyle,
+  normalizeHexColor,
+} from "@/lib/color-swatch";
 import { ImageUpload } from "./ImageUpload";
 
 const STOCK = { UNLIMITED: "UNLIMITED", LIMITED: "LIMITED" } as const;
@@ -127,6 +132,7 @@ const COMMON_SIZES = ["PP", "P", "M", "G", "GG", "XG"];
 const COMMON_COLORS = [
   { name: "Preto", hex: "#000000" },
   { name: "Branco", hex: "#FFFFFF" },
+  { name: "Mesclado (Preto/Branco)", hex: MESCLADO_BW_HEX },
   { name: "Vermelho", hex: "#DC2626" },
   { name: "Azul", hex: "#2563EB" },
   { name: "Rosa", hex: "#EC4899" },
@@ -136,6 +142,8 @@ const COMMON_COLORS = [
   { name: "Cinza", hex: "#6B7280" },
   { name: "Nude", hex: "#E8C4A0" },
 ];
+
+const COMMON_COLOR_NAMES = new Set(COMMON_COLORS.map((c) => c.name));
 
 export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -173,6 +181,12 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
   const [pieces, setPieces] = useState<PieceForm[]>(() =>
     mapInitialPieces(initialData?.pieces)
   );
+  const [customColorDraft, setCustomColorDraft] = useState<
+    Record<number, { name: string; hex: string }>
+  >({});
+  const [showCustomColorForm, setShowCustomColorForm] = useState<
+    Record<number, boolean>
+  >({});
 
   const isEditing = !!initialData?.id;
 
@@ -248,6 +262,45 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
         return reconcileVariants({ ...p, colors: nextColors });
       })
     );
+  }
+
+  function updateCustomColorDraft(
+    pieceIndex: number,
+    field: "name" | "hex",
+    value: string
+  ) {
+    setCustomColorDraft((prev) => ({
+      ...prev,
+      [pieceIndex]: {
+        name: prev[pieceIndex]?.name ?? "",
+        hex: prev[pieceIndex]?.hex ?? "",
+        [field]: value,
+      },
+    }));
+  }
+
+  function addCustomColor(pieceIndex: number) {
+    const draft = customColorDraft[pieceIndex] ?? { name: "", hex: "" };
+    const name = draft.name.trim();
+    const hex = normalizeHexColor(draft.hex);
+    if (!name || !hex) return;
+
+    setPieces((prev) =>
+      prev.map((p, i) => {
+        if (i !== pieceIndex) return p;
+        const withoutSame = p.colors.filter(
+          (c) => c.name.toLowerCase() !== name.toLowerCase()
+        );
+        return reconcileVariants({
+          ...p,
+          colors: [...withoutSame, { name, hex }],
+        });
+      })
+    );
+    setCustomColorDraft((prev) => ({
+      ...prev,
+      [pieceIndex]: { name: "", hex: "" },
+    }));
   }
 
   function updateVariantQty(
@@ -892,14 +945,121 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
                         }`}
                       >
                         <span
-                          className="inline-block h-3 w-3 rounded-full border border-stone-300"
-                          style={{ backgroundColor: color.hex }}
+                          className="inline-block h-3 w-3 shrink-0 rounded-full border border-stone-300"
+                          style={colorSwatchStyle(color.hex)}
                         />
                         {color.name}
                       </button>
                     );
                   })}
+                  {piece.colors
+                    .filter((c) => !COMMON_COLOR_NAMES.has(c.name))
+                    .map((color) => (
+                      <button
+                        key={color.name}
+                        type="button"
+                        onClick={() => toggleColor(pi, color.name, color.hex)}
+                        className="flex items-center gap-1.5 rounded-lg border border-stone-900 bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors"
+                      >
+                        <span
+                          className="inline-block h-3 w-3 shrink-0 rounded-full border border-stone-300"
+                          style={colorSwatchStyle(color.hex)}
+                        />
+                        {color.name}
+                      </button>
+                    ))}
                 </div>
+
+                {!showCustomColorForm[pi] ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setShowCustomColorForm((prev) => ({
+                        ...prev,
+                        [pi]: true,
+                      }))
+                    }
+                    className="mt-3 rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-semibold text-stone-700 shadow-sm transition-colors hover:border-stone-400 hover:bg-stone-50"
+                  >
+                    Adicionar mais cores
+                  </button>
+                ) : (
+                  <div className="mt-3 rounded-lg border border-dashed border-stone-300 bg-stone-50/80 p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-500">
+                        Adicionar outra cor
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setShowCustomColorForm((prev) => ({
+                            ...prev,
+                            [pi]: false,
+                          }))
+                        }
+                        className="text-[11px] font-medium text-stone-500 hover:text-stone-800"
+                      >
+                        Fechar
+                      </button>
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                      <label className="min-w-0 flex-1">
+                        <span className="mb-1 block text-[11px] font-medium text-stone-600">
+                          Nome
+                        </span>
+                        <input
+                          type="text"
+                          value={customColorDraft[pi]?.name ?? ""}
+                          onChange={(e) =>
+                            updateCustomColorDraft(pi, "name", e.target.value)
+                          }
+                          placeholder="Ex.: Azul Marinho"
+                          className={INPUT_CLASS}
+                        />
+                      </label>
+                      <label className="w-full sm:w-40">
+                        <span className="mb-1 block text-[11px] font-medium text-stone-600">
+                          Número da cor
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="inline-block h-9 w-9 shrink-0 rounded-full border border-stone-300 shadow-sm"
+                            style={colorSwatchStyle(
+                              normalizeHexColor(
+                                customColorDraft[pi]?.hex ?? ""
+                              ) ?? undefined
+                            )}
+                            title="Prévia da cor"
+                          />
+                          <input
+                            type="text"
+                            value={customColorDraft[pi]?.hex ?? ""}
+                            onChange={(e) =>
+                              updateCustomColorDraft(pi, "hex", e.target.value)
+                            }
+                            placeholder="#FFFFFF"
+                            className={INPUT_CLASS}
+                          />
+                        </div>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => addCustomColor(pi)}
+                        disabled={
+                          !(customColorDraft[pi]?.name ?? "").trim() ||
+                          !normalizeHexColor(customColorDraft[pi]?.hex ?? "")
+                        }
+                        className="rounded-lg border border-stone-900 bg-stone-900 px-3 py-2.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Adicionar
+                      </button>
+                    </div>
+                    <p className="mt-1.5 text-[11px] text-stone-500">
+                      Use o código hexadecimal (ex.: #FF5733). A bolinha atualiza
+                      ao digitar.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {piece.colors.length > 0 && piece.sizes.length > 0 && (
@@ -925,7 +1085,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
                             <span className="inline-flex flex-col items-center gap-1">
                               <span
                                 className="h-3 w-3 rounded-full border border-stone-200"
-                                style={{ backgroundColor: c.hex }}
+                                style={colorSwatchStyle(c.hex)}
                               />
                               {c.name}
                             </span>
