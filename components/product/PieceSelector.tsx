@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { emptyPieceSelections } from "@/lib/product-piece-selection";
 import {
+  emptyPieceSelections,
   hasVariantMatrix,
+  pieceShowsColorPicker,
   qtyForCombination,
   type PieceSelectionMap,
 } from "@/lib/product-piece-selection";
@@ -45,21 +46,51 @@ export function PieceSelector({
     setInternal(emptyPieceSelections(pieces));
   }, [pieceKey, isControlled, pieces]);
 
+  useEffect(() => {
+    for (const piece of pieces) {
+      if (pieceShowsColorPicker(piece) && piece.colors.length === 1) {
+        window.dispatchEvent(
+          new CustomEvent("color:selected", {
+            detail: piece.colors[0]!.name,
+          })
+        );
+        break;
+      }
+    }
+  }, [pieceKey, pieces]);
+
   const multiplePieces = pieces.length > 1;
 
   function selectColor(pieceId: string, colorName: string) {
     setSelections((prev) => ({
       ...prev,
-      [pieceId]: { ...prev[pieceId]!, color: colorName },
+      [pieceId]: {
+        ...(prev[pieceId] ?? { color: null, size: null }),
+        color: colorName,
+      },
     }));
     window.dispatchEvent(new CustomEvent("color:selected", { detail: colorName }));
   }
 
   function selectSize(pieceId: string, sizeName: string) {
-    setSelections((prev) => ({
-      ...prev,
-      [pieceId]: { ...prev[pieceId]!, size: sizeName },
-    }));
+    const piece = pieces.find((p) => p.id === pieceId);
+    setSelections((prev) => {
+      const current = prev[pieceId] ?? { color: null, size: null };
+      let color = current.color;
+      // Tamanho sem estoque na cor atual → limpa a cor para poder escolher outra
+      if (
+        piece &&
+        hasVariantMatrix(piece) &&
+        color != null &&
+        qtyForCombination(piece, color, sizeName) === 0
+      ) {
+        color = null;
+      }
+      return {
+        ...prev,
+        [pieceId]: { ...current, size: sizeName, color },
+      };
+    });
   }
 
   if (pieces.length === 0) return null;
@@ -111,20 +142,17 @@ export function PieceSelector({
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {piece.sizes.map((size) => {
-                        const noStockEveryColor =
+                        // Só bloqueia se não houver estoque em nenhuma cor
+                        const disabled =
                           matrix &&
                           piece.colors.every(
                             (c) =>
                               qtyForCombination(piece, c.name, size.name) === 0
                           );
-                        const noStockForSelectedColor =
+                        const conflictsSelectedColor =
                           matrix &&
                           sel?.color != null &&
                           qtyForCombination(piece, sel.color, size.name) === 0;
-
-                        const disabled =
-                          matrix &&
-                          (noStockEveryColor || noStockForSelectedColor);
 
                         return (
                           <button
@@ -135,7 +163,9 @@ export function PieceSelector({
                             className={`min-w-[2.25rem] shrink-0 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-30 sm:min-w-[2.5rem] sm:px-3 sm:py-2 sm:text-sm ${
                               sel?.size === size.name
                                 ? "border-2 border-black bg-white text-stone-900"
-                                : "border border-stone-300 bg-white text-stone-700 hover:border-stone-500"
+                                : conflictsSelectedColor
+                                  ? "border border-stone-300 bg-white text-stone-400 hover:border-stone-500 hover:text-stone-700"
+                                  : "border border-stone-300 bg-white text-stone-700 hover:border-stone-500"
                             }`}
                           >
                             {size.name}
@@ -146,7 +176,7 @@ export function PieceSelector({
                   </div>
                 )}
 
-                {piece.colors.length > 0 && (
+                {pieceShowsColorPicker(piece) && (
                   <div>
                     <p className="mb-2 text-xs text-stone-500">
                       <span className="font-medium text-stone-600">Cor: </span>
@@ -160,7 +190,7 @@ export function PieceSelector({
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {piece.colors.map((color) => {
-                        const noStockEverySize =
+                        const noStockAnySize =
                           matrix &&
                           piece.sizes.every(
                             (s) =>
@@ -174,10 +204,8 @@ export function PieceSelector({
                           matrix &&
                           sel?.size != null &&
                           qtyForCombination(piece, color.name, sel.size) === 0;
-
                         const disabled =
-                          matrix &&
-                          (noStockEverySize || noStockForSelectedSize);
+                          noStockAnySize || noStockForSelectedSize;
 
                         return (
                           <button
@@ -230,20 +258,16 @@ export function PieceSelector({
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {piece.sizes.map((size) => {
-                        const noStockEveryColor =
+                        const disabled =
                           matrix &&
                           piece.colors.every(
                             (c) =>
                               qtyForCombination(piece, c.name, size.name) === 0
                           );
-                        const noStockForSelectedColor =
+                        const conflictsSelectedColor =
                           matrix &&
                           sel?.color != null &&
                           qtyForCombination(piece, sel.color, size.name) === 0;
-
-                        const disabled =
-                          matrix &&
-                          (noStockEveryColor || noStockForSelectedColor);
 
                         return (
                           <button
@@ -254,7 +278,9 @@ export function PieceSelector({
                             className={`min-w-[2.25rem] shrink-0 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-30 sm:min-w-[2.5rem] sm:px-3 sm:py-2 sm:text-sm ${
                               sel?.size === size.name
                                 ? "border-2 border-stone-900 bg-white text-stone-900"
-                                : "border border-stone-300 bg-white text-stone-700 hover:border-stone-500"
+                                : conflictsSelectedColor
+                                  ? "border border-stone-300 bg-white text-stone-400 hover:border-stone-500 hover:text-stone-700"
+                                  : "border border-stone-300 bg-white text-stone-700 hover:border-stone-500"
                             }`}
                           >
                             {size.name}
@@ -265,7 +291,7 @@ export function PieceSelector({
                   </div>
                 )}
 
-                {piece.colors.length > 0 && (
+                {pieceShowsColorPicker(piece) && (
                   <div>
                     <p className="mb-2 text-xs text-stone-500">
                       <span className="font-medium text-stone-600">Cor: </span>
@@ -279,7 +305,7 @@ export function PieceSelector({
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {piece.colors.map((color) => {
-                        const noStockEverySize =
+                        const noStockAnySize =
                           matrix &&
                           piece.sizes.every(
                             (s) =>
@@ -293,10 +319,8 @@ export function PieceSelector({
                           matrix &&
                           sel?.size != null &&
                           qtyForCombination(piece, color.name, sel.size) === 0;
-
                         const disabled =
-                          matrix &&
-                          (noStockEverySize || noStockForSelectedSize);
+                          noStockAnySize || noStockForSelectedSize;
 
                         return (
                           <button

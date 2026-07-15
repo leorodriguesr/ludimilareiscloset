@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useState } from "react";
 import { formatPrice } from "@/lib/format";
+import { isSizeOnlyColorName } from "@/lib/piece-size-only-color";
 import { installmentValueEqualParts } from "@/lib/product-pricing";
 import type { Product } from "@/lib/types";
 import {
@@ -160,7 +161,10 @@ function countProductVariants(product: Product): number {
 function countProductColors(product: Product): number {
   const names = new Set<string>();
   for (const piece of product.pieces) {
-    for (const color of piece.colors) names.add(color.name);
+    for (const color of piece.colors) {
+      if (isSizeOnlyColorName(color.name)) continue;
+      names.add(color.name);
+    }
   }
   return names.size;
 }

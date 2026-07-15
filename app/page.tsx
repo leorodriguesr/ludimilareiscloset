@@ -5,6 +5,7 @@ import { TrustBar } from "@/components/TrustBar";
 import { ProductCard } from "@/components/ProductCard";
 import { CategoryFilter } from "@/components/CategoryFilter";
 import { productListInclude } from "@/lib/product-include";
+import { isSizeOnlyColorName } from "@/lib/piece-size-only-color";
 
 export const dynamic = "force-dynamic";
 
@@ -138,6 +139,7 @@ export default async function Home({ searchParams }: HomeProps) {
 function uniqueColors(pieces: { colors: { id: string; name: string; hex: string | null }[] }[]) {
   const seen = new Set<string>();
   return pieces.flatMap((p) => p.colors).filter((c) => {
+    if (isSizeOnlyColorName(c.name)) return false;
     const key = c.hex ?? c.name;
     if (seen.has(key)) return false;
     seen.add(key);

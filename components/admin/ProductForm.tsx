@@ -7,25 +7,27 @@ import {
   colorSwatchStyle,
   normalizeHexColor,
 } from "@/lib/color-swatch";
+import {
+  SIZE_ONLY_COLOR_HEX,
+  SIZE_ONLY_COLOR_NAME,
+  isSizeOnlyColorName,
+} from "@/lib/piece-size-only-color";
 import { ImageUpload } from "./ImageUpload";
 
 const STOCK = { UNLIMITED: "UNLIMITED", LIMITED: "LIMITED" } as const;
 type StockTypeValue = (typeof STOCK)[keyof typeof STOCK];
 
-/** Estoque do produto = soma das quantidades da matriz cor×tamanho (quando existir). */
+/** Estoque do produto = soma das quantidades por tamanho (e cor, se houver). */
 function computeProductStockFromPieces(
   namedPieces: PieceForm[]
 ): { stockType: StockTypeValue; stockQuantity: number | null } {
   let sum = 0;
   let hasVariantMatrix = false;
   for (const p of namedPieces) {
-    if (
-      p.colors.length > 0 &&
-      p.sizes.length > 0 &&
-      (p.variants?.length ?? 0) > 0
-    ) {
+    const reconciled = reconcileVariants(p);
+    if (p.sizes.length > 0 && reconciled.variants.length > 0) {
       hasVariantMatrix = true;
-      for (const v of p.variants) {
+      for (const v of reconciled.variants) {
         sum += Math.max(
           0,
           Math.floor(Number.parseInt(String(v.quantity).trim(), 10) || 0)
@@ -76,19 +78,33 @@ interface ProductData {
 
 function reconcileVariants(piece: PieceForm): PieceForm {
   const prev = piece.variants;
-  if (piece.colors.length === 0 || piece.sizes.length === 0) {
+  if (piece.sizes.length === 0) {
     return { ...piece, variants: [] };
   }
+
+  const colorsForMatrix =
+    piece.colors.length > 0
+      ? piece.colors
+      : [{ name: SIZE_ONLY_COLOR_NAME, hex: SIZE_ONLY_COLOR_HEX }];
+
   const next: PieceVariantForm[] = [];
-  for (const c of piece.colors) {
+  for (const c of colorsForMatrix) {
     for (const s of piece.sizes) {
       const found = prev.find(
         (v) => v.colorName === c.name && v.sizeName === s.name
       );
+      const fromSizeOnly =
+        !found &&
+        piece.colors.length > 0
+          ? prev.find(
+              (v) =>
+                isSizeOnlyColorName(v.colorName) && v.sizeName === s.name
+            )
+          : undefined;
       next.push({
         colorName: c.name,
         sizeName: s.name,
-        quantity: found?.quantity ?? "0",
+        quantity: found?.quantity ?? fromSizeOnly?.quantity ?? "0",
       });
     }
   }
@@ -99,10 +115,12 @@ function mapInitialPieces(
   raw: ProductData["pieces"] | undefined
 ): PieceForm[] {
   if (!raw?.length) return [];
-  return raw.map((p) =>
-    reconcileVariants({
+  return raw.map((p) => {
+    const sizeOnly =
+      p.colors.length === 1 && isSizeOnlyColorName(p.colors[0]?.name);
+    return reconcileVariants({
       name: p.name,
-      colors: p.colors.map((c) => ({ ...c })),
+      colors: sizeOnly ? [] : p.colors.map((c) => ({ ...c })),
       sizes: p.sizes.map((s) => ({ ...s })),
       variants:
         p.variants?.map((v) => ({
@@ -110,8 +128,31 @@ function mapInitialPieces(
           sizeName: v.sizeName,
           quantity: String(v.quantity),
         })) ?? [],
-    })
-  );
+    });
+  });
+}
+
+function serializePieceForApi(piece: PieceForm) {
+  const reconciled = reconcileVariants(piece);
+  const colors =
+    piece.colors.length > 0
+      ? piece.colors
+      : piece.sizes.length > 0
+        ? [{ name: SIZE_ONLY_COLOR_NAME, hex: SIZE_ONLY_COLOR_HEX }]
+        : [];
+  return {
+    name: piece.name.trim(),
+    colors,
+    sizes: piece.sizes,
+    variants: reconciled.variants.map((v) => ({
+      colorName: v.colorName,
+      sizeName: v.sizeName,
+      quantity: Math.max(
+        0,
+        Math.floor(Number.parseInt(String(v.quantity).trim(), 10) || 0)
+      ),
+    })),
+  };
 }
 
 interface ProductFormProps {
@@ -436,21 +477,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
         widthCm: form.widthCm.trim() === "" ? null : form.widthCm,
         heightCm: form.heightCm.trim() === "" ? null : form.heightCm,
         images,
-        pieces: namedPieces.map((p) => ({
-            name: p.name.trim(),
-            colors: p.colors,
-            sizes: p.sizes,
-            variants: (p.variants ?? []).map((v) => ({
-              colorName: v.colorName,
-              sizeName: v.sizeName,
-              quantity: Math.max(
-                0,
-                Math.floor(
-                  Number.parseInt(String(v.quantity).trim(), 10) || 0
-                )
-              ),
-            })),
-          })),
+        pieces: namedPieces.map(serializePieceForApi),
         categoryIds,
         sectionIds,
       };
@@ -1061,6 +1088,70 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
                   </div>
                 )}
               </div>
+
+              {piece.sizes.length > 0 && piece.colors.length === 0 && (
+                <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white shadow-sm">
+                  <p className="border-b border-stone-100 bg-stone-50 px-3 py-2.5 text-xs font-semibold text-stone-800">
+                    Quantidade em estoque por tamanho
+                  </p>
+                  <table className="w-full min-w-[200px] border-collapse text-center text-xs">
+                    <thead>
+                      <tr>
+                        <th
+                          scope="col"
+                          className="border-b border-r border-stone-100 bg-stone-50/90 p-2 text-left font-medium text-stone-500"
+                        >
+                          Tamanho
+                        </th>
+                        <th
+                          scope="col"
+                          className="border-b border-stone-100 p-2 font-medium text-stone-800"
+                        >
+                          Qtd.
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {piece.sizes.map((s) => {
+                        const cell = piece.variants.find(
+                          (v) =>
+                            isSizeOnlyColorName(v.colorName) &&
+                            v.sizeName === s.name
+                        );
+                        return (
+                          <tr key={s.name}>
+                            <th
+                              scope="row"
+                              className="border-b border-r border-stone-100 bg-stone-50/80 p-2 text-left font-medium text-stone-800"
+                            >
+                              {s.name}
+                            </th>
+                            <td className="border-b border-stone-50 p-1.5">
+                              <input
+                                type="number"
+                                min={0}
+                                step={1}
+                                inputMode="numeric"
+                                aria-label={`Quantidade ${piece.name || "peça"} ${s.name}`}
+                                className="w-full max-w-[4.5rem] rounded-md border border-stone-300 bg-white px-1 py-1.5 text-center text-sm font-medium tabular-nums text-stone-900 focus:border-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-900/10"
+                                value={cell?.quantity ?? "0"}
+                                onChange={(e) =>
+                                  updateVariantQty(
+                                    pi,
+                                    SIZE_ONLY_COLOR_NAME,
+                                    s.name,
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               {piece.colors.length > 0 && piece.sizes.length > 0 && (
                 <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white shadow-sm">

@@ -1,4 +1,5 @@
 import type { CartPieceSelection } from "@/lib/cart/types";
+import { isSizeOnlyPiece } from "@/lib/piece-size-only-color";
 import type { ProductPiece } from "@/lib/types";
 
 export function qtyForCombination(
@@ -21,10 +22,18 @@ export type PieceSelectionMap = Record<
   { color: string | null; size: string | null }
 >;
 
+/** Cor já selecionada quando há só uma opção (inclui estoque só por tamanho). */
 export function emptyPieceSelections(pieces: ProductPiece[]): PieceSelectionMap {
   return Object.fromEntries(
-    pieces.map((p) => [p.id, { color: null, size: null }])
+    pieces.map((p) => {
+      const color = p.colors.length === 1 ? p.colors[0]!.name : null;
+      return [p.id, { color, size: null }];
+    })
   );
+}
+
+export function pieceShowsColorPicker(piece: ProductPiece): boolean {
+  return piece.colors.length > 0 && !isSizeOnlyPiece(piece);
 }
 
 export function buildCartPieceSelections(
@@ -47,7 +56,9 @@ export function pieceSelectionsAreComplete(
     const s = selections[p.id];
     if (!s) return false;
     if (p.sizes.length > 0 && !s.size) return false;
-    if (p.colors.length > 0 && !s.color) return false;
+    if (pieceShowsColorPicker(p) && !s.color) return false;
+    // Estoque só por tamanho: cor interna "Único" pode vir pré-selecionada
+    if (isSizeOnlyPiece(p) && !s.color) return false;
     if (
       hasVariantMatrix(p) &&
       s.color &&
