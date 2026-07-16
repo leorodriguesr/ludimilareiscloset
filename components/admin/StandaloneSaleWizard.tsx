@@ -471,10 +471,6 @@ function QuickSaleProductForm({
     >
       <div>
         <p className="text-sm font-semibold text-stone-900">Novo produto rápido</p>
-        <p className="mt-0.5 text-xs text-stone-500">
-          Cadastro mínimo para a venda — sem foto. Tamanho e cor ficam disponíveis
-          nas próximas vendas. Parcelas no cartão: {QUICK_PRODUCT_INSTALLMENTS}×.
-        </p>
       </div>
 
       {formError && (
