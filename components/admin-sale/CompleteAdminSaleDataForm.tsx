@@ -264,9 +264,10 @@ export function CompleteAdminSaleDataForm({ token }: Props) {
                 </p>
               </div>
               <div>
-                <FieldLabel optional>E-mail</FieldLabel>
+                <FieldLabel>E-mail</FieldLabel>
                 <TextInput
                   type="email"
+                  required
                   autoComplete="email"
                   value={form.email}
                   onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}

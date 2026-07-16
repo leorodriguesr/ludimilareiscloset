@@ -51,14 +51,14 @@ export function customerNamePhoneValidationError(
   return null;
 }
 
-/** Contato + endereço (transportadora). E-mail e complemento são opcionais. */
+/** Contato + endereço (transportadora). Complemento é opcional; e-mail é obrigatório. */
 export function isCustomerContactAddressComplete(
   data: CustomerContactAddressFields
 ): boolean {
   const email = data.email.trim();
   if (!data.name.trim()) return false;
   if (data.name.trim().length > CUSTOMER_NAME_MAX_LENGTH) return false;
-  if (email && (!email.includes("@") || !email.includes("."))) return false;
+  if (!email || !email.includes("@") || !email.includes(".")) return false;
   if (digits(data.phone).length < 10) return false;
   if (!isValidCpf(data.cpf)) return false;
   if (digits(data.destinationCep).length !== 8) return false;
@@ -80,7 +80,8 @@ export function customerContactAddressValidationError(
     return `Nome: no máximo ${CUSTOMER_NAME_MAX_LENGTH} caracteres.`;
   }
   const email = data.email.trim();
-  if (email && (!email.includes("@") || !email.includes("."))) {
+  if (!email) return "Informe o e-mail do cliente.";
+  if (!email.includes("@") || !email.includes(".")) {
     return "Informe um e-mail válido.";
   }
   if (digits(data.phone).length < 10) {

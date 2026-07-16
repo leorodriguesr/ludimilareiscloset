@@ -31,6 +31,7 @@ import { initiateOrderPayment } from "@/lib/order/payment/initiate-payment";
 import { ORDER_STATUS, type PaymentMethod } from "@/lib/orders/constants";
 import { reserveStockForOrderLines } from "@/lib/orders/stock/reservation";
 import { prisma } from "@/lib/prisma";
+import { checkFreeShipping } from "@/lib/shipping/free-shipping";
 import { quoteShippingForCartLines } from "@/lib/shipping/quote-cart";
 import {
   parseSuperfreteServiceId,
@@ -99,6 +100,22 @@ function serializePieceSelections(
   return JSON.stringify(selections);
 }
 
+async function loadFreeShippingSettings() {
+  const settings = await prisma.storeSettings.findUnique({
+    where: { id: "default" },
+    select: {
+      freeShippingEnabled: true,
+      freeShippingType: true,
+      freeShippingMinValue: true,
+    },
+  });
+  return {
+    freeShippingEnabled: settings?.freeShippingEnabled ?? false,
+    freeShippingType: settings?.freeShippingType ?? "minimum_value",
+    freeShippingMinValue: settings?.freeShippingMinValue ?? 0,
+  };
+}
+
 async function resolveShipping(input: CreateAdminSaleInput) {
   const strategy = getFulfillmentStrategy(input.fulfillmentType);
 
@@ -122,10 +139,15 @@ async function resolveShipping(input: CreateAdminSaleInput) {
       throw new Error("Opção de frete inválida ou expirada.");
     }
 
+    const quotedPrice = Math.round(chosen.price * 100) / 100;
+    const cheapest = [...quote.options].sort((a, b) => a.price - b.price)[0];
+    const isCheapestOption = cheapest?.id === chosen.id;
+
     return {
-      shippingAmount: Math.round(chosen.price * 100) / 100,
+      shippingAmount: quotedPrice,
+      isCheapestCarrierOption: isCheapestOption,
       destinationCep: destCep,
-      shippingQuotedPrice: Math.round(chosen.price * 100) / 100,
+      shippingQuotedPrice: quotedPrice,
       shippingDeliveryDaysMin:
         chosen.deliveryDaysMin > 0 ? Math.floor(chosen.deliveryDaysMin) : null,
       shippingDeliveryDaysMax:
@@ -156,6 +178,7 @@ async function resolveShipping(input: CreateAdminSaleInput) {
 
   return {
     shippingAmount: Math.round(arrangedAmount * 100) / 100,
+    isCheapestCarrierOption: false,
     destinationCep: input.address
       ? normalizePostalCode(input.address.destinationCep)
       : null,
@@ -189,12 +212,45 @@ export async function createAdminSale(
     };
   }
 
+  let merchandiseSubtotal: number;
+  try {
+    const basePricing = await resolveAdminSalePricing({
+      lines: input.lines,
+      paymentMethod: input.paymentMethod,
+      shippingAmount: 0,
+      orderDiscount: input.orderDiscount,
+    });
+    merchandiseSubtotal = basePricing.subtotalAfterItemDiscounts;
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Erro ao calcular totais.",
+    };
+  }
+
+  const freeShippingSettings = await loadFreeShippingSettings();
+  const qualifiesForFreeShipping = checkFreeShipping(
+    freeShippingSettings,
+    merchandiseSubtotal
+  ).isFree;
+
+  let chargedShippingAmount = shipping.shippingAmount;
+  if (qualifiesForFreeShipping) {
+    if (input.fulfillmentType === FulfillmentType.CARRIER) {
+      if (shipping.isCheapestCarrierOption) {
+        chargedShippingAmount = 0;
+      }
+    } else if (input.arrangedMode === "store_delivery") {
+      chargedShippingAmount = 0;
+    }
+  }
+
   let pricing;
   try {
     pricing = await resolveAdminSalePricing({
       lines: input.lines,
       paymentMethod: input.paymentMethod,
-      shippingAmount: shipping.shippingAmount,
+      shippingAmount: chargedShippingAmount,
       orderDiscount: input.orderDiscount,
     });
   } catch (e) {

@@ -20,6 +20,7 @@ import {
 } from "@/lib/product-piece-selection";
 import type { Product } from "@/lib/types";
 import type { NormalizedShippingOption } from "@/lib/shipping/types";
+import { checkFreeShipping } from "@/lib/shipping/free-shipping";
 import { parseDiscountInputValue } from "@/lib/admin-sale/parse-discount-value";
 import {
   ADDRESS_COMPLEMENT_MAX_LENGTH,
@@ -827,10 +828,12 @@ function OrderSummary({
   pricing,
   paymentMethod,
   maxInstallments,
+  shippingLabel,
 }: {
   pricing: { pix: PricingPreview | null; card: PricingPreview | null };
   paymentMethod: "pix" | "card" | null;
   maxInstallments: number;
+  shippingLabel: string;
 }) {
   // Breakdown usa cartão como base até o método ser escolhido (preço de lista).
   const active = paymentMethod ? pricing[paymentMethod] : pricing.card ?? pricing.pix;
@@ -865,7 +868,7 @@ function OrderSummary({
         )}
         <div className="flex justify-between text-stone-600">
           <dt>Entrega / frete</dt>
-          <dd className="tabular-nums">{formatPrice(active.shippingAmount)}</dd>
+          <dd className="tabular-nums">{shippingLabel}</dd>
         </div>
         {active.orderDiscountAmount > 0 && (
           <div className="flex justify-between text-red-600">
@@ -1006,18 +1009,72 @@ export function StandaloneSaleWizard({
 
   const storeDeliveryFee = Math.max(0, Number(settings?.storeDeliveryFee ?? 0) || 0);
 
+  const merchandiseTotal = useMemo(() => {
+    const preview = paymentMethod
+      ? pricingByMethod[paymentMethod]
+      : pricingByMethod.card ?? pricingByMethod.pix;
+    if (preview) return preview.subtotalAfterItemDiscounts;
+    return lines.reduce((sum, l) => sum + l.product.price * l.quantity, 0);
+  }, [paymentMethod, pricingByMethod, lines]);
+
+  const freeShippingResult = settings
+    ? checkFreeShipping(settings, merchandiseTotal)
+    : null;
+  const isFreeShipping = freeShippingResult?.isFree ?? false;
+
+  const cheapestShippingId = useMemo(() => {
+    if (!shippingOptions.length) return null;
+    return [...shippingOptions].sort((a, b) => a.price - b.price)[0]?.id ?? null;
+  }, [shippingOptions]);
+
+  const displayShippingOptions = useMemo(() => {
+    if (!isFreeShipping) return shippingOptions;
+    return [...shippingOptions].sort((a, b) => a.price - b.price);
+  }, [shippingOptions, isFreeShipping]);
+
   const shippingAmount = useMemo(() => {
     if (fulfillmentType === "ARRANGED") {
-      return arrangedMode === "store_delivery" ? storeDeliveryFee : 0;
+      if (arrangedMode === "store_delivery") {
+        return isFreeShipping ? 0 : storeDeliveryFee;
+      }
+      return 0;
     }
     const opt = shippingOptions.find((o) => o.id === selectedShippingId);
-    return opt?.price ?? 0;
+    if (!opt) return 0;
+    if (isFreeShipping && opt.id === cheapestShippingId) return 0;
+    return opt.price;
   }, [
     fulfillmentType,
     arrangedMode,
     storeDeliveryFee,
     shippingOptions,
     selectedShippingId,
+    isFreeShipping,
+    cheapestShippingId,
+  ]);
+
+  const shippingLabel = useMemo(() => {
+    if (fulfillmentType === "ARRANGED") {
+      if (!arrangedMode) return "A definir";
+      if (arrangedMode === "store_delivery") {
+        if (isFreeShipping || storeDeliveryFee <= 0) return "Grátis";
+        return formatPrice(storeDeliveryFee);
+      }
+      if (arrangedMode === "pickup") return "Grátis";
+      return "A combinar";
+    }
+    const opt = shippingOptions.find((o) => o.id === selectedShippingId);
+    if (!opt) return "A calcular";
+    if (isFreeShipping && opt.id === cheapestShippingId) return "Grátis";
+    return formatPrice(opt.price);
+  }, [
+    fulfillmentType,
+    arrangedMode,
+    storeDeliveryFee,
+    shippingOptions,
+    selectedShippingId,
+    isFreeShipping,
+    cheapestShippingId,
   ]);
 
   const activePricing = paymentMethod
@@ -1149,8 +1206,13 @@ export function StandaloneSaleWizard({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Erro ao cotar frete.");
-      setShippingOptions(data.options ?? []);
-      setSelectedShippingId(data.options?.[0]?.id ?? "");
+      const options = (data.options ?? []) as NormalizedShippingOption[];
+      setShippingOptions(options);
+      const preferred =
+        isFreeShipping && options.length
+          ? [...options].sort((a, b) => a.price - b.price)[0]
+          : options[0];
+      setSelectedShippingId(preferred?.id ?? "");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao cotar frete.");
     } finally {
@@ -1651,6 +1713,53 @@ export function StandaloneSaleWizard({
 
                 {fulfillmentType === "CARRIER" ? (
                   <div className="space-y-4 rounded-xl border border-stone-200 p-5">
+                    {settings?.freeShippingEnabled && freeShippingResult ? (
+                      isFreeShipping ? (
+                        <div className="flex items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2.5">
+                          <svg
+                            className="h-4 w-4 shrink-0 text-emerald-600"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M5 13l4 4L19 7"
+                            />
+                          </svg>
+                          <p className="text-xs font-medium text-emerald-700">
+                            Frete grátis conquistado!
+                          </p>
+                        </div>
+                      ) : freeShippingResult.missingAmount != null &&
+                        freeShippingResult.minValue != null ? (
+                        <div className="space-y-1.5">
+                          <p className="text-xs text-stone-600">
+                            Falta{" "}
+                            <span className="font-semibold text-stone-900">
+                              {formatPrice(freeShippingResult.missingAmount)}
+                            </span>{" "}
+                            para{" "}
+                            <span className="font-semibold text-stone-900">
+                              frete grátis
+                            </span>
+                          </p>
+                          <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-200">
+                            <div
+                              className="h-full rounded-full bg-stone-900 transition-all duration-500"
+                              style={{
+                                width: `${Math.min(
+                                  100,
+                                  (merchandiseTotal / freeShippingResult.minValue) * 100
+                                )}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      ) : null
+                    ) : null}
                     <div>
                       <FieldLabel>CEP de destino</FieldLabel>
                       <div className="flex gap-2">
@@ -1669,10 +1778,12 @@ export function StandaloneSaleWizard({
                         </button>
                       </div>
                     </div>
-                    {shippingOptions.length > 0 && (
+                    {displayShippingOptions.length > 0 && (
                       <div className="space-y-2">
                         <FieldLabel>Opção de frete</FieldLabel>
-                        {shippingOptions.map((opt) => (
+                        {displayShippingOptions.map((opt, idx) => {
+                          const optionIsFree = isFreeShipping && idx === 0;
+                          return (
                           <label
                             key={opt.id}
                             className={`flex cursor-pointer items-center gap-3 rounded-xl border p-4 transition-colors ${
@@ -1698,11 +1809,27 @@ export function StandaloneSaleWizard({
                                 </p>
                               )}
                             </div>
-                            <span className="text-sm font-semibold tabular-nums text-stone-900">
-                              {formatPrice(opt.price)}
-                            </span>
+                            <div className="shrink-0 text-right">
+                              {optionIsFree ? (
+                                <>
+                                  <p className="text-sm font-semibold text-emerald-600">
+                                    Grátis
+                                  </p>
+                                  {opt.price > 0 && (
+                                    <p className="text-xs tabular-nums text-stone-400 line-through">
+                                      {formatPrice(opt.price)}
+                                    </p>
+                                  )}
+                                </>
+                              ) : (
+                                <span className="text-sm font-semibold tabular-nums text-stone-900">
+                                  {formatPrice(opt.price)}
+                                </span>
+                              )}
+                            </div>
                           </label>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -1715,9 +1842,9 @@ export function StandaloneSaleWizard({
                         onChange={() => setArrangedMode("store_delivery")}
                         label="Entregador da loja"
                         description={
-                          storeDeliveryFee > 0
-                            ? `Frete: ${formatPrice(storeDeliveryFee)}`
-                            : "Frete grátis"
+                          isFreeShipping || storeDeliveryFee <= 0
+                            ? "Frete grátis"
+                            : `Frete: ${formatPrice(storeDeliveryFee)}`
                         }
                       />
                       <CheckboxOption
@@ -1851,8 +1978,15 @@ export function StandaloneSaleWizard({
                           </p>
                         </div>
                         <div>
-                          <FieldLabel optional>E-mail</FieldLabel>
-                          <TextInput type="email" value={contact.email} onChange={(e) => setContact((c) => ({ ...c, email: e.target.value }))} />
+                          <FieldLabel>E-mail</FieldLabel>
+                          <TextInput
+                            type="email"
+                            required
+                            value={contact.email}
+                            onChange={(e) =>
+                              setContact((c) => ({ ...c, email: e.target.value }))
+                            }
+                          />
                         </div>
                         <div>
                           <FieldLabel>Telefone</FieldLabel>
@@ -2060,6 +2194,7 @@ export function StandaloneSaleWizard({
               pricing={pricingByMethod}
               paymentMethod={paymentMethod}
               maxInstallments={maxInstallments}
+              shippingLabel={shippingLabel}
             />
           </aside>
         </div>

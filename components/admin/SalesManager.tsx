@@ -1653,7 +1653,11 @@ function OrderDetailsBody({
       return;
     }
     const email = customerForm.email.trim();
-    if (email && (!email.includes("@") || !email.includes("."))) {
+    if (!email) {
+      setCustomerError("Informe o e-mail do cliente.");
+      return;
+    }
+    if (!email.includes("@") || !email.includes(".")) {
       setCustomerError("Informe um e-mail válido.");
       return;
     }
@@ -1666,7 +1670,7 @@ function OrderDetailsBody({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           recipientName: customerForm.recipientName,
-          email: email || null,
+          email,
           phone: customerForm.phone,
           cpf: customerForm.cpf,
           destinationCep: customerForm.destinationCep,
@@ -1784,9 +1788,10 @@ function OrderDetailsBody({
                   Máx. {CUSTOMER_NAME_MAX_LENGTH} caracteres
                 </p>
               </EditField>
-              <EditField label="E-mail" optional>
+              <EditField label="E-mail">
                 <EditInput
                   type="email"
+                  required
                   value={customerForm.email}
                   onChange={(e) => setCustomerForm((f) => ({ ...f, email: e.target.value }))}
                 />

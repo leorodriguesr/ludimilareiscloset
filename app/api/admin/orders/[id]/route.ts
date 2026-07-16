@@ -122,14 +122,16 @@ export async function PATCH(
       return NextResponse.json({ error: "E-mail inválido." }, { status: 400 });
     }
     const email = typeof b.email === "string" ? b.email.trim().toLowerCase() : "";
-    if (email) {
-      if (!email.includes("@") || !email.includes(".")) {
-        return NextResponse.json({ error: "Informe um e-mail válido." }, { status: 400 });
-      }
-      updates.email = email;
-    } else {
-      updates.email = null;
+    if (!email) {
+      return NextResponse.json(
+        { error: "Informe o e-mail do cliente." },
+        { status: 400 }
+      );
     }
+    if (!email.includes("@") || !email.includes(".")) {
+      return NextResponse.json({ error: "Informe um e-mail válido." }, { status: 400 });
+    }
+    updates.email = email;
   }
 
   const phone = asOptionalString(b.phone);
