@@ -37,6 +37,28 @@ import {
 } from "@/lib/admin-sale/customer-form-input";
 import { cpfValidationError } from "@/lib/validation/cpf";
 import { useStoreSettings } from "@/lib/hooks/use-store-settings";
+import { MESCLADO_BW_HEX } from "@/lib/color-swatch";
+import {
+  SIZE_ONLY_COLOR_HEX,
+  SIZE_ONLY_COLOR_NAME,
+} from "@/lib/piece-size-only-color";
+
+const QUICK_PRODUCT_INSTALLMENTS = 6;
+const QUICK_VARIANT_STOCK = 999;
+const QUICK_SIZES = ["PP", "P", "M", "G", "GG", "XG"] as const;
+const QUICK_COLORS = [
+  { name: "Preto", hex: "#000000" },
+  { name: "Branco", hex: "#FFFFFF" },
+  { name: "Mesclado (Preto/Branco)", hex: MESCLADO_BW_HEX },
+  { name: "Vermelho", hex: "#DC2626" },
+  { name: "Azul", hex: "#2563EB" },
+  { name: "Rosa", hex: "#EC4899" },
+  { name: "Bege", hex: "#D4A574" },
+  { name: "Marrom", hex: "#78350F" },
+  { name: "Verde", hex: "#16A34A" },
+  { name: "Cinza", hex: "#6B7280" },
+  { name: "Nude", hex: "#E8C4A0" },
+] as const;
 
 type DiscountForm = { mode: "FIXED" | "PERCENT"; value: string };
 
@@ -346,9 +368,12 @@ function QuickSaleProductForm({
   onCancel: () => void;
 }) {
   const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
   const [cardPrice, setCardPrice] = useState("");
   const [pixPrice, setPixPrice] = useState("");
+  const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
+  const [selectedColors, setSelectedColors] = useState<
+    { name: string; hex: string }[]
+  >([]);
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -356,20 +381,51 @@ function QuickSaleProductForm({
   const pixPriceNum = Number(pixPrice.replace(",", "."));
   const canSubmit =
     name.trim().length > 0 &&
-    description.trim().length > 0 &&
     cardPrice.trim().length > 0 &&
     pixPrice.trim().length > 0 &&
     Number.isFinite(cardPriceNum) &&
     cardPriceNum >= 0 &&
     Number.isFinite(pixPriceNum) &&
-    pixPriceNum >= 0;
+    pixPriceNum >= 0 &&
+    selectedSizes.length > 0;
+
+  function toggleSize(size: string) {
+    setSelectedSizes((prev) =>
+      prev.includes(size) ? prev.filter((s) => s !== size) : [...prev, size]
+    );
+  }
+
+  function toggleColor(color: { name: string; hex: string }) {
+    setSelectedColors((prev) =>
+      prev.some((c) => c.name === color.name)
+        ? prev.filter((c) => c.name !== color.name)
+        : [...prev, color]
+    );
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!canSubmit) {
-      setFormError("Preencha todos os campos para continuar.");
+      setFormError(
+        selectedSizes.length === 0
+          ? "Selecione pelo menos um tamanho."
+          : "Preencha todos os campos para continuar."
+      );
       return;
     }
+
+    const colors =
+      selectedColors.length > 0
+        ? selectedColors
+        : [{ name: SIZE_ONLY_COLOR_NAME, hex: SIZE_ONLY_COLOR_HEX }];
+    const sizes = selectedSizes.map((sizeName) => ({ name: sizeName }));
+    const variants = colors.flatMap((color) =>
+      sizes.map((size) => ({
+        colorName: color.name,
+        sizeName: size.name,
+        quantity: QUICK_VARIANT_STOCK,
+      }))
+    );
 
     setLoading(true);
     setFormError(null);
@@ -379,12 +435,19 @@ function QuickSaleProductForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
-          description: description.trim(),
           price: cardPriceNum,
           pixPrice: pixPriceNum,
+          installmentCount: QUICK_PRODUCT_INSTALLMENTS,
           images: [],
           stockType: "UNLIMITED",
-          pieces: [],
+          pieces: [
+            {
+              name: name.trim(),
+              colors,
+              sizes,
+              variants,
+            },
+          ],
           visibleOnSite: false,
         }),
       });
@@ -409,7 +472,8 @@ function QuickSaleProductForm({
       <div>
         <p className="text-sm font-semibold text-stone-900">Novo produto rápido</p>
         <p className="mt-0.5 text-xs text-stone-500">
-          Cadastro mínimo para a venda — sem foto nem estoque. A descrição ajuda quem vai embalar.
+          Cadastro mínimo para a venda — sem foto. Tamanho e cor ficam disponíveis
+          nas próximas vendas. Parcelas no cartão: {QUICK_PRODUCT_INSTALLMENTS}×.
         </p>
       </div>
 
@@ -429,17 +493,6 @@ function QuickSaleProductForm({
             placeholder="Ex.: Vestido floral midi"
             className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
             autoFocus
-          />
-        </div>
-        <div className="sm:col-span-2">
-          <FieldLabel>Descrição</FieldLabel>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            required
-            rows={3}
-            placeholder="Detalhes para identificar a peça na embalagem (cor, tamanho, marca, observações…)"
-            className="mt-1 w-full resize-y rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
           />
         </div>
         <div>
@@ -473,6 +526,70 @@ function QuickSaleProductForm({
               className="w-full rounded-lg border border-stone-200 bg-white py-2 pl-10 pr-3 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
             />
           </div>
+        </div>
+
+        <div className="sm:col-span-2">
+          <FieldLabel>Tamanhos</FieldLabel>
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            {QUICK_SIZES.map((size) => {
+              const active = selectedSizes.includes(size);
+              return (
+                <button
+                  key={size}
+                  type="button"
+                  onClick={() => toggleSize(size)}
+                  className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    active
+                      ? "border-stone-900 bg-stone-900 text-white"
+                      : "border-stone-200 bg-white text-stone-700 hover:border-stone-300"
+                  }`}
+                >
+                  {size}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-1 text-[10px] text-stone-400">
+            Obrigatório. Na venda, escolha o tamanho da peça.
+          </p>
+        </div>
+
+        <div className="sm:col-span-2">
+          <FieldLabel optional>Cores</FieldLabel>
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            {QUICK_COLORS.map((color) => {
+              const active = selectedColors.some((c) => c.name === color.name);
+              return (
+                <button
+                  key={color.name}
+                  type="button"
+                  onClick={() => toggleColor(color)}
+                  className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    active
+                      ? "border-stone-900 bg-stone-900 text-white"
+                      : "border-stone-200 bg-white text-stone-700 hover:border-stone-300"
+                  }`}
+                >
+                  <span
+                    className="h-3 w-3 shrink-0 rounded-full border border-stone-300"
+                    style={
+                      color.hex === MESCLADO_BW_HEX
+                        ? {
+                            background:
+                              "linear-gradient(135deg, #000 50%, #fff 50%)",
+                          }
+                        : { backgroundColor: color.hex }
+                    }
+                    aria-hidden
+                  />
+                  {color.name}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-1 text-[10px] text-stone-400">
+            Opcional. Sem cor, a venda só pede o tamanho.
+          </p>
         </div>
       </div>
 
