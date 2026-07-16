@@ -512,7 +512,11 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form
+      onSubmit={handleSubmit}
+      className="flex h-full min-h-0 flex-col"
+    >
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-4 py-5 sm:px-6 sm:py-6">
       <section className={SECTION_CLASS}>
         <h3 className={SECTION_TITLE_CLASS}>Informações básicas</h3>
         <div className="grid gap-4 sm:grid-cols-2">
@@ -1269,19 +1273,20 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
           ))}
         </div>
       </section>
+      </div>
 
-      <div className="sticky bottom-0 -mx-4 border-t border-stone-200 bg-white/95 px-4 py-4 backdrop-blur-sm sm:-mx-6 sm:px-6">
-      <button
-        type="submit"
-        disabled={loading || images.length === 0}
-        className="w-full rounded-lg bg-stone-900 px-8 py-3 text-sm font-semibold text-white shadow-sm hover:bg-stone-800 focus:outline-none focus:ring-2 focus:ring-stone-900 focus:ring-offset-2 disabled:opacity-50 transition-colors sm:w-auto"
-      >
-        {loading
-          ? "Salvando..."
-          : isEditing
-            ? "Atualizar Produto"
-            : "Cadastrar Produto"}
-      </button>
+      <div className="flex shrink-0 justify-end border-t border-stone-200 bg-white px-4 py-4 sm:px-6">
+        <button
+          type="submit"
+          disabled={loading || images.length === 0}
+          className="rounded-lg bg-stone-900 px-8 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-stone-800 focus:outline-none focus:ring-2 focus:ring-stone-900 focus:ring-offset-2 disabled:opacity-50"
+        >
+          {loading
+            ? "Salvando..."
+            : isEditing
+              ? "Atualizar Produto"
+              : "Cadastrar Produto"}
+        </button>
       </div>
     </form>
   );

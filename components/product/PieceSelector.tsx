@@ -124,7 +124,7 @@ export function PieceSelector({
             key={piece.id}
             className={
               multiplePieces
-                ? `relative flex min-w-0 w-full flex-col justify-center px-4 py-5 sm:mx-auto sm:max-w-[20rem] sm:items-center sm:p-4 ${
+                ? `relative flex min-w-0 w-full flex-col justify-start px-4 py-5 sm:mx-auto sm:max-w-[20rem] sm:items-center sm:p-4 ${
                     showShortDivider
                       ? // Mobile: traço curto horizontal; sm+: traço curto vertical
                         "after:absolute after:bottom-0 after:left-1/2 after:h-px after:w-14 after:-translate-x-1/2 after:bg-stone-300 sm:after:bottom-auto sm:after:left-auto sm:after:right-0 sm:after:top-1/2 sm:after:h-14 sm:after:w-px sm:after:translate-x-0 sm:after:-translate-y-1/2"
@@ -200,7 +200,7 @@ export function PieceSelector({
                       ) : piece.sizes.length > 0 && !sel?.size ? (
                         <span className="text-stone-400">
                           {" "}
-                          — escolha o tamanho primeiro
+                          — escolha
                         </span>
                       ) : (
                         <span className="text-stone-400"> — escolha</span>
@@ -237,7 +237,7 @@ export function PieceSelector({
                             onClick={() => selectColor(piece.id, color.name)}
                             title={
                               needsSizeFirst
-                                ? "Escolha o tamanho primeiro"
+                                ? "Escolha"
                                 : color.name
                             }
                             className={`h-8 w-8 rounded-full transition-all disabled:cursor-not-allowed disabled:opacity-30 sm:h-7 sm:w-7 ${
@@ -328,7 +328,7 @@ export function PieceSelector({
                       ) : piece.sizes.length > 0 && !sel?.size ? (
                         <span className="text-stone-400">
                           {" "}
-                          — escolha o tamanho primeiro
+                          — escolha
                         </span>
                       ) : (
                         <span className="text-stone-400"> — escolha</span>
@@ -365,7 +365,7 @@ export function PieceSelector({
                             onClick={() => selectColor(piece.id, color.name)}
                             title={
                               needsSizeFirst
-                                ? "Escolha o tamanho primeiro"
+                                ? "Escolha"
                                 : color.name
                             }
                             className={`h-8 w-8 rounded-full transition-all disabled:cursor-not-allowed disabled:opacity-30 sm:h-7 sm:w-7 ${
