@@ -4,6 +4,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import Link from "next/link";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
+import {
+  onlyDigits,
+  phoneFmt,
+} from "@/lib/admin-sale/customer-form-input";
 
 export function RegisterForm() {
   const router = useRouter();
@@ -19,12 +23,26 @@ export function RegisterForm() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    const phoneDigits = onlyDigits(phone, 11);
+    if (phoneDigits.length < 10) {
+      setError("Informe um telefone válido com DDD.");
+      return;
+    }
+    if (password.length < 6) {
+      setError("A senha deve ter pelo menos 6 caracteres.");
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, phone, password }),
+        body: JSON.stringify({
+          name,
+          email,
+          phone: phoneDigits,
+          password,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -99,16 +117,18 @@ export function RegisterForm() {
             id="phone"
             name="phone"
             type="tel"
+            inputMode="numeric"
             autoComplete="tel"
             required
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
+            placeholder="(00) 00000-0000"
+            value={phoneFmt(phone)}
+            onChange={(e) => setPhone(onlyDigits(e.target.value, 11))}
             className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-stone-900 shadow-sm focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
           />
         </div>
         <div>
           <label htmlFor="password" className="block text-sm font-medium text-stone-700">
-            Senha (mín. 8 caracteres)
+            Senha (mín. 6 caracteres)
           </label>
           <input
             id="password"
@@ -116,7 +136,7 @@ export function RegisterForm() {
             type="password"
             autoComplete="new-password"
             required
-            minLength={8}
+            minLength={6}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-stone-900 shadow-sm focus:border-stone-500 focus:outline-none focus:ring-1 focus:ring-stone-500"
