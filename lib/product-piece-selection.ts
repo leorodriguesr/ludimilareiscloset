@@ -22,11 +22,19 @@ export type PieceSelectionMap = Record<
   { color: string | null; size: string | null }
 >;
 
-/** Cor já selecionada quando há só uma opção (inclui estoque só por tamanho). */
+/**
+ * Estado inicial das seleções.
+ * Cor só vem pré-marcada em estoque só por tamanho ("Único") ou quando não há tamanhos.
+ * Com tamanho + cores, o cliente escolhe o tamanho primeiro.
+ */
 export function emptyPieceSelections(pieces: ProductPiece[]): PieceSelectionMap {
   return Object.fromEntries(
     pieces.map((p) => {
-      const color = p.colors.length === 1 ? p.colors[0]!.name : null;
+      const color =
+        p.colors.length === 1 &&
+        (isSizeOnlyPiece(p) || p.sizes.length === 0)
+          ? p.colors[0]!.name
+          : null;
       return [p.id, { color, size: null }];
     })
   );

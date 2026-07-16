@@ -124,23 +124,24 @@ export function PieceSelector({
             key={piece.id}
             className={
               multiplePieces
-                ? `relative mx-auto flex min-w-0 w-full max-w-[20rem] flex-col items-center justify-center p-4 ${
+                ? `relative flex min-w-0 w-full flex-col justify-center px-4 py-5 sm:mx-auto sm:max-w-[20rem] sm:items-center sm:p-4 ${
                     showShortDivider
-                      ? "after:absolute after:right-0 after:top-1/2 after:h-20 after:w-px after:-translate-y-1/2 after:bg-stone-200"
+                      ? // Mobile: traço curto horizontal; sm+: traço curto vertical
+                        "after:absolute after:bottom-0 after:left-1/2 after:h-px after:w-14 after:-translate-x-1/2 after:bg-stone-300 sm:after:bottom-auto sm:after:left-auto sm:after:right-0 sm:after:top-1/2 sm:after:h-14 sm:after:w-px sm:after:translate-x-0 sm:after:-translate-y-1/2"
                       : ""
                   }`
-                : "space-y-4"
+                : "space-y-5 sm:space-y-4"
             }
           >
             {multiplePieces ? (
-              <div className="w-full max-w-[20rem] space-y-4 text-left">
-                <h3 className="text-sm font-semibold tracking-wide text-stone-900">
+              <div className="w-full space-y-5 text-left sm:max-w-[20rem] sm:space-y-4">
+                <h3 className="text-base font-semibold tracking-wide text-stone-900 sm:text-sm">
                   {piece.name}
                 </h3>
 
                 {piece.sizes.length > 0 && (
                   <div>
-                    <p className="mb-2 text-xs text-stone-500">
+                    <p className="mb-2.5 text-sm text-stone-500 sm:mb-2 sm:text-xs">
                       <span className="font-medium text-stone-600">
                         Tamanho:{" "}
                       </span>
@@ -152,7 +153,7 @@ export function PieceSelector({
                         <span className="text-stone-400"> — escolha</span>
                       )}
                     </p>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-2.5 sm:gap-2">
                       {piece.sizes.map((size) => {
                         // Só bloqueia se não houver estoque em nenhuma cor
                         const disabled =
@@ -172,7 +173,7 @@ export function PieceSelector({
                             type="button"
                             disabled={disabled}
                             onClick={() => selectSize(piece.id, size.name)}
-                            className={`min-w-[2.25rem] shrink-0 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-30 sm:min-w-[2.5rem] sm:px-3 sm:py-2 sm:text-sm ${
+                            className={`min-w-[2.75rem] shrink-0 rounded-md border px-3.5 py-2.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-30 sm:min-w-[2.5rem] sm:px-3 sm:py-2 sm:text-sm ${
                               sel?.size === size.name
                                 ? "border-2 border-black bg-white text-stone-900"
                                 : conflictsSelectedColor
@@ -190,18 +191,25 @@ export function PieceSelector({
 
                 {pieceShowsColorPicker(piece) && (
                   <div>
-                    <p className="mb-2 text-xs text-stone-500">
+                    <p className="mb-2.5 text-sm text-stone-500 sm:mb-2 sm:text-xs">
                       <span className="font-medium text-stone-600">Cor: </span>
                       {sel?.color ? (
                         <span className="font-semibold text-stone-900">
                           {sel.color}
                         </span>
+                      ) : piece.sizes.length > 0 && !sel?.size ? (
+                        <span className="text-stone-400">
+                          {" "}
+                          — escolha o tamanho primeiro
+                        </span>
                       ) : (
                         <span className="text-stone-400"> — escolha</span>
                       )}
                     </p>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-3 sm:gap-2">
                       {piece.colors.map((color) => {
+                        const needsSizeFirst =
+                          piece.sizes.length > 0 && !sel?.size;
                         const noStockAnySize =
                           matrix &&
                           piece.sizes.every(
@@ -217,7 +225,9 @@ export function PieceSelector({
                           sel?.size != null &&
                           qtyForCombination(piece, color.name, sel.size) === 0;
                         const disabled =
-                          noStockAnySize || noStockForSelectedSize;
+                          needsSizeFirst ||
+                          noStockAnySize ||
+                          noStockForSelectedSize;
 
                         return (
                           <button
@@ -225,8 +235,12 @@ export function PieceSelector({
                             type="button"
                             disabled={disabled}
                             onClick={() => selectColor(piece.id, color.name)}
-                            title={color.name}
-                            className={`h-6 w-6 rounded-full transition-all disabled:cursor-not-allowed disabled:opacity-30 sm:h-7 sm:w-7 ${
+                            title={
+                              needsSizeFirst
+                                ? "Escolha o tamanho primeiro"
+                                : color.name
+                            }
+                            className={`h-8 w-8 rounded-full transition-all disabled:cursor-not-allowed disabled:opacity-30 sm:h-7 sm:w-7 ${
                               sel?.color === color.name
                                 ? "border-2 border-black"
                                 : "border-2 border-stone-200 hover:border-stone-400"
@@ -247,7 +261,7 @@ export function PieceSelector({
                   sel?.color &&
                   sel?.size &&
                   qtyForCombination(piece, sel.color, sel.size) === 0 && (
-                    <p className="text-xs text-stone-500">
+                    <p className="text-sm text-stone-500 sm:text-xs">
                       Indisponível nesta combinação.
                     </p>
                   )}
@@ -256,7 +270,7 @@ export function PieceSelector({
               <>
                 {piece.sizes.length > 0 && (
                   <div>
-                    <p className="mb-2 text-xs text-stone-500">
+                    <p className="mb-2.5 text-sm text-stone-500 sm:mb-2 sm:text-xs">
                       <span className="font-medium text-stone-600">
                         Tamanho:{" "}
                       </span>
@@ -268,7 +282,7 @@ export function PieceSelector({
                         <span className="text-stone-400"> — escolha</span>
                       )}
                     </p>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-2.5 sm:gap-2">
                       {piece.sizes.map((size) => {
                         const disabled =
                           matrix &&
@@ -287,7 +301,7 @@ export function PieceSelector({
                             type="button"
                             disabled={disabled}
                             onClick={() => selectSize(piece.id, size.name)}
-                            className={`min-w-[2.25rem] shrink-0 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-30 sm:min-w-[2.5rem] sm:px-3 sm:py-2 sm:text-sm ${
+                            className={`min-w-[2.75rem] shrink-0 rounded-md border px-3.5 py-2.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-30 sm:min-w-[2.5rem] sm:px-3 sm:py-2 sm:text-sm ${
                               sel?.size === size.name
                                 ? "border-2 border-stone-900 bg-white text-stone-900"
                                 : conflictsSelectedColor
@@ -305,18 +319,25 @@ export function PieceSelector({
 
                 {pieceShowsColorPicker(piece) && (
                   <div>
-                    <p className="mb-2 text-xs text-stone-500">
+                    <p className="mb-2.5 text-sm text-stone-500 sm:mb-2 sm:text-xs">
                       <span className="font-medium text-stone-600">Cor: </span>
                       {sel?.color ? (
                         <span className="font-semibold text-stone-900">
                           {sel.color}
                         </span>
+                      ) : piece.sizes.length > 0 && !sel?.size ? (
+                        <span className="text-stone-400">
+                          {" "}
+                          — escolha o tamanho primeiro
+                        </span>
                       ) : (
                         <span className="text-stone-400"> — escolha</span>
                       )}
                     </p>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-3 sm:gap-2">
                       {piece.colors.map((color) => {
+                        const needsSizeFirst =
+                          piece.sizes.length > 0 && !sel?.size;
                         const noStockAnySize =
                           matrix &&
                           piece.sizes.every(
@@ -332,7 +353,9 @@ export function PieceSelector({
                           sel?.size != null &&
                           qtyForCombination(piece, color.name, sel.size) === 0;
                         const disabled =
-                          noStockAnySize || noStockForSelectedSize;
+                          needsSizeFirst ||
+                          noStockAnySize ||
+                          noStockForSelectedSize;
 
                         return (
                           <button
@@ -340,8 +363,12 @@ export function PieceSelector({
                             type="button"
                             disabled={disabled}
                             onClick={() => selectColor(piece.id, color.name)}
-                            title={color.name}
-                            className={`h-6 w-6 rounded-full transition-all disabled:cursor-not-allowed disabled:opacity-30 sm:h-7 sm:w-7 ${
+                            title={
+                              needsSizeFirst
+                                ? "Escolha o tamanho primeiro"
+                                : color.name
+                            }
+                            className={`h-8 w-8 rounded-full transition-all disabled:cursor-not-allowed disabled:opacity-30 sm:h-7 sm:w-7 ${
                               sel?.color === color.name
                                 ? "border-2 border-stone-900"
                                 : "border-2 border-stone-200 hover:border-stone-400"
@@ -362,7 +389,7 @@ export function PieceSelector({
                   sel?.color &&
                   sel?.size &&
                   qtyForCombination(piece, sel.color, sel.size) === 0 && (
-                    <p className="text-xs text-stone-500">
+                    <p className="text-sm text-stone-500 sm:text-xs">
                       Indisponível nesta combinação.
                     </p>
                   )}
