@@ -8,6 +8,10 @@ import {
   normalizeHexColor,
 } from "@/lib/color-swatch";
 import {
+  getPieceColorBinding,
+  setPieceColorBinding,
+} from "@/lib/image-color-bindings";
+import {
   SIZE_ONLY_COLOR_HEX,
   SIZE_ONLY_COLOR_NAME,
   isSizeOnlyColorName,
@@ -371,9 +375,19 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
     setImages((prev) => prev.filter((_, i) => i !== index));
   }
 
-  function setImageColor(index: number, colorName: string | null) {
+  function setImagePieceColor(
+    index: number,
+    pieceName: string,
+    colorName: string | null
+  ) {
     setImages((prev) =>
-      prev.map((img, i) => (i === index ? { ...img, colorName } : img))
+      prev.map((img, i) => {
+        if (i !== index) return img;
+        return {
+          ...img,
+          colorName: setPieceColorBinding(img.colorName, pieceName, colorName),
+        };
+      })
     );
   }
 
@@ -767,13 +781,15 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
         </h3>
         <p className={HELPER_CLASS}>
           Arraste uma foto sobre outra para mudar a ordem. A primeira continua
-          sendo a capa.
+          sendo a capa. Vincule a cor de cada peça na foto para a galeria
+          trocar conforme a escolha do cliente.
         </p>
         <div className="flex flex-wrap gap-3 mb-3">
           {images.map((img, i) => {
-            const allColors = pieces.flatMap((p) => p.colors);
-            const uniqueColors = allColors.filter(
-              (c, idx) => allColors.findIndex((x) => x.name === c.name) === idx
+            const piecesWithColors = pieces.filter(
+              (p) =>
+                p.name.trim() &&
+                p.colors.some((c) => !isSizeOnlyColorName(c.name))
             );
             return (
               <div key={img.url} className="flex flex-col gap-1">
@@ -836,21 +852,41 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
                     </span>
                   )}
                 </div>
-                {/* Seletor de cor */}
-                {uniqueColors.length > 0 && (
-                  <select
-                    value={img.colorName ?? ""}
-                    onChange={(e) => setImageColor(i, e.target.value || null)}
-                    className="w-24 rounded border border-stone-200 bg-white px-1 py-0.5 text-[10px] text-stone-700 focus:border-stone-900 focus:outline-none"
-                    title="Vincular esta imagem a uma cor"
-                  >
-                    <option value="">— cor —</option>
-                    {uniqueColors.map((c) => (
-                      <option key={c.name} value={c.name}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                {piecesWithColors.length > 0 && (
+                  <div className="flex w-24 flex-col gap-1">
+                    {piecesWithColors.map((piece) => {
+                      const pieceName = piece.name.trim();
+                      const colors = piece.colors.filter(
+                        (c) => !isSizeOnlyColorName(c.name)
+                      );
+                      return (
+                        <label key={pieceName} className="block">
+                          <span className="mb-0.5 block truncate text-[9px] font-medium text-stone-500">
+                            {pieceName}
+                          </span>
+                          <select
+                            value={getPieceColorBinding(img.colorName, pieceName)}
+                            onChange={(e) =>
+                              setImagePieceColor(
+                                i,
+                                pieceName,
+                                e.target.value || null
+                              )
+                            }
+                            className="w-full rounded border border-stone-200 bg-white px-1 py-0.5 text-[10px] text-stone-700 focus:border-stone-900 focus:outline-none"
+                            title={`Cor da ${pieceName} nesta imagem`}
+                          >
+                            <option value="">— cor —</option>
+                            {colors.map((c) => (
+                              <option key={c.name} value={c.name}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
             );

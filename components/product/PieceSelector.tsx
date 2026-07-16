@@ -46,30 +46,38 @@ export function PieceSelector({
     setInternal(emptyPieceSelections(pieces));
   }, [pieceKey, isControlled, pieces]);
 
-  useEffect(() => {
+  function emitPieceColorsChanged(map: PieceSelectionMap) {
+    const detail: Record<string, string | null> = {};
     for (const piece of pieces) {
-      if (pieceShowsColorPicker(piece) && piece.colors.length === 1) {
-        window.dispatchEvent(
-          new CustomEvent("color:selected", {
-            detail: piece.colors[0]!.name,
-          })
-        );
-        break;
-      }
+      const name = piece.name.trim();
+      if (!name) continue;
+      detail[name] = map[piece.id]?.color ?? null;
     }
-  }, [pieceKey, pieces]);
+    window.dispatchEvent(
+      new CustomEvent("piece-colors:changed", { detail })
+    );
+  }
+
+  useEffect(() => {
+    emitPieceColorsChanged(emptyPieceSelections(pieces));
+    // Só reemite ao trocar o conjunto de peças do produto
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pieceKey]);
 
   const multiplePieces = pieces.length > 1;
 
   function selectColor(pieceId: string, colorName: string) {
-    setSelections((prev) => ({
-      ...prev,
-      [pieceId]: {
-        ...(prev[pieceId] ?? { color: null, size: null }),
-        color: colorName,
-      },
-    }));
-    window.dispatchEvent(new CustomEvent("color:selected", { detail: colorName }));
+    setSelections((prev) => {
+      const next = {
+        ...prev,
+        [pieceId]: {
+          ...(prev[pieceId] ?? { color: null, size: null }),
+          color: colorName,
+        },
+      };
+      emitPieceColorsChanged(next);
+      return next;
+    });
   }
 
   function selectSize(pieceId: string, sizeName: string) {
@@ -86,10 +94,14 @@ export function PieceSelector({
       ) {
         color = null;
       }
-      return {
+      const next = {
         ...prev,
         [pieceId]: { ...current, size: sizeName, color },
       };
+      if (color !== current.color) {
+        emitPieceColorsChanged(next);
+      }
+      return next;
     });
   }
 

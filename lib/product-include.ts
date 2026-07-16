@@ -28,6 +28,7 @@ export const productFullInclude = {
 export const productListInclude = {
   images: { orderBy: { order: "asc" as const } },
   pieces: {
+    orderBy: { id: "asc" as const },
     include: {
       colors: true,
     },

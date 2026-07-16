@@ -136,15 +136,17 @@ export default async function Home({ searchParams }: HomeProps) {
   );
 }
 
-function uniqueColors(pieces: { colors: { id: string; name: string; hex: string | null }[] }[]) {
-  const seen = new Set<string>();
-  return pieces.flatMap((p) => p.colors).filter((c) => {
-    if (isSizeOnlyColorName(c.name)) return false;
-    const key = c.hex ?? c.name;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+/** Cores da listagem = só a primeira peça do produto. */
+function firstPieceColors(
+  pieces: { name: string; colors: { id: string; name: string; hex: string | null }[] }[]
+): {
+  pieceName: string | null;
+  colors: { id: string; name: string; hex: string | null }[];
+} {
+  const first = pieces[0];
+  if (!first) return { pieceName: null, colors: [] };
+  const colors = first.colors.filter((c) => !isSizeOnlyColorName(c.name));
+  return { pieceName: first.name.trim() || null, colors };
 }
 
 type ProductCardData = {
@@ -155,25 +157,29 @@ type ProductCardData = {
   installmentCount: number | null;
   images: { url: string; order: number; colorName: string | null }[];
   tag: string | null;
-  pieces: { colors: { id: string; name: string; hex: string | null }[] }[];
+  pieces: { name: string; colors: { id: string; name: string; hex: string | null }[] }[];
 };
 
 function ProductCards({ products }: { products: ProductCardData[] }) {
   return (
     <>
-      {products.map((product) => (
-        <ProductCard
-          key={product.id}
-          id={product.id}
-          name={product.name}
-          price={product.price}
-          pixPrice={product.pixPrice}
-          installmentCount={product.installmentCount}
-          images={product.images}
-          tag={product.tag}
-          colors={uniqueColors(product.pieces)}
-        />
-      ))}
+      {products.map((product) => {
+        const { pieceName, colors } = firstPieceColors(product.pieces);
+        return (
+          <ProductCard
+            key={product.id}
+            id={product.id}
+            name={product.name}
+            price={product.price}
+            pixPrice={product.pixPrice}
+            installmentCount={product.installmentCount}
+            images={product.images}
+            tag={product.tag}
+            colors={colors}
+            colorPieceName={pieceName}
+          />
+        );
+      })}
     </>
   );
 }

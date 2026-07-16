@@ -7,6 +7,10 @@ import { formatPrice } from "@/lib/format";
 import { installmentValueEqualParts } from "@/lib/product-pricing";
 import { FavoriteButton } from "@/components/favorites/FavoriteButton";
 import { colorSwatchStyle } from "@/lib/color-swatch";
+import {
+  findBestImageIndex,
+  imageMatchesColorSwatch,
+} from "@/lib/image-color-bindings";
 
 interface Color {
   id: string;
@@ -28,6 +32,8 @@ interface ProductCardProps {
   images: ProductImage[];
   tag?: string | null;
   colors?: Color[];
+  /** Nome da primeira peça — usado para bater a foto pela cor dessa peça. */
+  colorPieceName?: string | null;
 }
 
 function IconCard({ className }: { className?: string }) {
@@ -58,6 +64,7 @@ export function ProductCard({
   images,
   tag,
   colors = [],
+  colorPieceName = null,
 }: ProductCardProps) {
   const showPix =
     pixPrice != null && Number.isFinite(pixPrice) && pixPrice > 0;
@@ -75,10 +82,21 @@ export function ProductCard({
 
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
 
-  // Encontra a imagem correspondente à cor selecionada, ou usa a primeira
-  const activeImage = selectedColor
-    ? (images.find((img) => img.colorName === selectedColor) ?? images[0])
-    : images[0];
+  // Foto pela cor da primeira peça (não mistura com cores das outras peças)
+  let activeImage = images[0];
+  if (selectedColor) {
+    if (colorPieceName) {
+      const idx = findBestImageIndex(images, {
+        [colorPieceName]: selectedColor,
+      });
+      activeImage = idx !== -1 ? images[idx] : images[0];
+    } else {
+      activeImage =
+        images.find((img) =>
+          imageMatchesColorSwatch(img.colorName, selectedColor)
+        ) ?? images[0];
+    }
+  }
 
   const imageUrl = activeImage?.url ?? null;
 

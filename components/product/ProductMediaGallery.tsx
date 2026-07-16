@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { findBestImageIndex } from "@/lib/image-color-bindings";
 import { getVideoEmbedInfo } from "@/lib/video-embed";
 
 export type ProductMediaImage = { url: string; colorName?: string | null };
@@ -110,15 +111,22 @@ export function ProductMediaGallery({ images, productName, videoUrl }: ProductMe
   const goPrev = useCallback(() => goTo(currentIndex - 1), [currentIndex, goTo]);
   const goNext = useCallback(() => goTo(currentIndex + 1), [currentIndex, goTo]);
 
-  // Navega para a imagem da cor selecionada no PieceSelector
+  // Navega pela combinação de cores das peças (não usar color:selected —
+  // ele pegava a 1ª foto com aquela cor e sobrescrevia o match correto).
   useEffect(() => {
-    function handleColorSelected(e: Event) {
-      const colorName = (e as CustomEvent<string>).detail;
-      const idx = images.findIndex((img) => img.colorName === colorName);
+    function handlePieceColorsChanged(e: Event) {
+      const selectedByPiece = (e as CustomEvent<Record<string, string | null>>)
+        .detail;
+      const idx = findBestImageIndex(images, selectedByPiece ?? {});
       if (idx !== -1) goTo(idx);
     }
-    window.addEventListener("color:selected", handleColorSelected);
-    return () => window.removeEventListener("color:selected", handleColorSelected);
+    window.addEventListener("piece-colors:changed", handlePieceColorsChanged);
+    return () => {
+      window.removeEventListener(
+        "piece-colors:changed",
+        handlePieceColorsChanged
+      );
+    };
   }, [images, goTo]);
 
   // Swipe no mobile
