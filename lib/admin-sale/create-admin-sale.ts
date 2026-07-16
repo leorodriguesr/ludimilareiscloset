@@ -337,6 +337,9 @@ export async function createAdminSale(
         items: {
           create: pricing.lines.map((line) => ({
             productId: line.productId,
+            productName: line.productName,
+            productDescription: line.productDescription,
+            productImageUrl: line.productImageUrl,
             quantity: line.quantity,
             catalogListPrice: line.catalogListPrice,
             catalogPromoPrice: line.catalogPromoPrice,

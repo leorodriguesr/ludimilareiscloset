@@ -1,7 +1,7 @@
 import { StockType } from "@/app/generated/prisma/client";
 import type { CartPieceSelection } from "@/lib/cart/types";
 import { OrderCreateError } from "@/lib/orders/create-order";
-import type { ResolvedOrderLine } from "@/lib/orders/recalculate-order";
+import type { StockReservationLine } from "@/lib/orders/stock/reservation";
 
 export type StockDemand = {
   productId: string;
@@ -80,7 +80,7 @@ function findVariantId(
 
 /** Converte linhas do pedido em unidades de reserva (produto ou variante). */
 export async function buildStockDemands(
-  lines: ResolvedOrderLine[],
+  lines: StockReservationLine[],
   db: VariantReader
 ): Promise<StockDemand[]> {
   const map = new Map<string, StockDemand>();

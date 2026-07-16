@@ -10,6 +10,10 @@ import { formatPrice } from "@/lib/format";
 import { ClearCartOnPaymentSuccess } from "@/components/cart/ClearCartOnPaymentSuccess";
 import { PAYMENT_GATEWAY } from "@/lib/orders/constants";
 import { getActivePaymentAttempt } from "@/lib/orders/get-active-payment-attempt";
+import {
+  orderItemDisplayImageUrl,
+  orderItemDisplayName,
+} from "@/lib/orders/order-item-display";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -361,7 +365,8 @@ export default async function PedidoPage({ params, searchParams }: PageProps) {
                 } catch { /* noop */ }
               }
 
-              const coverImage = it.product.images[0]?.url ?? null;
+              const coverImage = orderItemDisplayImageUrl(it);
+              const itemName = orderItemDisplayName(it);
 
               return (
                 <li key={it.id} className="flex gap-4 px-4 py-4">
@@ -369,7 +374,7 @@ export default async function PedidoPage({ params, searchParams }: PageProps) {
                     {coverImage ? (
                       <Image
                         src={coverImage}
-                        alt={it.product.name}
+                        alt={itemName}
                         fill
                         className="object-cover"
                         sizes="64px"
@@ -383,7 +388,7 @@ export default async function PedidoPage({ params, searchParams }: PageProps) {
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="line-clamp-2 text-sm font-medium text-stone-900">{it.product.name}</p>
+                    <p className="line-clamp-2 text-sm font-medium text-stone-900">{itemName}</p>
                     {pieceSelections && pieceSelections.length > 0 && (
                       <ul className="mt-1 space-y-0.5">
                         {pieceSelections.map((row, idx) => {

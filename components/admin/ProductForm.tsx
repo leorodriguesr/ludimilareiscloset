@@ -74,6 +74,7 @@ interface ProductData {
   lengthCm: number | null;
   widthCm: number | null;
   heightCm: number | null;
+  visibleOnSite: boolean;
   images: { url: string; colorName?: string | null }[];
   pieces: PieceForm[];
   categoryIds: string[];
@@ -232,6 +233,9 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
   const [showCustomColorForm, setShowCustomColorForm] = useState<
     Record<number, boolean>
   >({});
+  const [visibleOnSite, setVisibleOnSite] = useState(
+    initialData?.visibleOnSite ?? true
+  );
 
   const isEditing = !!initialData?.id;
 
@@ -427,11 +431,13 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
     setSectionIds([]);
     setImages([]);
     setPieces([]);
+    setVisibleOnSite(true);
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (images.length === 0) return;
+    // Cadastro novo exige foto; edição de produto rápido (venda avulsa) pode salvar sem.
+    if (!isEditing && images.length === 0) return;
     setLoading(true);
 
     try {
@@ -494,6 +500,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
         pieces: namedPieces.map(serializePieceForApi),
         categoryIds,
         sectionIds,
+        visibleOnSite,
       };
 
       const res = await fetch(url, {
@@ -1275,11 +1282,27 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
       </section>
       </div>
 
-      <div className="flex shrink-0 justify-end border-t border-stone-200 bg-white px-4 py-4 sm:px-6">
+      <div className="flex shrink-0 flex-col gap-3 border-t border-stone-200 bg-white px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <label className="flex cursor-pointer items-start gap-2.5 sm:max-w-sm">
+          <input
+            type="checkbox"
+            checked={visibleOnSite}
+            onChange={(e) => setVisibleOnSite(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-stone-300 accent-stone-900"
+          />
+          <span>
+            <span className="block text-sm font-medium text-stone-900">
+              Visível no site
+            </span>
+            <span className="mt-0.5 block text-xs text-stone-500">
+              Se desmarcado, o produto não aparece na vitrine nem na busca da loja.
+            </span>
+          </span>
+        </label>
         <button
           type="submit"
-          disabled={loading || images.length === 0}
-          className="rounded-lg bg-stone-900 px-8 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-stone-800 focus:outline-none focus:ring-2 focus:ring-stone-900 focus:ring-offset-2 disabled:opacity-50"
+          disabled={loading || (!isEditing && images.length === 0)}
+          className="rounded-lg bg-stone-900 px-8 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-stone-800 focus:outline-none focus:ring-2 focus:ring-stone-900 focus:ring-offset-2 disabled:opacity-50 sm:shrink-0"
         >
           {loading
             ? "Salvando..."

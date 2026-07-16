@@ -1,4 +1,5 @@
 import type { InfinitePayLinkItem } from "@/lib/payments/infinitepay";
+import { orderItemDisplayName } from "@/lib/orders/order-item-display";
 
 type OrderRow = {
   total: number;
@@ -7,7 +8,8 @@ type OrderRow = {
   items: {
     quantity: number;
     price: number;
-    product: { name: string };
+    productName?: string | null;
+    product?: { name: string } | null;
   }[];
 };
 
@@ -21,7 +23,7 @@ export function orderToInfinitePayItems(order: OrderRow): InfinitePayLinkItem[] 
     out.push({
       quantity: it.quantity,
       price: unitCents,
-      description: it.product.name.slice(0, 180),
+      description: orderItemDisplayName(it).slice(0, 180),
     });
   }
 

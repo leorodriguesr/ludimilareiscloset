@@ -17,6 +17,9 @@ export type AdminSaleLineInput = {
 
 export type ResolvedAdminSaleLine = {
   productId: string;
+  productName: string;
+  productDescription: string | null;
+  productImageUrl: string | null;
   quantity: number;
   pieceSelections?: CartPieceSelection[];
   catalogListPrice: number;
@@ -74,7 +77,18 @@ export async function resolveAdminSalePricing(
   for (const line of input.lines) {
     const product = await prisma.product.findUnique({
       where: { id: line.productId.trim() },
-      select: { id: true, price: true, pixPrice: true, name: true },
+      select: {
+        id: true,
+        price: true,
+        pixPrice: true,
+        name: true,
+        description: true,
+        images: {
+          orderBy: { order: "asc" },
+          take: 1,
+          select: { url: true },
+        },
+      },
     });
     if (!product) {
       throw new Error(`Produto não encontrado: ${line.productId}`);
@@ -101,6 +115,9 @@ export async function resolveAdminSalePricing(
 
     resolved.push({
       productId: product.id,
+      productName: product.name.trim() || "Produto",
+      productDescription: product.description?.trim() || null,
+      productImageUrl: product.images[0]?.url ?? null,
       quantity: qty,
       ...(line.pieceSelections?.length
         ? { pieceSelections: line.pieceSelections }

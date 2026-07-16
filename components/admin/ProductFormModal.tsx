@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import type { Product } from "@/lib/types";
+import { isProductVisibleOnSite, type Product } from "@/lib/types";
 import { ProductForm } from "./ProductForm";
 
 export interface ProductFormData {
@@ -20,6 +20,7 @@ export interface ProductFormData {
   lengthCm: number | null;
   widthCm: number | null;
   heightCm: number | null;
+  visibleOnSite: boolean;
   images: { url: string; colorName?: string | null }[];
   pieces: {
     name: string;
@@ -48,6 +49,7 @@ export function mapProductToFormData(product: Product): ProductFormData {
     lengthCm: product.lengthCm,
     widthCm: product.widthCm,
     heightCm: product.heightCm,
+    visibleOnSite: isProductVisibleOnSite(product.visibleOnSite),
     images: product.images.map((img) => ({
       url: img.url,
       colorName: img.colorName ?? null,

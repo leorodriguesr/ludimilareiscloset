@@ -11,12 +11,24 @@ import {
   isPendingAdminSaleCustomer,
   orderCustomerDisplayEmail,
   orderCustomerDisplayName,
+  shouldOfferCustomerDataFillLink,
 } from "@/lib/admin-sale/customer-display";
+import {
+  orderItemDisplayDescription,
+  orderItemDisplayImageUrl,
+  orderItemDisplayName,
+} from "@/lib/orders/order-item-display";
 import {
   resolveArrangedDeliveryDisplay,
   splitArrangedDeliveryNotes,
   arrangedDeliveryLabelFromServiceName,
 } from "@/lib/admin-sale/arranged-delivery";
+import {
+  ADDRESS_COMPLEMENT_MAX_LENGTH,
+  ADDRESS_NUMBER_MAX_LENGTH,
+  CUSTOMER_NAME_MAX_LENGTH,
+  isCustomerContactAddressComplete,
+} from "@/lib/admin-sale/customer-form-complete";
 import {
   cepMask,
   cpfFmt,
@@ -31,6 +43,7 @@ import { cpfValidationError } from "@/lib/validation/cpf";
 type OrderProduct = {
   id: string;
   name: string;
+  description?: string | null;
   images: { url: string }[];
 };
 
@@ -39,7 +52,11 @@ type OrderItem = {
   quantity: number;
   price: number;
   pieceSelectionsJson: string | null;
-  product: OrderProduct;
+  productId?: string | null;
+  productName?: string | null;
+  productDescription?: string | null;
+  productImageUrl?: string | null;
+  product: OrderProduct | null;
 };
 
 type AdminOrder = {
@@ -1048,10 +1065,7 @@ function AdminSaleLinks({
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [copied, setCopied] = useState<"data" | "pix" | "card" | null>(null);
 
-  const showCustomerLink =
-    order.orderSource === "ADMIN_SALE" &&
-    order.customerDataStatus === "PENDING" &&
-    Boolean(order.customerDataToken);
+  const showCustomerLink = shouldOfferCustomerDataFillLink(order);
 
   const showPaymentLink =
     order.orderSource === "ADMIN_SALE" &&
@@ -1119,7 +1133,7 @@ function AdminSaleLinks({
               }
               className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
             >
-              {copied === "pix" ? "Mensagem copiada!" : "Copiar mensagem PIX"}
+              {copied === "pix" ? "Mensagem copiada!" : "Copiar chave PIX"}
             </button>
           )}
           {paymentInfo?.type === "card" && (
@@ -1133,7 +1147,7 @@ function AdminSaleLinks({
               }
               className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
             >
-              {copied === "card" ? "Mensagem copiada!" : "Copiar mensagem de pagamento"}
+              {copied === "card" ? "Mensagem copiada!" : "Copiar link de pagamento"}
             </button>
           )}
           {paymentInfo?.type === "paid" && (
@@ -1150,7 +1164,7 @@ function AdminSaleLinks({
           }
           className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
         >
-          {copied === "data" ? "Mensagem copiada!" : "Copiar mensagem de dados"}
+          {copied === "data" ? "Mensagem copiada!" : "Copiar link de preenchimento de dados"}
         </button>
       )}
     </div>
@@ -1189,10 +1203,7 @@ function OrderRowActionsMenu({
   const isCancelled = order.status === "cancelled";
   const isPaid = Boolean(order.paidAt);
   const isArranged = order.fulfillmentType === "ARRANGED";
-  const showCustomerLink =
-    order.orderSource === "ADMIN_SALE" &&
-    order.customerDataStatus === "PENDING" &&
-    Boolean(order.customerDataToken);
+  const showCustomerLink = shouldOfferCustomerDataFillLink(order);
   const showPaymentLink =
     order.orderSource === "ADMIN_SALE" &&
     !order.paidAt &&
@@ -1318,7 +1329,7 @@ function OrderRowActionsMenu({
     if (showCustomerLink) {
       items.push({
         id: "customer-link",
-        label: "Copiar mensagem de dados",
+        label: "Copiar link de preenchimento de dados",
         icon: (
           <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m9.86-2.121a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
@@ -1448,7 +1459,9 @@ function OrderProductsCards({ order }: { order: AdminOrder }) {
     <div className="divide-y divide-stone-100">
       {order.items.map((item) => {
         const pieces = parsePieces(item.pieceSelectionsJson);
-        const img = item.product.images[0]?.url ?? null;
+        const img = orderItemDisplayImageUrl(item);
+        const name = orderItemDisplayName(item);
+        const description = orderItemDisplayDescription(item);
         return (
           <div key={item.id} className="flex gap-3 py-3 first:pt-0 last:pb-0">
             <div className="relative h-16 w-12 shrink-0 overflow-hidden rounded-lg bg-stone-100">
@@ -1459,7 +1472,12 @@ function OrderProductsCards({ order }: { order: AdminOrder }) {
               )}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="font-medium leading-snug text-stone-900">{item.product.name}</p>
+              <p className="font-medium leading-snug text-stone-900">{name}</p>
+              {description ? (
+                <p className="mt-0.5 whitespace-pre-wrap text-xs text-stone-500">
+                  {description}
+                </p>
+              ) : null}
               {pieces.length > 0 ? (
                 <p className="mt-0.5 text-xs text-stone-400">
                   {pieces.map((p) => [p.pieceName, p.color, p.size].filter(Boolean).join(" · ")).join(" / ")}
@@ -1585,6 +1603,10 @@ function OrderDetailsBody({
       setCustomerError("Informe o nome.");
       return;
     }
+    if (customerForm.recipientName.trim().length > CUSTOMER_NAME_MAX_LENGTH) {
+      setCustomerError(`Nome: no máximo ${CUSTOMER_NAME_MAX_LENGTH} caracteres.`);
+      return;
+    }
     if (onlyDigits(customerForm.phone).length < 10) {
       setCustomerError("Informe um telefone válido.");
       return;
@@ -1604,6 +1626,18 @@ function OrderDetailsBody({
     }
     if (!customerForm.addressNumber.trim()) {
       setCustomerError("Informe o número.");
+      return;
+    }
+    if (customerForm.addressNumber.trim().length > ADDRESS_NUMBER_MAX_LENGTH) {
+      setCustomerError(`Número: no máximo ${ADDRESS_NUMBER_MAX_LENGTH} caracteres.`);
+      return;
+    }
+    if (
+      customerForm.addressComplement.trim().length > ADDRESS_COMPLEMENT_MAX_LENGTH
+    ) {
+      setCustomerError(
+        `Complemento: no máximo ${ADDRESS_COMPLEMENT_MAX_LENGTH} caracteres.`
+      );
       return;
     }
     if (!customerForm.addressNeighborhood.trim()) {
@@ -1658,6 +1692,20 @@ function OrderDetailsBody({
     }
   }
 
+  const canSaveCustomer = isCustomerContactAddressComplete({
+    name: customerForm.recipientName,
+    email: customerForm.email,
+    phone: customerForm.phone,
+    cpf: customerForm.cpf,
+    destinationCep: customerForm.destinationCep,
+    street: customerForm.addressStreet,
+    number: customerForm.addressNumber,
+    complement: customerForm.addressComplement,
+    neighborhood: customerForm.addressNeighborhood,
+    city: customerForm.addressCity,
+    state: customerForm.addressState,
+  });
+
   const customerName = orderCustomerName(order);
   const customerPhone = order.phone || order.user?.phone || null;
   const customerEmail = orderCustomerDisplayEmail(order);
@@ -1680,10 +1728,7 @@ function OrderDetailsBody({
       : null;
   const deliveryUserNotes = arrangedDelivery?.userNotes ?? order.deliveryNotes?.trim() ?? null;
   const addressBlock = formatOrderAddressBlock(order);
-  const showCustomerLink =
-    order.orderSource === "ADMIN_SALE" &&
-    order.customerDataStatus === "PENDING" &&
-    Boolean(order.customerDataToken);
+  const showCustomerLink = shouldOfferCustomerDataFillLink(order);
   const showPaymentLink =
     order.orderSource === "ADMIN_SALE" &&
     !order.paidAt &&
@@ -1723,11 +1768,21 @@ function OrderDetailsBody({
             <div className="grid gap-3 sm:grid-cols-2">
               <EditField label="Nome">
                 <EditInput
+                  maxLength={CUSTOMER_NAME_MAX_LENGTH}
                   value={customerForm.recipientName}
                   onChange={(e) =>
-                    setCustomerForm((f) => ({ ...f, recipientName: e.target.value }))
+                    setCustomerForm((f) => ({
+                      ...f,
+                      recipientName: e.target.value.slice(
+                        0,
+                        CUSTOMER_NAME_MAX_LENGTH
+                      ),
+                    }))
                   }
                 />
+                <p className="mt-1 text-[10px] text-stone-400">
+                  Máx. {CUSTOMER_NAME_MAX_LENGTH} caracteres
+                </p>
               </EditField>
               <EditField label="E-mail" optional>
                 <EditInput
@@ -1776,11 +1831,21 @@ function OrderDetailsBody({
                 </EditField>
                 <EditField label="Número">
                   <EditInput
+                    maxLength={ADDRESS_NUMBER_MAX_LENGTH}
                     value={customerForm.addressNumber}
                     onChange={(e) =>
-                      setCustomerForm((f) => ({ ...f, addressNumber: e.target.value }))
+                      setCustomerForm((f) => ({
+                        ...f,
+                        addressNumber: e.target.value.slice(
+                          0,
+                          ADDRESS_NUMBER_MAX_LENGTH
+                        ),
+                      }))
                     }
                   />
+                  <p className="mt-1 text-[10px] text-stone-400">
+                    Máx. {ADDRESS_NUMBER_MAX_LENGTH} caracteres
+                  </p>
                 </EditField>
                 <div className="sm:col-span-2">
                   <EditField label="Rua">
@@ -1795,11 +1860,21 @@ function OrderDetailsBody({
                 <div className="sm:col-span-2">
                   <EditField label="Complemento" optional>
                     <EditInput
+                      maxLength={ADDRESS_COMPLEMENT_MAX_LENGTH}
                       value={customerForm.addressComplement}
                       onChange={(e) =>
-                        setCustomerForm((f) => ({ ...f, addressComplement: e.target.value }))
+                        setCustomerForm((f) => ({
+                          ...f,
+                          addressComplement: e.target.value.slice(
+                            0,
+                            ADDRESS_COMPLEMENT_MAX_LENGTH
+                          ),
+                        }))
                       }
                     />
+                    <p className="mt-1 text-[10px] text-stone-400">
+                      Máx. {ADDRESS_COMPLEMENT_MAX_LENGTH} caracteres
+                    </p>
                   </EditField>
                 </div>
                 <EditField label="Bairro">
@@ -1838,9 +1913,9 @@ function OrderDetailsBody({
             <div className="flex gap-2">
               <button
                 type="button"
-                disabled={savingCustomer}
+                disabled={savingCustomer || !canSaveCustomer}
                 onClick={() => void saveCustomerData()}
-                className="flex-1 rounded-lg bg-stone-900 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50"
+                className="flex-1 rounded-lg bg-stone-900 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {savingCustomer ? "Salvando…" : "Salvar"}
               </button>
@@ -2376,6 +2451,11 @@ export function SalesManager() {
           products={products}
           onClose={() => setShowWizard(false)}
           onCreated={() => void fetchOrders()}
+          onProductCreated={(product) =>
+            setProducts((prev) =>
+              prev.some((p) => p.id === product.id) ? prev : [product, ...prev]
+            )
+          }
         />
       )}
       <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5 md:justify-between md:overflow-visible">

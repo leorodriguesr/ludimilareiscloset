@@ -172,7 +172,8 @@ async function restartCardPayment(
     items: Array<{
       quantity: number;
       price: number;
-      product: { name: string };
+      productName?: string | null;
+      product?: { name: string } | null;
     }>;
   }
 ): Promise<ContinueOrderPaymentSuccess | { ok: false; error: string }> {

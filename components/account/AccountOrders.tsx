@@ -7,6 +7,11 @@ import { useEffect, useState } from "react";
 import { formatPrice } from "@/lib/format";
 import { describeCartPieceSelection } from "@/lib/cart/format-piece-selections";
 import type { CartPieceSelection } from "@/lib/cart/types";
+import {
+  orderItemCatalogProductId,
+  orderItemDisplayImageUrl,
+  orderItemDisplayName,
+} from "@/lib/orders/order-item-display";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -15,7 +20,10 @@ export type AccountOrderItem = {
   quantity: number;
   price: number;
   pieceSelectionsJson: string | null;
-  product: { id: string; name: string; images: { url: string }[] };
+  productId?: string | null;
+  productName?: string | null;
+  productImageUrl?: string | null;
+  product: { id: string; name: string; images: { url: string }[] } | null;
 };
 
 export type AccountOrderListItem = {
@@ -510,7 +518,9 @@ function OrderCard({ order }: { order: AccountOrderListItem }) {
         {/* Produtos */}
         <ul className="divide-y divide-stone-50 px-5 py-1">
           {order.items.map((line) => {
-            const thumb = line.product.images[0]?.url;
+            const thumb = orderItemDisplayImageUrl(line);
+            const name = orderItemDisplayName(line);
+            const catalogId = orderItemCatalogProductId(line);
             const sel = parsePieceSelections(line.pieceSelectionsJson);
             const selText = sel
               .map((r) => {
@@ -520,20 +530,25 @@ function OrderCard({ order }: { order: AccountOrderListItem }) {
               .filter(Boolean)
               .join(" · ");
 
+            const thumbNode = (
+              <div className="relative h-14 w-12 shrink-0 overflow-hidden rounded-lg bg-stone-100">
+                {thumb ? (
+                  <Image src={thumb} alt={name} fill className="object-cover" sizes="48px" />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-xs text-stone-300">—</div>
+                )}
+              </div>
+            );
+
             return (
               <li key={line.id} className="flex items-center gap-3 py-3">
-                <Link
-                  href={`/products/${line.product.id}`}
-                  className="relative h-14 w-12 shrink-0 overflow-hidden rounded-lg bg-stone-100"
-                >
-                  {thumb ? (
-                    <Image src={thumb} alt={line.product.name} fill className="object-cover" sizes="48px" />
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-xs text-stone-300">—</div>
-                  )}
-                </Link>
+                {catalogId ? (
+                  <Link href={`/products/${catalogId}`}>{thumbNode}</Link>
+                ) : (
+                  thumbNode
+                )}
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-stone-900 line-clamp-2">{line.product.name}</p>
+                  <p className="text-sm font-medium text-stone-900 line-clamp-2">{name}</p>
                   {selText && <p className="mt-0.5 text-[11px] text-stone-500">{selText}</p>}
                   <p className="mt-0.5 text-[11px] tabular-nums text-stone-400">
                     {line.quantity} × {formatPrice(line.price)}

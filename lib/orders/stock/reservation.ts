@@ -1,6 +1,6 @@
 import { StockType } from "@/app/generated/prisma/client";
+import type { CartPieceSelection } from "@/lib/cart/types";
 import { OrderCreateError } from "@/lib/orders/create-order";
-import type { ResolvedOrderLine } from "@/lib/orders/recalculate-order";
 import { getAvailableStock } from "@/lib/orders/stock/availability";
 import { buildStockDemands } from "@/lib/orders/stock/build-demands";
 import { prisma } from "@/lib/prisma";
@@ -13,6 +13,13 @@ type ReservationTx = Pick<
   | "$executeRawUnsafe"
 >;
 
+export type StockReservationLine = {
+  productId: string;
+  quantity: number;
+  price: number;
+  pieceSelections?: CartPieceSelection[];
+};
+
 export async function releaseStockReservations(
   tx: Pick<typeof prisma, "stockReservation">,
   orderId: string
@@ -23,7 +30,7 @@ export async function releaseStockReservations(
 export async function reserveStockForOrderLines(
   tx: ReservationTx,
   orderId: string,
-  lines: ResolvedOrderLine[],
+  lines: StockReservationLine[],
   now: Date = new Date()
 ): Promise<void> {
   const demands = await buildStockDemands(lines, tx);

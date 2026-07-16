@@ -93,7 +93,7 @@ export type StoredOrderShippingSnapshot = {
   packageLengthCm: number | null;
   packageWeightKg: number | null;
   items: Array<{
-    productId: string;
+    productId: string | null;
     quantity: number;
     pieceSelectionsJson: string | null;
   }>;
@@ -142,6 +142,7 @@ function checkoutLinesMatchOrderItems(
 
   const orderQty = new Map<string, number>();
   for (const item of orderItems) {
+    if (!item.productId) return false;
     const key = cartLineKey(
       item.productId,
       parseOrderPieceSelections(item.pieceSelectionsJson)
@@ -319,8 +320,13 @@ export async function prepareOrderRecalculation(
 
 export type ResolvedOrderLine = {
   productId: string;
+  productName: string;
+  productDescription: string | null;
+  productImageUrl: string | null;
   quantity: number;
   price: number;
+  catalogListPrice: number;
+  catalogPromoPrice: number | null;
   pieceSelections?: CartPieceSelection[];
 };
 
@@ -356,8 +362,15 @@ export async function resolveOrderLinesAndTotals(
       where: { id: line.productId },
       select: {
         id: true,
+        name: true,
+        description: true,
         price: true,
         pixPrice: true,
+        images: {
+          orderBy: { order: "asc" as const },
+          take: 1,
+          select: { url: true },
+        },
       },
     });
 
@@ -368,14 +381,21 @@ export async function resolveOrderLinesAndTotals(
       );
     }
 
+    const catalogListPrice = product.price;
+    const catalogPromoPrice = product.pixPrice;
     const linePrice = usePix
-      ? (product.pixPrice ?? product.price)
-      : product.price;
+      ? (catalogPromoPrice ?? catalogListPrice)
+      : catalogListPrice;
 
     resolved.push({
       productId: product.id,
+      productName: product.name.trim() || "Produto",
+      productDescription: product.description?.trim() || null,
+      productImageUrl: product.images[0]?.url ?? null,
       quantity: line.quantity,
       price: linePrice,
+      catalogListPrice,
+      catalogPromoPrice,
       ...(line.pieceSelections?.length
         ? { pieceSelections: line.pieceSelections }
         : {}),
@@ -438,8 +458,16 @@ export async function persistRecalculatedOrder(
       data: totals.lines.map((r) => ({
         orderId,
         productId: r.productId,
+        productName: r.productName,
+        productDescription: r.productDescription,
+        productImageUrl: r.productImageUrl,
         quantity: r.quantity,
         price: r.price,
+        catalogListPrice: r.catalogListPrice,
+        catalogPromoPrice: r.catalogPromoPrice,
+        catalogUnitPrice: r.price,
+        lineSubtotalOriginal: Math.round(r.price * r.quantity * 100) / 100,
+        lineSubtotalFinal: Math.round(r.price * r.quantity * 100) / 100,
         pieceSelectionsJson: r.pieceSelections?.length
           ? JSON.stringify(r.pieceSelections)
           : null,

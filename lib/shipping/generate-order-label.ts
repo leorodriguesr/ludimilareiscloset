@@ -20,8 +20,12 @@ import {
 } from "@/lib/orders/order-shipping-fields";
 import { clearLabelAutoGenerateError } from "@/lib/shipping/label-auto-generate-error";
 import { ShippingQuoteError } from "@/lib/shipping/types";
-import { FulfillmentType } from "@/app/generated/prisma/client";
+import {
+  CustomerDataStatus,
+  FulfillmentType,
+} from "@/app/generated/prisma/client";
 import { canGenerateLabelForFulfillment } from "@/lib/fulfillment/fulfillment-types";
+import { orderItemDisplayName } from "@/lib/orders/order-item-display";
 
 const DEFAULT_PKG = { weightGrams: 300, lengthCm: 16, widthCm: 11, heightCm: 2 };
 
@@ -63,8 +67,12 @@ async function loadOrderForLabel(orderId: string) {
       superfreteStatus: true,
       shippingStatus: true,
       fulfillmentType: true,
+      customerDataStatus: true,
       items: {
-        include: {
+        select: {
+          quantity: true,
+          price: true,
+          productName: true,
           product: {
             select: {
               name: true,
@@ -105,11 +113,13 @@ function buildVolumeFromOrder(order: OrderForLabel): LabelInput["volume"] {
     const p = item.product;
     const qty = item.quantity;
     const unitGrams =
-      p.weightGrams != null && p.weightGrams > 0 ? p.weightGrams : DEFAULT_PKG.weightGrams;
+      p?.weightGrams != null && p.weightGrams > 0
+        ? p.weightGrams
+        : DEFAULT_PKG.weightGrams;
     weightGrams += unitGrams * qty;
-    const len = positiveDimCm(p.lengthCm);
-    const wid = positiveDimCm(p.widthCm);
-    const hgt = positiveDimCm(p.heightCm);
+    const len = positiveDimCm(p?.lengthCm);
+    const wid = positiveDimCm(p?.widthCm);
+    const hgt = positiveDimCm(p?.heightCm);
     if (len != null) lengthCm = Math.max(lengthCm, len);
     if (wid != null) widthCm = Math.max(widthCm, wid);
     if (hgt != null) heightCm = Math.max(heightCm, hgt);
@@ -168,6 +178,24 @@ function validateOrderForLabel(order: OrderForLabel): {
   }
 
   const destCep = (order.destinationCep ?? "").replace(/\D/g, "");
+  const hasDeliveryAddress = Boolean(
+    destCep.length === 8 &&
+      order.addressStreet &&
+      order.addressCity &&
+      order.addressState
+  );
+
+  if (
+    order.customerDataStatus === CustomerDataStatus.PENDING &&
+    !hasDeliveryAddress
+  ) {
+    throw new ShippingQuoteError(
+      "VALIDATION",
+      "Aguardando o preenchimento dos dados de entrega.",
+      400
+    );
+  }
+
   if (destCep.length !== 8) {
     throw new ShippingQuoteError(
       "VALIDATION",
@@ -200,7 +228,7 @@ function buildLabelInput(order: OrderForLabel): LabelInput {
   for (const item of order.items) {
     totalInsurance += item.price * item.quantity;
     products.push({
-      name: item.product.name,
+      name: orderItemDisplayName(item),
       quantity: item.quantity,
       unitary_value: item.price,
     });

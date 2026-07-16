@@ -134,6 +134,9 @@ export async function createOrderFromCheckout(input: {
   return prisma.$transaction(async (tx) => {
     const resolved: {
       productId: string;
+      productName: string;
+      productDescription: string | null;
+      productImageUrl: string | null;
       quantity: number;
       price: number;
       pieceSelections?: CartPieceSelection[];
@@ -147,10 +150,17 @@ export async function createOrderFromCheckout(input: {
         where: { id: line.productId },
         select: {
           id: true,
+          name: true,
+          description: true,
           price: true,
           pixPrice: true,
           stockType: true,
           stockQuantity: true,
+          images: {
+            orderBy: { order: "asc" as const },
+            take: 1,
+            select: { url: true },
+          },
         },
       });
 
@@ -177,6 +187,9 @@ export async function createOrderFromCheckout(input: {
 
       resolved.push({
         productId: product.id,
+        productName: product.name.trim() || "Produto",
+        productDescription: product.description?.trim() || null,
+        productImageUrl: product.images[0]?.url ?? null,
         quantity: line.quantity,
         price: linePrice,
         ...(line.pieceSelections?.length
@@ -209,6 +222,9 @@ export async function createOrderFromCheckout(input: {
           create: resolved.map((r) => ({
             quantity: r.quantity,
             price: r.price,
+            productName: r.productName,
+            productDescription: r.productDescription,
+            productImageUrl: r.productImageUrl,
             pieceSelectionsJson: r.pieceSelections?.length
               ? JSON.stringify(r.pieceSelections)
               : null,

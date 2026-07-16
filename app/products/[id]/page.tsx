@@ -17,7 +17,9 @@ export default async function ProductPage({ params }: ProductPageProps) {
     include: productFullInclude,
   });
 
-  if (!product) notFound();
+  if (!product || !product.visibleOnSite || product.images.length === 0) {
+    notFound();
+  }
 
   const coverImage = product.images[0]?.url ?? "";
 

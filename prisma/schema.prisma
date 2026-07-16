@@ -276,8 +276,13 @@ model OrderItem {
   id        String  @id @default(cuid())
   orderId   String
   order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId String
-  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  /** Referência opcional ao catálogo; null se o produto foi excluído. */
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  /** Snapshot do produto no momento da venda (histórico independente do catálogo). */
+  productName         String
+  productDescription  String?
+  productImageUrl     String?
   quantity  Int
   /** Preço de tabela do catálogo no momento da venda (product.price). */
   catalogListPrice      Float?
@@ -300,6 +305,7 @@ model OrderItem {
   pieceSelectionsJson String?
 
   @@index([orderId])
+  @@index([productId])
 }
 
 model Category {
@@ -356,6 +362,8 @@ model Product {
   lengthCm      Float?
   widthCm       Float?
   heightCm      Float?
+  /** Se false, o produto não aparece na vitrine / busca pública. */
+  visibleOnSite Boolean           @default(true)
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
   images        ProductImage[]

@@ -206,11 +206,16 @@ export default async function MinhaContaPage() {
                   quantity: it.quantity,
                   price: it.price,
                   pieceSelectionsJson: it.pieceSelectionsJson,
-                  product: {
-                    id: it.product.id,
-                    name: it.product.name,
-                    images: it.product.images,
-                  },
+                  productId: it.productId,
+                  productName: it.productName,
+                  productImageUrl: it.productImageUrl,
+                  product: it.product
+                    ? {
+                        id: it.product.id,
+                        name: it.product.name,
+                        images: it.product.images,
+                      }
+                    : null,
                 })),
               }))}
             />

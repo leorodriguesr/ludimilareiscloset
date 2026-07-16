@@ -50,12 +50,12 @@ export async function POST(request: NextRequest) {
 
   const name = typeof b.name === "string" ? b.name : "";
   const price = b.price;
-  const images = Array.isArray(b.images) ? b.images : null;
+  const images = Array.isArray(b.images) ? b.images : [];
   const piecesRaw = Array.isArray(b.pieces) ? b.pieces : [];
 
-  if (!name.trim() || price == null || !images?.length) {
+  if (!name.trim() || price == null) {
     return NextResponse.json(
-      { error: "Nome, preço e pelo menos uma imagem são obrigatórios." },
+      { error: "Nome e preço são obrigatórios." },
       { status: 400 }
     );
   }
@@ -114,6 +114,14 @@ export async function POST(request: NextRequest) {
     stockQuantity =
       Number.isFinite(q) && q >= 0 ? Math.floor(q) : 0;
   }
+
+  const visibleOnSite =
+    b.visibleOnSite === false ||
+    b.visibleOnSite === 0 ||
+    b.visibleOnSite === "0" ||
+    b.visibleOnSite === "false"
+      ? false
+      : true;
 
   const weightRaw = b.weightGrams;
   let weightGrams: number | null = null;
@@ -272,13 +280,14 @@ export async function POST(request: NextRequest) {
           videoUrl,
           stockType,
           stockQuantity,
+          visibleOnSite,
           weightGrams,
           lengthCm,
           widthCm,
           heightCm,
-          images: {
-            create: imageCreates,
-          },
+          ...(imageCreates.length > 0
+            ? { images: { create: imageCreates } }
+            : {}),
           categories:
             categoryIds.length > 0
               ? {

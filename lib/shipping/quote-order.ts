@@ -33,11 +33,23 @@ export async function quoteShippingForOrder(orderId: string) {
     throw new ShippingQuoteError("VALIDATION", "Pedido sem itens para cotar frete.", 400);
   }
 
-  return quoteShippingForCartLines(
-    order.items.map((item) => ({
+  const lines = order.items
+    .filter(
+      (item): item is typeof item & { productId: string } =>
+        typeof item.productId === "string" && item.productId.length > 0
+    )
+    .map((item) => ({
       productId: item.productId,
       quantity: item.quantity,
-    })),
-    destCep
-  );
+    }));
+
+  if (!lines.length) {
+    throw new ShippingQuoteError(
+      "VALIDATION",
+      "Pedido sem produtos do catálogo para cotar frete.",
+      400
+    );
+  }
+
+  return quoteShippingForCartLines(lines, destCep);
 }

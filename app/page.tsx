@@ -5,6 +5,7 @@ import { TrustBar } from "@/components/TrustBar";
 import { ProductCard } from "@/components/ProductCard";
 import { CategoryFilter } from "@/components/CategoryFilter";
 import { productListInclude } from "@/lib/product-include";
+import { publicCatalogProductWhere } from "@/lib/public-product-where";
 import { isSizeOnlyColorName } from "@/lib/piece-size-only-color";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +26,7 @@ export default async function Home({ searchParams }: HomeProps) {
             orderBy: { order: "asc" },
             include: {
               products: {
+                where: { product: publicCatalogProductWhere },
                 include: {
                   product: { include: productListInclude },
                 },
@@ -33,7 +35,12 @@ export default async function Home({ searchParams }: HomeProps) {
           }),
       categoryId
         ? prisma.product.findMany({
-            where: { categories: { some: { categoryId } } },
+            where: {
+              AND: [
+                publicCatalogProductWhere,
+                { categories: { some: { categoryId } } },
+              ],
+            },
             orderBy: { createdAt: "desc" },
             include: productListInclude,
           })
@@ -42,11 +49,16 @@ export default async function Home({ searchParams }: HomeProps) {
         ? Promise.resolve([])
         : prisma.product.findMany({
             where: {
-              NOT: {
-                sections: {
-                  some: { section: { isActive: true } },
+              AND: [
+                publicCatalogProductWhere,
+                {
+                  NOT: {
+                    sections: {
+                      some: { section: { isActive: true } },
+                    },
+                  },
                 },
-              },
+              ],
             },
             orderBy: { createdAt: "desc" },
             include: productListInclude,

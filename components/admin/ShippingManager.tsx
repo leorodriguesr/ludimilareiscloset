@@ -892,10 +892,8 @@ function ShipmentRow({
   onToggleSelect: () => void;
   onChangeShipping: () => void;
 }) {
-  const { busy, trackingCode, awaitingTracking, runAction } = useShipmentActions(
-    order,
-    onRefresh
-  );
+  const { busy, error, trackingCode, awaitingTracking, runAction } =
+    useShipmentActions(order, onRefresh);
   const caps = shipmentCapabilities(order);
   const freightPrice = chosenShippingPrice(order);
   const freightTypeLabel = shipmentFreightTypeLabel(order);
@@ -935,6 +933,14 @@ function ShipmentRow({
               <LabelAutoGenerateWarningIcon title={caps.labelAutoGenerateTitle} />
             ) : null}
           </div>
+          {error ? (
+            <p
+              className="mt-1.5 max-w-[16rem] rounded-md border border-red-200 bg-red-50 px-2 py-1.5 text-xs leading-snug text-red-700"
+              role="alert"
+            >
+              {error}
+            </p>
+          ) : null}
         </div>
       </td>
       <td className="px-4 py-3.5">
@@ -1237,9 +1243,24 @@ export function ShippingManager() {
               type="button"
               onClick={() => void fetchWallet()}
               disabled={walletLoading}
-              className={`rounded-lg border border-stone-200 bg-white px-3 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50 ${SHIPPING_TOOLBAR_SIZE}`}
+              aria-label="Atualizar saldo"
+              title="Atualizar saldo"
+              className={`inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50 ${SHIPPING_TOOLBAR_SIZE}`}
             >
-              Atualizar saldo
+              <svg
+                className={`h-3 w-3 ${walletLoading ? "animate-spin" : ""}`}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                viewBox="0 0 24 24"
+                aria-hidden
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"
+                />
+              </svg>
             </button>
           </div>
         </div>

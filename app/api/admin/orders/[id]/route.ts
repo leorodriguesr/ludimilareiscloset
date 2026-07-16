@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { FulfillmentType } from "@/app/generated/prisma/client";
+import {
+  CustomerDataStatus,
+  FulfillmentType,
+} from "@/app/generated/prisma/client";
 import { isCarrierShippingStatusLocked } from "@/lib/fulfillment/shipping-status-policy";
 import { prisma } from "@/lib/prisma";
 import { requireAdminApi } from "@/lib/require-admin-api";
@@ -198,6 +201,11 @@ export async function PATCH(
       return NextResponse.json({ error: "Informe a UF." }, { status: 400 });
     }
     updates.addressState = addressState.toUpperCase();
+  }
+
+  // Edição manual no admin equivale ao preenchimento pelo cliente.
+  if (isCustomerUpdate) {
+    updates.customerDataStatus = CustomerDataStatus.COMPLETE;
   }
 
   if (Object.keys(updates).length === 0) {

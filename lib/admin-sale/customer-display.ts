@@ -14,6 +14,52 @@ export function isPendingAdminSaleCustomer(order: {
   );
 }
 
+/** Dados mínimos já preenchidos (admin ou cliente) — não oferecer link de completar. */
+export function hasFilledAdminSaleCustomerData(order: {
+  fulfillmentType?: string | null;
+  recipientName?: string | null;
+  phone?: string | null;
+  addressStreet?: string | null;
+  addressCity?: string | null;
+  addressState?: string | null;
+  destinationCep?: string | null;
+}): boolean {
+  if (!order.recipientName?.trim()) return false;
+
+  if (order.fulfillmentType === "ARRANGED") {
+    return (order.phone ?? "").replace(/\D/g, "").length >= 10;
+  }
+
+  const cep = (order.destinationCep ?? "").replace(/\D/g, "");
+  return Boolean(
+    order.addressStreet?.trim() &&
+      order.addressCity?.trim() &&
+      order.addressState?.trim() &&
+      cep.length === 8
+  );
+}
+
+/** Link “completar dados” só quando ainda falta o preenchimento. */
+export function shouldOfferCustomerDataFillLink(order: {
+  orderSource?: string;
+  customerDataStatus?: string | null;
+  customerDataToken?: string | null;
+  fulfillmentType?: string | null;
+  recipientName?: string | null;
+  phone?: string | null;
+  addressStreet?: string | null;
+  addressCity?: string | null;
+  addressState?: string | null;
+  destinationCep?: string | null;
+}): boolean {
+  return (
+    order.orderSource === "ADMIN_SALE" &&
+    order.customerDataStatus === "PENDING" &&
+    Boolean(order.customerDataToken) &&
+    !hasFilledAdminSaleCustomerData(order)
+  );
+}
+
 export function orderCustomerDisplayName(order: {
   orderSource?: string;
   customerDataStatus?: string | null;

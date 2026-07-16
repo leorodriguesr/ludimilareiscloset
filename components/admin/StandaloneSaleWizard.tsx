@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import Image from "next/image";
 import { PieceSelector } from "@/components/product/PieceSelector";
 import { formatPrice } from "@/lib/format";
@@ -60,6 +67,8 @@ type Props = {
   products: Product[];
   onClose: () => void;
   onCreated: () => void;
+  /** Chamado quando um produto rápido é cadastrado na venda. */
+  onProductCreated?: (product: Product) => void;
 };
 
 const STEPS = [
@@ -329,6 +338,165 @@ function CustomerSearchSelect({
   );
 }
 
+function QuickSaleProductForm({
+  onCreated,
+  onCancel,
+}: {
+  onCreated: (product: Product) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [cardPrice, setCardPrice] = useState("");
+  const [pixPrice, setPixPrice] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const cardPriceNum = Number(cardPrice.replace(",", "."));
+  const pixPriceNum = Number(pixPrice.replace(",", "."));
+  const canSubmit =
+    name.trim().length > 0 &&
+    description.trim().length > 0 &&
+    cardPrice.trim().length > 0 &&
+    pixPrice.trim().length > 0 &&
+    Number.isFinite(cardPriceNum) &&
+    cardPriceNum >= 0 &&
+    Number.isFinite(pixPriceNum) &&
+    pixPriceNum >= 0;
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!canSubmit) {
+      setFormError("Preencha todos os campos para continuar.");
+      return;
+    }
+
+    setLoading(true);
+    setFormError(null);
+    try {
+      const res = await fetch("/api/products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          description: description.trim(),
+          price: cardPriceNum,
+          pixPrice: pixPriceNum,
+          images: [],
+          stockType: "UNLIMITED",
+          pieces: [],
+          visibleOnSite: false,
+        }),
+      });
+      const data = (await res.json()) as Product & { error?: string };
+      if (!res.ok) {
+        setFormError(data.error ?? "Não foi possível cadastrar o produto.");
+        return;
+      }
+      onCreated(data);
+    } catch {
+      setFormError("Não foi possível cadastrar o produto.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="space-y-3 rounded-xl border border-stone-200 bg-stone-50/80 p-4"
+    >
+      <div>
+        <p className="text-sm font-semibold text-stone-900">Novo produto rápido</p>
+        <p className="mt-0.5 text-xs text-stone-500">
+          Cadastro mínimo para a venda — sem foto nem estoque. A descrição ajuda quem vai embalar.
+        </p>
+      </div>
+
+      {formError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {formError}
+        </div>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="sm:col-span-2">
+          <FieldLabel>Nome da peça</FieldLabel>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            placeholder="Ex.: Vestido floral midi"
+            className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+            autoFocus
+          />
+        </div>
+        <div className="sm:col-span-2">
+          <FieldLabel>Descrição</FieldLabel>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            required
+            rows={3}
+            placeholder="Detalhes para identificar a peça na embalagem (cor, tamanho, marca, observações…)"
+            className="mt-1 w-full resize-y rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+          />
+        </div>
+        <div>
+          <FieldLabel>Preço no cartão</FieldLabel>
+          <div className="relative mt-1">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-stone-400">
+              R$
+            </span>
+            <input
+              value={cardPrice}
+              onChange={(e) => setCardPrice(e.target.value)}
+              required
+              inputMode="decimal"
+              placeholder="0,00"
+              className="w-full rounded-lg border border-stone-200 bg-white py-2 pl-10 pr-3 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+            />
+          </div>
+        </div>
+        <div>
+          <FieldLabel>Preço no Pix</FieldLabel>
+          <div className="relative mt-1">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-stone-400">
+              R$
+            </span>
+            <input
+              value={pixPrice}
+              onChange={(e) => setPixPrice(e.target.value)}
+              required
+              inputMode="decimal"
+              placeholder="0,00"
+              className="w-full rounded-lg border border-stone-200 bg-white py-2 pl-10 pr-3 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap justify-end gap-2 pt-1">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={loading}
+          className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50"
+        >
+          Cancelar
+        </button>
+        <button
+          type="submit"
+          disabled={loading || !canSubmit}
+          className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {loading ? "Salvando…" : "Criar e adicionar"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function ProductSearchSelect({
   products,
   onSelect,
@@ -356,7 +524,7 @@ function ProductSearchSelect({
   }, [open]);
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className="relative min-w-0 flex-1">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -659,10 +827,21 @@ function OrderSummary({
 
 /* ─── Main wizard ────────────────────────────────────────────── */
 
-export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
+export function StandaloneSaleWizard({
+  products,
+  onClose,
+  onCreated,
+  onProductCreated,
+}: Props) {
   const { settings } = useStoreSettings();
   const [step, setStep] = useState(0);
   const [lines, setLines] = useState<WizardLine[]>([]);
+  const [catalog, setCatalog] = useState(products);
+  const [showQuickProduct, setShowQuickProduct] = useState(false);
+
+  useEffect(() => {
+    setCatalog(products);
+  }, [products]);
 
   const [fulfillmentType, setFulfillmentType] = useState<"CARRIER" | "ARRANGED">("CARRIER");
   const [arrangedMode, setArrangedMode] = useState<ArrangedMode | null>(null);
@@ -799,6 +978,15 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
       },
     ]);
     setError(null);
+  }
+
+  function handleQuickProductCreated(product: Product) {
+    setCatalog((prev) =>
+      prev.some((p) => p.id === product.id) ? prev : [product, ...prev]
+    );
+    onProductCreated?.(product);
+    addProduct(product);
+    setShowQuickProduct(false);
   }
 
   async function lookupAddressCep(digits: string) {
@@ -1150,7 +1338,40 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                       Adicione itens e configure cor, tamanho e desconto em cada um.
                     </p>
                   </div>
-                  <ProductSearchSelect products={products} onSelect={addProduct} />
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                    <ProductSearchSelect products={catalog} onSelect={addProduct} />
+                    <button
+                      type="button"
+                      onClick={() => setShowQuickProduct((v) => !v)}
+                      className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border px-3 py-2.5 text-sm font-semibold transition-colors sm:min-w-[9.5rem] ${
+                        showQuickProduct
+                          ? "border-stone-900 bg-stone-900 text-white"
+                          : "border-stone-200 bg-white text-stone-700 hover:border-stone-300 hover:bg-stone-50"
+                      }`}
+                    >
+                      <svg
+                        className="h-4 w-4"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        viewBox="0 0 24 24"
+                        aria-hidden
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M12 4.5v15m7.5-7.5h-15"
+                        />
+                      </svg>
+                      Novo produto
+                    </button>
+                  </div>
+                  {showQuickProduct && (
+                    <QuickSaleProductForm
+                      onCreated={handleQuickProductCreated}
+                      onCancel={() => setShowQuickProduct(false)}
+                    />
+                  )}
                 </section>
 
                 <section className="space-y-3">
@@ -1193,6 +1414,11 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                                   <p className="text-sm font-medium leading-snug text-stone-900 sm:text-[15px]">
                                     {line.product.name}
                                   </p>
+                                  {line.product.description ? (
+                                    <p className="mt-0.5 line-clamp-2 text-xs text-stone-500">
+                                      {line.product.description}
+                                    </p>
+                                  ) : null}
                                   <ProductPrices product={line.product} quantity={line.quantity} />
                                 </div>
                                 <button

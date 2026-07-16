@@ -79,9 +79,19 @@ export interface Product {
   lengthCm: number | null;
   widthCm: number | null;
   heightCm: number | null;
+  visibleOnSite: boolean;
   images: ProductImage[];
   pieces: ProductPiece[];
   categories: ProductCategoryLink[];
   sections: ProductSectionLink[];
   createdAt: string;
+}
+
+/** SQLite/libsql pode devolver 0/1; evita `0 !== false` → true. */
+export function isProductVisibleOnSite(
+  value: boolean | number | null | undefined,
+  defaultWhenMissing = true
+): boolean {
+  if (value === undefined || value === null) return defaultWhenMissing;
+  return value === true || value === 1;
 }

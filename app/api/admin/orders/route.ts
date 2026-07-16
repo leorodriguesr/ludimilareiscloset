@@ -47,6 +47,7 @@ export async function GET(request: NextRequest) {
                 select: {
                   id: true,
                   name: true,
+                  description: true,
                   weightGrams: true,
                   lengthCm: true,
                   widthCm: true,

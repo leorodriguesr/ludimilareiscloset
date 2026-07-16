@@ -47,6 +47,7 @@ export async function PUT(
     videoUrl,
     stockType: stockTypeRaw,
     stockQuantity: stockQtyRaw,
+    visibleOnSite: visibleOnSiteRaw,
     weightGrams: weightRaw,
     lengthCm: lenRaw,
     widthCm: widRaw,
@@ -113,6 +114,15 @@ export async function PUT(
           typeof videoUrl === "string" && videoUrl.trim()
             ? videoUrl.trim()
             : null;
+      }
+
+      if (visibleOnSiteRaw !== undefined) {
+        updateData.visibleOnSite = !(
+          visibleOnSiteRaw === false ||
+          visibleOnSiteRaw === 0 ||
+          visibleOnSiteRaw === "0" ||
+          visibleOnSiteRaw === "false"
+        );
       }
 
       if (stockTypeRaw !== undefined) {
@@ -287,13 +297,56 @@ export async function DELETE(
 
   const { id } = await params;
 
-  try {
-    await prisma.product.delete({ where: { id } });
-    return NextResponse.json({ success: true });
-  } catch {
+  const existing = await prisma.product.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      _count: {
+        select: {
+          stockReservations: true,
+        },
+      },
+    },
+  });
+
+  if (!existing) {
     return NextResponse.json(
       { error: "Produto não encontrado." },
       { status: 404 }
+    );
+  }
+
+  // Pedidos antigos guardam snapshot; só reservas ativas bloqueiam a exclusão.
+  if (existing._count.stockReservations > 0) {
+    return NextResponse.json(
+      {
+        error:
+          "Não é possível excluir: há reserva de estoque pendente neste produto.",
+      },
+      { status: 409 }
+    );
+  }
+
+  try {
+    await prisma.product.delete({ where: { id } });
+    return NextResponse.json({ success: true });
+  } catch (e) {
+    console.error("[DELETE /api/products]", e);
+    if (
+      e instanceof Prisma.PrismaClientKnownRequestError &&
+      e.code === "P2003"
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Não é possível excluir: este produto está vinculado a outros registros.",
+        },
+        { status: 409 }
+      );
+    }
+    return NextResponse.json(
+      { error: "Não foi possível excluir o produto." },
+      { status: 500 }
     );
   }
 }

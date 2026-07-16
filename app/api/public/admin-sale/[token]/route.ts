@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateCustomerDataToken } from "@/lib/admin-sale/complete-customer-data";
+import { orderItemDisplayName } from "@/lib/orders/order-item-display";
 import { prisma } from "@/lib/prisma";
 import { formatPrice } from "@/lib/format";
 
@@ -22,6 +23,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         select: {
           quantity: true,
           price: true,
+          productName: true,
           product: { select: { name: true } },
         },
       },
@@ -38,7 +40,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     totalFormatted: formatPrice(order.total),
     fulfillmentType: order.fulfillmentType,
     items: order.items.map((i) => ({
-      name: i.product.name,
+      name: orderItemDisplayName(i),
       quantity: i.quantity,
       price: i.price,
     })),

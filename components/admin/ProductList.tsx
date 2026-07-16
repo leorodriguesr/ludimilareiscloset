@@ -5,7 +5,7 @@ import { useState } from "react";
 import { formatPrice } from "@/lib/format";
 import { isSizeOnlyColorName } from "@/lib/piece-size-only-color";
 import { installmentValueEqualParts } from "@/lib/product-pricing";
-import type { Product } from "@/lib/types";
+import { isProductVisibleOnSite, type Product } from "@/lib/types";
 import {
   ProductFormModal,
   mapProductToFormData,
@@ -193,7 +193,14 @@ export function ProductList({
     setDeletingId(id);
     try {
       const res = await fetch(`/api/products/${id}`, { method: "DELETE" });
-      if (res.ok) onRefresh();
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        window.alert(data.error ?? "Não foi possível excluir o produto.");
+        return;
+      }
+      onRefresh();
+    } catch {
+      window.alert("Erro de conexão ao excluir o produto.");
     } finally {
       setDeletingId(null);
     }
@@ -279,11 +286,18 @@ export function ProductList({
                     Sem foto
                   </div>
                 )}
-                {product.tag ? (
-                  <span className="absolute left-1.5 top-1.5 max-w-[calc(100%-0.75rem)] truncate rounded-md bg-stone-900/90 px-1.5 py-0.5 text-[8px] font-bold uppercase text-white">
-                    {product.tag}
-                  </span>
-                ) : null}
+                <div className="absolute left-1.5 top-1.5 flex max-w-[calc(100%-0.75rem)] flex-col gap-1">
+                  {!isProductVisibleOnSite(product.visibleOnSite) ? (
+                    <span className="truncate rounded-md bg-amber-500/95 px-1.5 py-0.5 text-[8px] font-bold uppercase text-white">
+                      Oculto no site
+                    </span>
+                  ) : null}
+                  {product.tag ? (
+                    <span className="truncate rounded-md bg-stone-900/90 px-1.5 py-0.5 text-[8px] font-bold uppercase text-white">
+                      {product.tag}
+                    </span>
+                  ) : null}
+                </div>
                 {product.images.length > 1 ? (
                   <span className="absolute bottom-1.5 right-1.5 rounded-md bg-black/50 px-1 py-px text-[8px] font-semibold text-white">
                     +{product.images.length - 1}
