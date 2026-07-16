@@ -76,10 +76,8 @@ function cepMask(v: string) {
   return d.length > 5 ? `${d.slice(0, 5)}-${d.slice(5)}` : d;
 }
 
-function getCarrierTrackingUrl(serviceId: number | null, code: string) {
-  if (serviceId === 3) return `https://www.jadlog.com.br/rastreamento/#tracking/${code}`;
-  if (serviceId === 31) return `https://melhorrastreio.com.br/rastreio/${code}`;
-  return `https://rastreamento.correios.com.br/app/index.php?code=${code}`;
+function getTrackingUrl(code: string) {
+  return `https://rastreamento.superfrete.com/#${encodeURIComponent(code)}`;
 }
 
 function shippingStep(shippingStatus: string, paymentStatus: string): number {
@@ -403,7 +401,6 @@ function TrackingBlock({ order }: { order: AccountOrderListItem }) {
   const [loading, setLoading] = useState(false);
 
   const trackingCode = data?.trackingCode ?? order.trackingCode;
-  const serviceId = data?.shippingServiceId ?? order.shippingServiceId;
   const deliveryMin = data?.deliveryMin ?? order.shippingDeliveryDaysMin;
   const deliveryMax = data?.deliveryMax ?? order.shippingDeliveryDaysMax;
 
@@ -440,7 +437,7 @@ function TrackingBlock({ order }: { order: AccountOrderListItem }) {
             <p className="mt-0.5 font-mono text-sm font-medium text-stone-900">{trackingCode}</p>
           </div>
           <a
-            href={getCarrierTrackingUrl(serviceId, trackingCode)}
+            href={getTrackingUrl(trackingCode)}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 rounded-lg bg-stone-900 px-4 py-2 text-xs font-semibold text-white transition hover:bg-stone-700"
