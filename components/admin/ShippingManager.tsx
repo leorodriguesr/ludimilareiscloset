@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import { formatPrice } from "@/lib/format";
 import { formatDeliveryDaysLabel } from "@/lib/shipping/delivery-days-label";
@@ -145,6 +153,64 @@ function chosenShippingPrice(order: ShipmentOrder): number | null {
 
 function trackingUrl(code: string) {
   return `https://rastreamento.superfrete.com/#${encodeURIComponent(code)}`;
+}
+
+function CopyTrackingLinkButton({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy(e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(trackingUrl(code));
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => void handleCopy(e)}
+      title={copied ? "Link copiado!" : "Copiar link de rastreio"}
+      aria-label={copied ? "Link de rastreio copiado" : "Copiar link de rastreio"}
+      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700"
+    >
+      {copied ? (
+        <svg
+          className="h-3.5 w-3.5 text-emerald-600"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          viewBox="0 0 24 24"
+          aria-hidden
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="m4.5 12.75 6 6 9-13.5"
+          />
+        </svg>
+      ) : (
+        <svg
+          className="h-3.5 w-3.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.8}
+          viewBox="0 0 24 24"
+          aria-hidden
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z"
+          />
+        </svg>
+      )}
+    </button>
+  );
 }
 
 function shortCarrierLabel(serviceName: string | null): string | null {
@@ -965,14 +1031,17 @@ function ShipmentRow({
       </td>
       <td className="px-4 py-3.5">
         {trackingCode ? (
-          <a
-            href={trackingUrl(trackingCode)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-mono text-sm text-stone-800 underline decoration-stone-300 underline-offset-2 hover:text-stone-950"
-          >
-            {trackingCode}
-          </a>
+          <div className="flex items-center gap-1.5">
+            <a
+              href={trackingUrl(trackingCode)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-sm text-stone-800 underline decoration-stone-300 underline-offset-2 hover:text-stone-950"
+            >
+              {trackingCode}
+            </a>
+            <CopyTrackingLinkButton code={trackingCode} />
+          </div>
         ) : order.labelUrl || order.superfreteShipmentId || awaitingTracking ? (
           <span className="text-xs text-stone-400">Aguardando…</span>
         ) : (
