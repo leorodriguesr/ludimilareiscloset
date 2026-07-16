@@ -15,6 +15,9 @@ import type { Product } from "@/lib/types";
 import type { NormalizedShippingOption } from "@/lib/shipping/types";
 import { parseDiscountInputValue } from "@/lib/admin-sale/parse-discount-value";
 import {
+  ADDRESS_COMPLEMENT_MAX_LENGTH,
+  ADDRESS_NUMBER_MAX_LENGTH,
+  CUSTOMER_NAME_MAX_LENGTH,
   isCustomerContactAddressComplete,
   isCustomerNamePhoneComplete,
 } from "@/lib/admin-sale/customer-form-complete";
@@ -1452,9 +1455,18 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                       <div>
                         <FieldLabel>Nome</FieldLabel>
                         <TextInput
+                          maxLength={CUSTOMER_NAME_MAX_LENGTH}
                           value={contact.name}
-                          onChange={(e) => setContact((c) => ({ ...c, name: e.target.value }))}
+                          onChange={(e) =>
+                            setContact((c) => ({
+                              ...c,
+                              name: e.target.value.slice(0, CUSTOMER_NAME_MAX_LENGTH),
+                            }))
+                          }
                         />
+                        <p className="mt-1 text-[10px] text-stone-400">
+                          Máx. {CUSTOMER_NAME_MAX_LENGTH} caracteres
+                        </p>
                       </div>
                       <div>
                         <FieldLabel>Telefone</FieldLabel>
@@ -1484,8 +1496,20 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                       </p>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <div>
-                          <FieldLabel>Nome</FieldLabel>
-                          <TextInput value={contact.name} onChange={(e) => setContact((c) => ({ ...c, name: e.target.value }))} />
+                          <FieldLabel>Nome completo</FieldLabel>
+                          <TextInput
+                            maxLength={CUSTOMER_NAME_MAX_LENGTH}
+                            value={contact.name}
+                            onChange={(e) =>
+                              setContact((c) => ({
+                                ...c,
+                                name: e.target.value.slice(0, CUSTOMER_NAME_MAX_LENGTH),
+                              }))
+                            }
+                          />
+                          <p className="mt-1 text-[10px] text-stone-400">
+                            Máx. {CUSTOMER_NAME_MAX_LENGTH} caracteres
+                          </p>
                         </div>
                         <div>
                           <FieldLabel optional>E-mail</FieldLabel>
@@ -1558,22 +1582,42 @@ export function StandaloneSaleWizard({ products, onClose, onCreated }: Props) {
                         <div>
                           <FieldLabel>Número</FieldLabel>
                           <TextInput
+                            maxLength={ADDRESS_NUMBER_MAX_LENGTH}
                             value={address.number}
                             onChange={(e) => {
                               setAddressFromLastOrder(false);
-                              setAddress((a) => ({ ...a, number: e.target.value }));
+                              setAddress((a) => ({
+                                ...a,
+                                number: e.target.value.slice(
+                                  0,
+                                  ADDRESS_NUMBER_MAX_LENGTH
+                                ),
+                              }));
                             }}
                           />
+                          <p className="mt-1 text-[10px] text-stone-400">
+                            Máx. {ADDRESS_NUMBER_MAX_LENGTH} caracteres
+                          </p>
                         </div>
                         <div>
                           <FieldLabel optional>Complemento</FieldLabel>
                           <TextInput
+                            maxLength={ADDRESS_COMPLEMENT_MAX_LENGTH}
                             value={address.complement}
                             onChange={(e) => {
                               setAddressFromLastOrder(false);
-                              setAddress((a) => ({ ...a, complement: e.target.value }));
+                              setAddress((a) => ({
+                                ...a,
+                                complement: e.target.value.slice(
+                                  0,
+                                  ADDRESS_COMPLEMENT_MAX_LENGTH
+                                ),
+                              }));
                             }}
                           />
+                          <p className="mt-1 text-[10px] text-stone-400">
+                            Máx. {ADDRESS_COMPLEMENT_MAX_LENGTH} caracteres
+                          </p>
                         </div>
                         <div>
                           <FieldLabel>Bairro</FieldLabel>

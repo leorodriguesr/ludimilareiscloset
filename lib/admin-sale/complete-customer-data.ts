@@ -5,6 +5,9 @@ import {
   OrderSource,
 } from "@/app/generated/prisma/client";
 import {
+  ADDRESS_COMPLEMENT_MAX_LENGTH,
+  ADDRESS_NUMBER_MAX_LENGTH,
+  CUSTOMER_NAME_MAX_LENGTH,
   customerContactAddressValidationError,
   customerNamePhoneValidationError,
 } from "@/lib/admin-sale/customer-form-complete";
@@ -136,7 +139,7 @@ export async function submitCustomerData(
   const order = await prisma.order.update({
     where: { id: validation.orderId },
     data: {
-      recipientName: data.name.trim(),
+      recipientName: data.name.trim().slice(0, CUSTOMER_NAME_MAX_LENGTH),
       email: contactEmail,
       phone: data.phone.trim(),
       ...(isArranged
@@ -145,8 +148,14 @@ export async function submitCustomerData(
             cpf: data.cpf?.trim() || null,
             destinationCep,
             addressStreet: data.addressStreet!.trim(),
-            addressNumber: data.addressNumber!.trim(),
-            addressComplement: data.addressComplement?.trim() || null,
+            addressNumber: data.addressNumber!
+              .trim()
+              .slice(0, ADDRESS_NUMBER_MAX_LENGTH),
+            addressComplement: data.addressComplement?.trim()
+              ? data.addressComplement
+                  .trim()
+                  .slice(0, ADDRESS_COMPLEMENT_MAX_LENGTH)
+              : null,
             addressNeighborhood: data.addressNeighborhood!.trim(),
             addressCity: data.addressCity!.trim(),
             addressState: data.addressState!.trim().toUpperCase().slice(0, 2),

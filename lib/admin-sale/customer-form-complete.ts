@@ -1,5 +1,10 @@
 import { cpfValidationError, isValidCpf } from "@/lib/validation/cpf";
 
+/** Limites de campos do cliente (etiqueta / SuperFrete). */
+export const CUSTOMER_NAME_MAX_LENGTH = 30;
+export const ADDRESS_NUMBER_MAX_LENGTH = 10;
+export const ADDRESS_COMPLEMENT_MAX_LENGTH = 20;
+
 export type CustomerContactAddressFields = {
   name: string;
   email: string;
@@ -28,6 +33,7 @@ export function isCustomerNamePhoneComplete(
   data: CustomerNamePhoneFields
 ): boolean {
   if (!data.name.trim()) return false;
+  if (data.name.trim().length > CUSTOMER_NAME_MAX_LENGTH) return false;
   if (digits(data.phone).length < 10) return false;
   return true;
 }
@@ -35,8 +41,14 @@ export function isCustomerNamePhoneComplete(
 export function customerNamePhoneValidationError(
   data: CustomerNamePhoneFields
 ): string | null {
-  if (isCustomerNamePhoneComplete(data)) return null;
-  return "Informe o nome e o telefone do cliente.";
+  if (!data.name.trim()) return "Informe o nome e o telefone do cliente.";
+  if (data.name.trim().length > CUSTOMER_NAME_MAX_LENGTH) {
+    return `Nome: no máximo ${CUSTOMER_NAME_MAX_LENGTH} caracteres.`;
+  }
+  if (digits(data.phone).length < 10) {
+    return "Informe o nome e o telefone do cliente.";
+  }
+  return null;
 }
 
 /** Contato + endereço (transportadora). E-mail e complemento são opcionais. */
@@ -45,12 +57,15 @@ export function isCustomerContactAddressComplete(
 ): boolean {
   const email = data.email.trim();
   if (!data.name.trim()) return false;
+  if (data.name.trim().length > CUSTOMER_NAME_MAX_LENGTH) return false;
   if (email && (!email.includes("@") || !email.includes("."))) return false;
   if (digits(data.phone).length < 10) return false;
   if (!isValidCpf(data.cpf)) return false;
   if (digits(data.destinationCep).length !== 8) return false;
   if (!data.street.trim()) return false;
   if (!data.number.trim()) return false;
+  if (data.number.trim().length > ADDRESS_NUMBER_MAX_LENGTH) return false;
+  if (data.complement.trim().length > ADDRESS_COMPLEMENT_MAX_LENGTH) return false;
   if (!data.neighborhood.trim()) return false;
   if (!data.city.trim()) return false;
   if (data.state.trim().length !== 2) return false;
@@ -61,6 +76,9 @@ export function customerContactAddressValidationError(
   data: CustomerContactAddressFields
 ): string | null {
   if (!data.name.trim()) return "Preencha todos os dados de contato e endereço.";
+  if (data.name.trim().length > CUSTOMER_NAME_MAX_LENGTH) {
+    return `Nome: no máximo ${CUSTOMER_NAME_MAX_LENGTH} caracteres.`;
+  }
   const email = data.email.trim();
   if (email && (!email.includes("@") || !email.includes("."))) {
     return "Informe um e-mail válido.";
@@ -81,6 +99,12 @@ export function customerContactAddressValidationError(
     data.state.trim().length !== 2
   ) {
     return "Preencha todos os dados de contato e endereço.";
+  }
+  if (data.number.trim().length > ADDRESS_NUMBER_MAX_LENGTH) {
+    return `Número: no máximo ${ADDRESS_NUMBER_MAX_LENGTH} caracteres.`;
+  }
+  if (data.complement.trim().length > ADDRESS_COMPLEMENT_MAX_LENGTH) {
+    return `Complemento: no máximo ${ADDRESS_COMPLEMENT_MAX_LENGTH} caracteres.`;
   }
   return null;
 }

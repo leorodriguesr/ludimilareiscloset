@@ -19,6 +19,9 @@ import {
   generateCustomerDataToken,
 } from "@/lib/admin-sale/complete-customer-data";
 import {
+  ADDRESS_COMPLEMENT_MAX_LENGTH,
+  ADDRESS_NUMBER_MAX_LENGTH,
+  CUSTOMER_NAME_MAX_LENGTH,
   customerContactAddressValidationError,
   customerNamePhoneValidationError,
 } from "@/lib/admin-sale/customer-form-complete";
@@ -299,16 +302,26 @@ export async function createAdminSale(
         packageWidthCm: shipping.packageWidthCm,
         packageLengthCm: shipping.packageLengthCm,
         packageWeightKg: shipping.packageWeightKg,
-        recipientName: fillNow ? input.contact!.name.trim() : null,
+        recipientName: fillNow
+          ? input.contact!.name.trim().slice(0, CUSTOMER_NAME_MAX_LENGTH)
+          : null,
         phone: fillNow ? input.contact!.phone.trim() : null,
         cpf: fillNow && !isArranged ? input.contact!.cpf?.trim() || null : null,
         addressStreet:
           fillNow && !isArranged ? input.address?.street.trim() || null : null,
         addressNumber:
-          fillNow && !isArranged ? input.address?.number.trim() || null : null,
+          fillNow && !isArranged
+            ? input.address?.number.trim()
+              ? input.address.number.trim().slice(0, ADDRESS_NUMBER_MAX_LENGTH)
+              : null
+            : null,
         addressComplement:
           fillNow && !isArranged
-            ? input.address?.complement?.trim() || null
+            ? input.address?.complement?.trim()
+              ? input.address.complement
+                  .trim()
+                  .slice(0, ADDRESS_COMPLEMENT_MAX_LENGTH)
+              : null
             : null,
         addressNeighborhood:
           fillNow && !isArranged

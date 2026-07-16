@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  ADDRESS_COMPLEMENT_MAX_LENGTH,
+  ADDRESS_NUMBER_MAX_LENGTH,
+  CUSTOMER_NAME_MAX_LENGTH,
   isCustomerContactAddressComplete,
   isCustomerNamePhoneComplete,
 } from "@/lib/admin-sale/customer-form-complete";
@@ -207,9 +210,18 @@ export function CompleteAdminSaleDataForm({ token }: Props) {
             <FieldLabel>Nome</FieldLabel>
             <TextInput
               autoComplete="name"
+              maxLength={CUSTOMER_NAME_MAX_LENGTH}
               value={form.name}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  name: e.target.value.slice(0, CUSTOMER_NAME_MAX_LENGTH),
+                }))
+              }
             />
+            <p className="mt-1 text-[10px] text-stone-400">
+              Máx. {CUSTOMER_NAME_MAX_LENGTH} caracteres
+            </p>
           </div>
           <div>
             <FieldLabel>Telefone</FieldLabel>
@@ -238,9 +250,18 @@ export function CompleteAdminSaleDataForm({ token }: Props) {
                 <FieldLabel>Nome completo</FieldLabel>
                 <TextInput
                   autoComplete="name"
+                  maxLength={CUSTOMER_NAME_MAX_LENGTH}
                   value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      name: e.target.value.slice(0, CUSTOMER_NAME_MAX_LENGTH),
+                    }))
+                  }
                 />
+                <p className="mt-1 text-[10px] text-stone-400">
+                  Máx. {CUSTOMER_NAME_MAX_LENGTH} caracteres
+                </p>
               </div>
               <div>
                 <FieldLabel optional>E-mail</FieldLabel>
@@ -323,20 +344,40 @@ export function CompleteAdminSaleDataForm({ token }: Props) {
               <div>
                 <FieldLabel>Número</FieldLabel>
                 <TextInput
+                  maxLength={ADDRESS_NUMBER_MAX_LENGTH}
                   value={form.addressNumber}
                   onChange={(e) =>
-                    setForm((f) => ({ ...f, addressNumber: e.target.value }))
+                    setForm((f) => ({
+                      ...f,
+                      addressNumber: e.target.value.slice(
+                        0,
+                        ADDRESS_NUMBER_MAX_LENGTH
+                      ),
+                    }))
                   }
                 />
+                <p className="mt-1 text-[10px] text-stone-400">
+                  Máx. {ADDRESS_NUMBER_MAX_LENGTH} caracteres
+                </p>
               </div>
               <div>
                 <FieldLabel optional>Complemento</FieldLabel>
                 <TextInput
+                  maxLength={ADDRESS_COMPLEMENT_MAX_LENGTH}
                   value={form.addressComplement}
                   onChange={(e) =>
-                    setForm((f) => ({ ...f, addressComplement: e.target.value }))
+                    setForm((f) => ({
+                      ...f,
+                      addressComplement: e.target.value.slice(
+                        0,
+                        ADDRESS_COMPLEMENT_MAX_LENGTH
+                      ),
+                    }))
                   }
                 />
+                <p className="mt-1 text-[10px] text-stone-400">
+                  Máx. {ADDRESS_COMPLEMENT_MAX_LENGTH} caracteres
+                </p>
               </div>
               <div>
                 <FieldLabel>Bairro</FieldLabel>
