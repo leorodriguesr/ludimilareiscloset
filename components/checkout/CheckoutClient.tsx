@@ -29,6 +29,11 @@ import type { CartPieceSelection } from "@/lib/cart/types";
 import { useStoreSettings } from "@/lib/hooks/use-store-settings";
 import { checkFreeShipping } from "@/lib/shipping/free-shipping";
 import { formatEstimatedDeliveryLabel } from "@/lib/shipping/delivery-days-label";
+import {
+  ADDRESS_COMPLEMENT_MAX_LENGTH,
+  ADDRESS_NUMBER_MAX_LENGTH,
+  CUSTOMER_NAME_MAX_LENGTH,
+} from "@/lib/admin-sale/customer-form-complete";
 import { cpfValidationError } from "@/lib/validation/cpf";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -493,6 +498,10 @@ function ContactStep({
 
   const handleNext = useCallback(async () => {
     if (!data.name.trim()) { setError("Informe seu nome."); return; }
+    if (data.name.trim().length > CUSTOMER_NAME_MAX_LENGTH) {
+      setError(`Nome: no máximo ${CUSTOMER_NAME_MAX_LENGTH} caracteres.`);
+      return;
+    }
     if (!data.email.trim()) { setError("Informe seu e-mail."); return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email.trim())) { setError("E-mail inválido."); return; }
     if (data.phone.replace(/\D/g, "").length < 10) { setError("Informe um telefone válido com DDD."); return; }
@@ -540,8 +549,24 @@ function ContactStep({
       )}
       <div>
         <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500" htmlFor="c-name">Nome completo</label>
-        <input id="c-name" type="text" autoComplete="name" placeholder="Seu nome completo"
-          value={data.name} onChange={(e) => onChange({ ...data, name: e.target.value })} className={inputCls} />
+        <input
+          id="c-name"
+          type="text"
+          autoComplete="name"
+          placeholder="Seu nome completo"
+          maxLength={CUSTOMER_NAME_MAX_LENGTH}
+          value={data.name}
+          onChange={(e) =>
+            onChange({
+              ...data,
+              name: e.target.value.slice(0, CUSTOMER_NAME_MAX_LENGTH),
+            })
+          }
+          className={inputCls}
+        />
+        <p className="mt-1 text-[10px] text-stone-400">
+          Máx. {CUSTOMER_NAME_MAX_LENGTH} caracteres
+        </p>
       </div>
       <div>
         <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500" htmlFor="c-email">E-mail</label>
@@ -685,6 +710,16 @@ function DeliveryStep({
     if (cepDigits.length !== 8) { setFormError("Informe um CEP válido."); return; }
     if (!data.street.trim()) { setFormError("Informe a rua/logradouro."); return; }
     if (!data.number.trim()) { setFormError("Informe o número."); return; }
+    if (data.number.trim().length > ADDRESS_NUMBER_MAX_LENGTH) {
+      setFormError(`Número: no máximo ${ADDRESS_NUMBER_MAX_LENGTH} caracteres.`);
+      return;
+    }
+    if (data.complement.trim().length > ADDRESS_COMPLEMENT_MAX_LENGTH) {
+      setFormError(
+        `Complemento: no máximo ${ADDRESS_COMPLEMENT_MAX_LENGTH} caracteres.`
+      );
+      return;
+    }
     if (!data.city.trim() || !data.state.trim()) { setFormError("Informe cidade e estado."); return; }
     if (!selectedId) { setFormError("Selecione uma opção de frete."); return; }
     setFormError(null); onNext();
@@ -745,15 +780,43 @@ function DeliveryStep({
       <div className="grid grid-cols-[minmax(4.5rem,20%)_1fr] gap-4">
         <div>
           <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">Número</label>
-          <input type="text" placeholder="123"
-            value={data.number} onChange={(e) => onChange({ ...data, number: e.target.value })} className={inputCls} />
+          <input
+            type="text"
+            placeholder="123"
+            maxLength={ADDRESS_NUMBER_MAX_LENGTH}
+            value={data.number}
+            onChange={(e) =>
+              onChange({
+                ...data,
+                number: e.target.value.slice(0, ADDRESS_NUMBER_MAX_LENGTH),
+              })
+            }
+            className={inputCls}
+          />
+          <p className="mt-1 text-[10px] text-stone-400">
+            Máx. {ADDRESS_NUMBER_MAX_LENGTH} caracteres
+          </p>
         </div>
         <div>
           <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">
             Complemento <span className="font-normal normal-case tracking-normal text-stone-400">(opcional)</span>
           </label>
-          <input type="text" placeholder="Apto 4"
-            value={data.complement} onChange={(e) => onChange({ ...data, complement: e.target.value })} className={inputCls} />
+          <input
+            type="text"
+            placeholder="Apto 4"
+            maxLength={ADDRESS_COMPLEMENT_MAX_LENGTH}
+            value={data.complement}
+            onChange={(e) =>
+              onChange({
+                ...data,
+                complement: e.target.value.slice(0, ADDRESS_COMPLEMENT_MAX_LENGTH),
+              })
+            }
+            className={inputCls}
+          />
+          <p className="mt-1 text-[10px] text-stone-400">
+            Máx. {ADDRESS_COMPLEMENT_MAX_LENGTH} caracteres
+          </p>
         </div>
       </div>
 
@@ -1522,9 +1585,25 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, initia
         email: loggedIn ? undefined : contact.email.trim(),
         lines: lines.map((l) => ({ productId: l.productId, quantity: l.quantity, ...(l.pieceSelections?.length ? { pieceSelections: l.pieceSelections } : {}) })),
         shipping: { destinationCep: shipping.cep, optionId: shipping.optionId },
-        contact: { name: contact.name.trim() || undefined, phone: contact.phone.replace(/\D/g, "") || undefined },
+        contact: {
+          name: contact.name.trim().slice(0, CUSTOMER_NAME_MAX_LENGTH) || undefined,
+          phone: contact.phone.replace(/\D/g, "") || undefined,
+        },
         cpf: contact.cpf.replace(/\D/g, "") || undefined,
-        address: { street: shipping.street.trim() || undefined, number: shipping.number.trim() || undefined, complement: shipping.complement.trim() || undefined, neighborhood: shipping.neighborhood.trim() || undefined, city: shipping.city.trim() || undefined, state: shipping.state.trim() || undefined },
+        address: {
+          street: shipping.street.trim() || undefined,
+          number:
+            shipping.number.trim().slice(0, ADDRESS_NUMBER_MAX_LENGTH) ||
+            undefined,
+          complement: shipping.complement.trim()
+            ? shipping.complement
+                .trim()
+                .slice(0, ADDRESS_COMPLEMENT_MAX_LENGTH)
+            : undefined,
+          neighborhood: shipping.neighborhood.trim() || undefined,
+          city: shipping.city.trim() || undefined,
+          state: shipping.state.trim() || undefined,
+        },
         paymentMethod,
       });
       if (!res.ok) { setSubmitError(res.error); return; }
