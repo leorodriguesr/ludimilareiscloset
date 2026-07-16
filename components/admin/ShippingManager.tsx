@@ -144,7 +144,7 @@ function chosenShippingPrice(order: ShipmentOrder): number | null {
 }
 
 function trackingUrl(code: string) {
-  return `https://rastreamento.correios.com.br/app/index.php?objeto=${encodeURIComponent(code)}`;
+  return `https://rastreamento.superfrete.com/#${encodeURIComponent(code)}`;
 }
 
 function shortCarrierLabel(serviceName: string | null): string | null {
