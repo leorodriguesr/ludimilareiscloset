@@ -15,6 +15,7 @@ export async function updateOrderShippingOption(orderId: string, optionId: strin
       id: true,
       labelUrl: true,
       superfreteShipmentId: true,
+      shippingStatus: true,
     },
   });
 
@@ -49,6 +50,9 @@ export async function updateOrderShippingOption(orderId: string, optionId: strin
   const shippingServiceId =
     chosen.serviceId ?? parseSuperfreteServiceId(trimmedOptionId);
   const ideal = quote.idealPackage;
+  // Após cancelar etiqueta, limpa rastros cancelados e volta a "por embalar".
+  const nextShippingStatus =
+    order.shippingStatus === "cancelled" ? "to_pack" : order.shippingStatus;
 
   await prisma.$executeRawUnsafe(
     `UPDATE "Order" SET
@@ -61,6 +65,12 @@ export async function updateOrderShippingOption(orderId: string, optionId: strin
       "packageWidthCm" = ?,
       "packageLengthCm" = ?,
       "packageWeightKg" = ?,
+      "trackingCode" = NULL,
+      "superfreteStatus" = NULL,
+      "superfreteShipmentId" = NULL,
+      "labelUrl" = NULL,
+      "labelGeneratedAt" = NULL,
+      "shippingStatus" = ?,
       "updatedAt" = datetime('now')
     WHERE id = ?`,
     shippingQuotedPrice,
@@ -72,6 +82,7 @@ export async function updateOrderShippingOption(orderId: string, optionId: strin
     ideal?.widthCm ?? null,
     ideal?.lengthCm ?? null,
     ideal?.weightKg ?? null,
+    nextShippingStatus,
     orderId
   );
 
@@ -81,5 +92,6 @@ export async function updateOrderShippingOption(orderId: string, optionId: strin
     shippingQuotedPrice,
     shippingDeliveryDaysMin,
     shippingDeliveryDaysMax,
+    shippingStatus: nextShippingStatus,
   };
 }

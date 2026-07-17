@@ -547,6 +547,29 @@ function useShipmentActions(order: ShipmentOrder, onRefresh: () => void) {
   const [localTracking, setLocalTracking] = useState<string | null>(null);
   const [awaitingTracking, setAwaitingTracking] = useState(false);
 
+  // Descarta rastreio otimista quando a etiqueta foi cancelada ou não há envio ativo.
+  useEffect(() => {
+    if (order.shippingStatus === "cancelled") {
+      setLocalTracking(null);
+      setAwaitingTracking(false);
+      return;
+    }
+    if (
+      !order.trackingCode &&
+      !order.labelUrl &&
+      !order.superfreteShipmentId &&
+      !awaitingTracking
+    ) {
+      setLocalTracking(null);
+    }
+  }, [
+    order.shippingStatus,
+    order.trackingCode,
+    order.labelUrl,
+    order.superfreteShipmentId,
+    awaitingTracking,
+  ]);
+
   async function pollTrackingUntilReady(attemptsLeft = 8) {
     if (attemptsLeft <= 0) {
       setAwaitingTracking(false);
@@ -601,7 +624,10 @@ function useShipmentActions(order: ShipmentOrder, onRefresh: () => void) {
       if (opts?.openPdf !== false && data.shipmentId) {
         window.open(`/api/admin/orders/${order.id}/label/pdf`, "_blank");
       }
-      if (data.tracking) {
+      if (key === "cancel") {
+        setLocalTracking(null);
+        setAwaitingTracking(false);
+      } else if (data.tracking) {
         setLocalTracking(data.tracking);
         setAwaitingTracking(false);
       }
