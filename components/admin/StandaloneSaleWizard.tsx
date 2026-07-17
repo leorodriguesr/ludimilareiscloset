@@ -517,7 +517,7 @@ function CustomSaleSetsForm({
     >
       <div className="flex items-start justify-between gap-3 border-b border-stone-200/80 bg-white/80 px-4 py-3.5 sm:px-5">
         <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-stone-900 text-white">
+          {/* <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-stone-900 text-white">
             <svg
               className="h-4 w-4"
               fill="none"
@@ -532,14 +532,14 @@ function CustomSaleSetsForm({
                 d="M12 4.5v15m7.5-7.5h-15"
               />
             </svg>
-          </div>
+          </div> */}
           <div>
             <p className="text-sm font-semibold text-stone-900">
               Registrar venda avulsa
             </p>
-            <p className="mt-0.5 text-xs leading-relaxed text-stone-500">
+            {/* <p className="mt-0.5 text-xs leading-relaxed text-stone-500">
               Descreva o que saiu — sem cadastrar no catálogo.
-            </p>
+            </p> */}
           </div>
         </div>
         <button

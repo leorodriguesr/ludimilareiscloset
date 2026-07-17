@@ -515,19 +515,12 @@ function OrderCard({ order }: { order: AccountOrderListItem }) {
       <div className="grid gap-0 sm:grid-cols-[1fr_220px] sm:divide-x sm:divide-stone-100">
 
         {/* Produtos */}
-        <ul className="divide-y divide-stone-50 px-5 py-1">
+        <ul className="space-y-4 px-5 py-4">
           {order.items.map((line) => {
             const thumb = orderItemDisplayImageUrl(line);
             const name = orderItemDisplayName(line);
             const catalogId = orderItemCatalogProductId(line);
             const sel = parsePieceSelections(line.pieceSelectionsJson);
-            const selText = sel
-              .map((r) => {
-                const d = describeCartPieceSelection(r);
-                return sel.length > 1 ? `${r.pieceName}: ${d}` : d;
-              })
-              .filter(Boolean)
-              .join(" · ");
 
             const thumbNode = (
               <div className="relative h-14 w-12 shrink-0 overflow-hidden rounded-lg bg-stone-100">
@@ -540,7 +533,7 @@ function OrderCard({ order }: { order: AccountOrderListItem }) {
             );
 
             return (
-              <li key={line.id} className="flex items-center gap-3 py-3">
+              <li key={line.id} className="flex items-start gap-3">
                 {catalogId ? (
                   <Link href={`/products/${catalogId}`}>{thumbNode}</Link>
                 ) : (
@@ -548,8 +541,20 @@ function OrderCard({ order }: { order: AccountOrderListItem }) {
                 )}
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-stone-900 line-clamp-2">{name}</p>
-                  {selText && <p className="mt-0.5 text-[11px] text-stone-500">{selText}</p>}
-                  <p className="mt-0.5 text-[11px] tabular-nums text-stone-400">
+                  {sel.length > 0 ? (
+                    <ul className="mt-1.5 space-y-0.5 text-[11px] text-stone-500">
+                      {sel.map((r, i) => {
+                        const detail = describeCartPieceSelection(r);
+                        const label =
+                          sel.length > 1 && r.pieceName
+                            ? `${r.pieceName}: ${detail || "—"}`
+                            : detail || r.pieceName;
+                        if (!label) return null;
+                        return <li key={`${line.id}-piece-${i}`}>{label}</li>;
+                      })}
+                    </ul>
+                  ) : null}
+                  <p className="mt-1 text-[11px] tabular-nums text-stone-400">
                     {line.quantity} × {formatPrice(line.price)}
                   </p>
                 </div>

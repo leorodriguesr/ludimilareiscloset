@@ -1456,14 +1456,14 @@ function OrderRowActionsMenu({
 
 function OrderProductsCards({ order }: { order: AdminOrder }) {
   return (
-    <div className="divide-y divide-stone-100">
+    <div className="space-y-4">
       {order.items.map((item) => {
         const pieces = parsePieces(item.pieceSelectionsJson);
         const img = orderItemDisplayImageUrl(item);
         const name = orderItemDisplayName(item);
         const description = orderItemDisplayDescription(item);
         return (
-          <div key={item.id} className="flex gap-3 py-3 first:pt-0 last:pb-0">
+          <div key={item.id} className="flex gap-3">
             <div className="relative h-16 w-12 shrink-0 overflow-hidden rounded-lg bg-stone-100">
               {img ? (
                 <Image src={img} alt="" fill className="object-cover" sizes="48px" />
@@ -1479,9 +1479,15 @@ function OrderProductsCards({ order }: { order: AdminOrder }) {
                 </p>
               ) : null}
               {pieces.length > 0 ? (
-                <p className="mt-0.5 text-xs text-stone-400">
-                  {pieces.map((p) => [p.pieceName, p.color, p.size].filter(Boolean).join(" · ")).join(" / ")}
-                </p>
+                <ul className="mt-1.5 space-y-0.5 text-xs text-stone-400">
+                  {pieces.map((p, i) => {
+                    const details = [p.pieceName, p.color, p.size]
+                      .filter(Boolean)
+                      .join(" · ");
+                    if (!details) return null;
+                    return <li key={`${item.id}-piece-${i}`}>{details}</li>;
+                  })}
+                </ul>
               ) : null}
               <div className="mt-1.5 flex items-center justify-between gap-2 text-sm">
                 <span className="text-stone-500">
