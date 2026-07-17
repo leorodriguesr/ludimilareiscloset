@@ -1,4 +1,4 @@
-const WHATSAPP_URL = "https://wa.me/5562982181924";
+import { WHATSAPP_URL } from "@/lib/whatsapp";
 
 function WhatsAppIcon({ className }: { className?: string }) {
   return (

@@ -4,6 +4,7 @@ import { Banner } from "@/components/Banner";
 import { TrustBar } from "@/components/TrustBar";
 import { ProductCard } from "@/components/ProductCard";
 import { CategoryFilter } from "@/components/CategoryFilter";
+import { SellerAssistBanner } from "@/components/SellerAssistBanner";
 import { productListInclude } from "@/lib/product-include";
 import { publicCatalogProductWhere } from "@/lib/public-product-where";
 import { isSizeOnlyColorName } from "@/lib/piece-size-only-color";
@@ -103,48 +104,77 @@ export default async function Home({ searchParams }: HomeProps) {
 
         {/* Vista por categoria */}
         {categoryId ? (
-          <section>
-            <div className="">
-              <SectionHeading label={activeCategory?.name ?? "Produtos"} />
-            </div>
-            {filteredProducts.length === 0 ? (
-              <EmptyState message="Nenhum produto encontrado nesta categoria." />
-            ) : (
-              <ProductGrid>
-                <ProductCards products={filteredProducts} />
-              </ProductGrid>
-            )}
-          </section>
+          <div className="space-y-10">
+            <section>
+              <div className="">
+                <SectionHeading label={activeCategory?.name ?? "Produtos"} />
+              </div>
+              {filteredProducts.length === 0 ? (
+                <EmptyState message="Nenhum produto encontrado nesta categoria." />
+              ) : (
+                <ProductGrid>
+                  <ProductCards products={filteredProducts} />
+                </ProductGrid>
+              )}
+            </section>
+            {filteredProducts.length > 0 ? <SellerAssistBanner /> : null}
+          </div>
         ) : !hasTodosProducts ? (
           <EmptyState message="Nenhum produto disponível no momento." />
         ) : (
-          <div className="space-y-10">
-            {sectionProductBlocks.map((block) => (
-              <section key={block.id}>
-                <div className="mb-5">
-                  <SectionHeading label={block.label} />
-                </div>
-                <ProductGrid>
-                  <ProductCards products={block.products} />
-                </ProductGrid>
-              </section>
-            ))}
-            {unsectionedProducts.length > 0 && (
-              <section>
-                {sectionProductBlocks.length > 0 && (
-                  <div className="mb-5">
-                    <SectionHeading label="Produtos" />
-                  </div>
-                )}
-                <ProductGrid>
-                  <ProductCards products={unsectionedProducts} />
-                </ProductGrid>
-              </section>
-            )}
-          </div>
+          <HomeCatalog
+            sectionBlocks={sectionProductBlocks}
+            unsectionedProducts={unsectionedProducts}
+          />
         )}
       </div>
     </>
+  );
+}
+
+function HomeCatalog({
+  sectionBlocks,
+  unsectionedProducts,
+}: {
+  sectionBlocks: { id: string; label: string; products: ProductCardData[] }[];
+  unsectionedProducts: ProductCardData[];
+}) {
+  const blocks: { key: string; label: string | null; products: ProductCardData[] }[] =
+    [
+      ...sectionBlocks.map((b) => ({
+        key: b.id,
+        label: b.label,
+        products: b.products,
+      })),
+      ...(unsectionedProducts.length > 0
+        ? [
+            {
+              key: "unsectioned",
+              label: sectionBlocks.length > 0 ? "Produtos" : null,
+              products: unsectionedProducts,
+            },
+          ]
+        : []),
+    ];
+
+  return (
+    <div className="space-y-10">
+      {blocks.map((block, index) => (
+        <div key={block.key} className="space-y-10">
+          <section>
+            {block.label ? (
+              <div className="mb-5">
+                <SectionHeading label={block.label} />
+              </div>
+            ) : null}
+            <ProductGrid>
+              <ProductCards products={block.products} />
+            </ProductGrid>
+          </section>
+          {index === 0 ? <SellerAssistBanner /> : null}
+        </div>
+      ))}
+    </div>
   );
 }
 
