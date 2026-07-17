@@ -38,28 +38,8 @@ import {
 } from "@/lib/admin-sale/customer-form-input";
 import { cpfValidationError } from "@/lib/validation/cpf";
 import { useStoreSettings } from "@/lib/hooks/use-store-settings";
-import { MESCLADO_BW_HEX } from "@/lib/color-swatch";
-import {
-  SIZE_ONLY_COLOR_HEX,
-  SIZE_ONLY_COLOR_NAME,
-} from "@/lib/piece-size-only-color";
 
-const QUICK_PRODUCT_INSTALLMENTS = 6;
-const QUICK_VARIANT_STOCK = 999;
-const QUICK_SIZES = ["PP", "P", "M", "G", "GG", "XG"] as const;
-const QUICK_COLORS = [
-  { name: "Preto", hex: "#000000" },
-  { name: "Branco", hex: "#FFFFFF" },
-  { name: "Mesclado (Preto/Branco)", hex: MESCLADO_BW_HEX },
-  { name: "Vermelho", hex: "#DC2626" },
-  { name: "Azul", hex: "#2563EB" },
-  { name: "Rosa", hex: "#EC4899" },
-  { name: "Bege", hex: "#D4A574" },
-  { name: "Marrom", hex: "#78350F" },
-  { name: "Verde", hex: "#16A34A" },
-  { name: "Cinza", hex: "#6B7280" },
-  { name: "Nude", hex: "#E8C4A0" },
-] as const;
+const CUSTOM_SET_SIZES = ["PP", "P", "M", "G", "GG"] as const;
 
 type DiscountForm = { mode: "FIXED" | "PERCENT"; value: string };
 
@@ -69,12 +49,45 @@ function buildDiscountPayload(discount: DiscountForm | null | undefined) {
   return { mode: discount.mode, value };
 }
 
-type WizardLine = {
+type WizardCatalogLine = {
   key: string;
+  kind: "catalog";
   product: Product;
   quantity: number;
   selections: PieceSelectionMap;
   itemDiscount: DiscountForm | null;
+};
+
+type CustomSetPiece = {
+  name: string;
+  size: string;
+  color: string;
+};
+
+type WizardCustomLine = {
+  key: string;
+  kind: "custom";
+  description: string;
+  pieces: CustomSetPiece[];
+  unitPrice: number;
+  quantity: number;
+  itemDiscount: DiscountForm | null;
+};
+
+type WizardLine = WizardCatalogLine | WizardCustomLine;
+
+type CustomSetPieceDraft = {
+  key: string;
+  name: string;
+  size: string;
+  color: string;
+};
+
+type CustomSetDraft = {
+  key: string;
+  description: string;
+  price: string;
+  pieces: CustomSetPieceDraft[];
 };
 
 type PricingPreview = {
@@ -90,8 +103,6 @@ type Props = {
   products: Product[];
   onClose: () => void;
   onCreated: () => void;
-  /** Chamado quando um produto rápido é cadastrado na venda. */
-  onProductCreated?: (product: Product) => void;
 };
 
 const STEPS = [
@@ -361,250 +372,449 @@ function CustomerSearchSelect({
   );
 }
 
-function QuickSaleProductForm({
-  onCreated,
+function newCustomSetPieceDraft(): CustomSetPieceDraft {
+  return {
+    key: `piece-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    name: "",
+    size: "",
+    color: "",
+  };
+}
+
+function newCustomSetDraft(): CustomSetDraft {
+  return {
+    key: `custom-draft-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    description: "",
+    price: "",
+    pieces: [newCustomSetPieceDraft()],
+  };
+}
+
+function formatDraftPrice(raw: string): string | null {
+  const n = Number(raw.replace(",", "."));
+  if (!raw.trim() || !Number.isFinite(n) || n < 0) return null;
+  return formatPrice(n);
+}
+
+function CustomSaleSetsForm({
+  onAdd,
   onCancel,
 }: {
-  onCreated: (product: Product) => void;
+  onAdd: (
+    sets: Omit<WizardCustomLine, "key" | "kind" | "itemDiscount" | "quantity">[]
+  ) => void;
   onCancel: () => void;
 }) {
-  const [name, setName] = useState("");
-  const [cardPrice, setCardPrice] = useState("");
-  const [pixPrice, setPixPrice] = useState("");
-  const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
-  const [selectedColors, setSelectedColors] = useState<
-    { name: string; hex: string }[]
-  >([]);
-  const [loading, setLoading] = useState(false);
+  const [rows, setRows] = useState<CustomSetDraft[]>(() => [newCustomSetDraft()]);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const cardPriceNum = Number(cardPrice.replace(",", "."));
-  const pixPriceNum = Number(pixPrice.replace(",", "."));
-  const canSubmit =
-    name.trim().length > 0 &&
-    cardPrice.trim().length > 0 &&
-    pixPrice.trim().length > 0 &&
-    Number.isFinite(cardPriceNum) &&
-    cardPriceNum >= 0 &&
-    Number.isFinite(pixPriceNum) &&
-    pixPriceNum >= 0 &&
-    selectedSizes.length > 0;
+  function updateSet(key: string, patch: Partial<CustomSetDraft>) {
+    setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  }
 
-  function toggleSize(size: string) {
-    setSelectedSizes((prev) =>
-      prev.includes(size) ? prev.filter((s) => s !== size) : [...prev, size]
+  function updatePiece(
+    setKey: string,
+    pieceKey: string,
+    patch: Partial<CustomSetPieceDraft>
+  ) {
+    setRows((prev) =>
+      prev.map((set) =>
+        set.key !== setKey
+          ? set
+          : {
+              ...set,
+              pieces: set.pieces.map((p) =>
+                p.key === pieceKey ? { ...p, ...patch } : p
+              ),
+            }
+      )
     );
   }
 
-  function toggleColor(color: { name: string; hex: string }) {
-    setSelectedColors((prev) =>
-      prev.some((c) => c.name === color.name)
-        ? prev.filter((c) => c.name !== color.name)
-        : [...prev, color]
+  function addPiece(setKey: string) {
+    setRows((prev) =>
+      prev.map((set) =>
+        set.key !== setKey
+          ? set
+          : {
+              ...set,
+              pieces: [...set.pieces, newCustomSetPieceDraft()],
+            }
+      )
     );
   }
 
-  async function handleSubmit(e: FormEvent) {
+  function removePiece(setKey: string, pieceKey: string) {
+    setRows((prev) =>
+      prev.map((set) => {
+        if (set.key !== setKey || set.pieces.length <= 1) return set;
+        return {
+          ...set,
+          pieces: set.pieces.filter((p) => p.key !== pieceKey),
+        };
+      })
+    );
+  }
+
+  function handleAddSet() {
+    setRows((prev) => [...prev, newCustomSetDraft()]);
+  }
+
+  function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!canSubmit) {
-      setFormError(
-        selectedSizes.length === 0
-          ? "Selecione pelo menos um tamanho."
-          : "Preencha todos os campos para continuar."
-      );
+    const parsed: Omit<
+      WizardCustomLine,
+      "key" | "kind" | "itemDiscount" | "quantity"
+    >[] = [];
+
+    for (const row of rows) {
+      const description = row.description.trim();
+      const unitPrice = Number(row.price.replace(",", "."));
+      const pieces = row.pieces
+        .map((p) => ({
+          name: p.name.trim(),
+          size: p.size.trim(),
+          color: p.color.trim(),
+        }))
+        .filter((p) => p.name || p.size || p.color);
+
+      const empty = !description && !row.price.trim() && pieces.length === 0;
+      if (empty) continue;
+
+      if (!description || !row.price.trim()) {
+        setFormError("Preencha a descrição e o valor de cada conjunto.");
+        return;
+      }
+      if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+        setFormError("Informe um valor válido para cada conjunto.");
+        return;
+      }
+
+      parsed.push({ description, pieces, unitPrice });
+    }
+
+    if (parsed.length === 0) {
+      setFormError("Adicione ao menos um conjunto.");
       return;
     }
 
-    const colors =
-      selectedColors.length > 0
-        ? selectedColors
-        : [{ name: SIZE_ONLY_COLOR_NAME, hex: SIZE_ONLY_COLOR_HEX }];
-    const sizes = selectedSizes.map((sizeName) => ({ name: sizeName }));
-    const variants = colors.flatMap((color) =>
-      sizes.map((size) => ({
-        colorName: color.name,
-        sizeName: size.name,
-        quantity: QUICK_VARIANT_STOCK,
-      }))
-    );
-
-    setLoading(true);
     setFormError(null);
-    try {
-      const res = await fetch("/api/products", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(),
-          price: cardPriceNum,
-          pixPrice: pixPriceNum,
-          installmentCount: QUICK_PRODUCT_INSTALLMENTS,
-          images: [],
-          stockType: "UNLIMITED",
-          pieces: [
-            {
-              name: name.trim(),
-              colors,
-              sizes,
-              variants,
-            },
-          ],
-          visibleOnSite: false,
-        }),
-      });
-      const data = (await res.json()) as Product & { error?: string };
-      if (!res.ok) {
-        setFormError(data.error ?? "Não foi possível cadastrar o produto.");
-        return;
-      }
-      onCreated(data);
-    } catch {
-      setFormError("Não foi possível cadastrar o produto.");
-    } finally {
-      setLoading(false);
-    }
+    onAdd(parsed);
   }
+
+  const readyCount = rows.filter(
+    (r) => r.description.trim() && r.price.trim()
+  ).length;
+  const totalPreview = rows.reduce((sum, r) => {
+    const n = Number(r.price.replace(",", "."));
+    return sum + (Number.isFinite(n) && n > 0 ? n : 0);
+  }, 0);
 
   return (
     <form
       onSubmit={handleSubmit}
-      className="space-y-3 rounded-xl border border-stone-200 bg-stone-50/80 p-4"
+      className="overflow-hidden rounded-2xl border border-stone-200 bg-gradient-to-b from-stone-50 to-white shadow-sm"
     >
-      <div>
-        <p className="text-sm font-semibold text-stone-900">Novo produto rápido</p>
-      </div>
-
-      {formError && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {formError}
-        </div>
-      )}
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="sm:col-span-2">
-          <FieldLabel>Nome da peça</FieldLabel>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-            placeholder="Ex.: Vestido floral midi"
-            className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
-            autoFocus
-          />
-        </div>
-        <div>
-          <FieldLabel>Preço no cartão</FieldLabel>
-          <div className="relative mt-1">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-stone-400">
-              R$
-            </span>
-            <input
-              value={cardPrice}
-              onChange={(e) => setCardPrice(e.target.value)}
-              required
-              inputMode="decimal"
-              placeholder="0,00"
-              className="w-full rounded-lg border border-stone-200 bg-white py-2 pl-10 pr-3 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
-            />
+      <div className="flex items-start justify-between gap-3 border-b border-stone-200/80 bg-white/80 px-4 py-3.5 sm:px-5">
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-stone-900 text-white">
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.8}
+              viewBox="0 0 24 24"
+              aria-hidden
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 4.5v15m7.5-7.5h-15"
+              />
+            </svg>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-stone-900">
+              Registrar venda avulsa
+            </p>
+            <p className="mt-0.5 text-xs leading-relaxed text-stone-500">
+              Descreva o que saiu — sem cadastrar no catálogo.
+            </p>
           </div>
         </div>
-        <div>
-          <FieldLabel>Preço no Pix</FieldLabel>
-          <div className="relative mt-1">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-stone-400">
-              R$
-            </span>
-            <input
-              value={pixPrice}
-              onChange={(e) => setPixPrice(e.target.value)}
-              required
-              inputMode="decimal"
-              placeholder="0,00"
-              className="w-full rounded-lg border border-stone-200 bg-white py-2 pl-10 pr-3 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
-            />
-          </div>
-        </div>
-
-        <div className="sm:col-span-2">
-          <FieldLabel>Tamanhos</FieldLabel>
-          <div className="mt-1.5 flex flex-wrap gap-2">
-            {QUICK_SIZES.map((size) => {
-              const active = selectedSizes.includes(size);
-              return (
-                <button
-                  key={size}
-                  type="button"
-                  onClick={() => toggleSize(size)}
-                  className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
-                    active
-                      ? "border-stone-900 bg-stone-900 text-white"
-                      : "border-stone-200 bg-white text-stone-700 hover:border-stone-300"
-                  }`}
-                >
-                  {size}
-                </button>
-              );
-            })}
-          </div>
-          <p className="mt-1 text-[10px] text-stone-400">
-            Obrigatório. Na venda, escolha o tamanho da peça.
-          </p>
-        </div>
-
-        <div className="sm:col-span-2">
-          <FieldLabel optional>Cores</FieldLabel>
-          <div className="mt-1.5 flex flex-wrap gap-2">
-            {QUICK_COLORS.map((color) => {
-              const active = selectedColors.some((c) => c.name === color.name);
-              return (
-                <button
-                  key={color.name}
-                  type="button"
-                  onClick={() => toggleColor(color)}
-                  className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
-                    active
-                      ? "border-stone-900 bg-stone-900 text-white"
-                      : "border-stone-200 bg-white text-stone-700 hover:border-stone-300"
-                  }`}
-                >
-                  <span
-                    className="h-3 w-3 shrink-0 rounded-full border border-stone-300"
-                    style={
-                      color.hex === MESCLADO_BW_HEX
-                        ? {
-                            background:
-                              "linear-gradient(135deg, #000 50%, #fff 50%)",
-                          }
-                        : { backgroundColor: color.hex }
-                    }
-                    aria-hidden
-                  />
-                  {color.name}
-                </button>
-              );
-            })}
-          </div>
-          <p className="mt-1 text-[10px] text-stone-400">
-            Opcional. Sem cor, a venda só pede o tamanho.
-          </p>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap justify-end gap-2 pt-1">
         <button
           type="button"
           onClick={onCancel}
-          disabled={loading}
-          className="rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50"
+          className="rounded-lg p-1.5 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700"
+          aria-label="Fechar"
         >
-          Cancelar
+          <svg
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.8}
+            viewBox="0 0 24 24"
+            aria-hidden
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
         </button>
+      </div>
+
+      <div className="space-y-4 px-4 py-4 sm:px-5">
+        {formError && (
+          <div className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700">
+            {formError}
+          </div>
+        )}
+
+        {rows.map((row, setIdx) => {
+          const priceLabel = formatDraftPrice(row.price);
+          return (
+            <article
+              key={row.key}
+              className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_1px_0_rgba(28,25,23,0.04)]"
+            >
+              <div className="flex items-center justify-between gap-3 border-b border-stone-100 bg-stone-50/70 px-4 py-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-stone-900 px-1.5 text-[11px] font-semibold text-white">
+                    {setIdx + 1}
+                  </span>
+                  <span className="text-xs font-medium text-stone-600">
+                    Conjunto
+                  </span>
+                  {priceLabel ? (
+                    <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-emerald-700">
+                      {priceLabel}
+                    </span>
+                  ) : null}
+                </div>
+                {rows.length > 1 ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setRows((prev) => prev.filter((r) => r.key !== row.key))
+                    }
+                    className="text-xs font-medium text-stone-400 transition-colors hover:text-red-600"
+                  >
+                    Remover
+                  </button>
+                ) : null}
+              </div>
+
+              <div className="space-y-5 p-4">
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8.5rem]">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-stone-600">
+                      O que foi vendido?
+                    </label>
+                    <textarea
+                      value={row.description}
+                      onChange={(e) =>
+                        updateSet(row.key, { description: e.target.value })
+                      }
+                      rows={2}
+                      placeholder="Ex.: Conjunto alfaiataria bege, cinto de couro…"
+                      autoFocus={setIdx === 0}
+                      className="w-full resize-none rounded-xl border border-stone-200 bg-stone-50/40 px-3.5 py-3 text-sm leading-relaxed text-stone-900 placeholder:text-stone-400 transition-colors focus:border-stone-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-stone-200"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-stone-600">
+                      Valor do conjunto
+                    </label>
+                    <div className="relative">
+                      <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-medium text-stone-400">
+                        R$
+                      </span>
+                      <input
+                        value={row.price}
+                        onChange={(e) =>
+                          updateSet(row.key, { price: e.target.value })
+                        }
+                        inputMode="decimal"
+                        placeholder="0,00"
+                        className="w-full rounded-xl border border-stone-200 bg-stone-50/40 py-3 pl-10 pr-3 text-base font-semibold tabular-nums text-stone-900 placeholder:font-normal placeholder:text-stone-400 transition-colors focus:border-stone-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-stone-200"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-stone-50/80 p-3.5">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-semibold text-stone-700">
+                        Peças deste conjunto
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => addPiece(row.key)}
+                      className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1.5 text-xs font-semibold text-stone-700 shadow-sm ring-1 ring-stone-200/80 transition-colors hover:bg-stone-900 hover:text-white hover:ring-stone-900"
+                    >
+                      <svg
+                        className="h-3.5 w-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        viewBox="0 0 24 24"
+                        aria-hidden
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M12 4.5v15m7.5-7.5h-15"
+                        />
+                      </svg>
+                      Peça
+                    </button>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {row.pieces.map((piece, pieceIdx) => (
+                      <div
+                        key={piece.key}
+                        className="rounded-xl border border-stone-200/80 bg-white p-3 shadow-sm"
+                      >
+                        <div className="mb-2.5 flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-medium uppercase tracking-wide text-stone-400">
+                            Peça {pieceIdx + 1}
+                          </span>
+                          {row.pieces.length > 1 ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                removePiece(row.key, piece.key)
+                              }
+                              className="text-[11px] font-medium text-stone-400 transition-colors hover:text-red-600"
+                            >
+                              Remover
+                            </button>
+                          ) : null}
+                        </div>
+
+                        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem]">
+                          <div>
+                            <label className="mb-1 block text-[11px] font-medium text-stone-500">
+                              Nome
+                            </label>
+                            <input
+                              value={piece.name}
+                              onChange={(e) =>
+                                updatePiece(row.key, piece.key, {
+                                  name: e.target.value,
+                                })
+                              }
+                              placeholder="Calça, blusa, cinto…"
+                              className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-[11px] font-medium text-stone-500">
+                              Cor
+                            </label>
+                            <input
+                              value={piece.color}
+                              onChange={(e) =>
+                                updatePiece(row.key, piece.key, {
+                                  color: e.target.value,
+                                })
+                              }
+                              placeholder="Preto"
+                              className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="mt-3">
+                          <label className="mb-1.5 block text-[11px] font-medium text-stone-500">
+                            Tamanho
+                          </label>
+                          <div className="flex flex-wrap gap-1.5">
+                            {CUSTOM_SET_SIZES.map((size) => {
+                              const active = piece.size === size;
+                              return (
+                                <button
+                                  key={size}
+                                  type="button"
+                                  onClick={() =>
+                                    updatePiece(row.key, piece.key, {
+                                      size: active ? "" : size,
+                                    })
+                                  }
+                                  className={`min-w-[2.5rem] rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all ${
+                                    active
+                                      ? "bg-stone-900 text-white shadow-sm"
+                                      : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+                                  }`}
+                                >
+                                  {size}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+
+        <button
+          type="button"
+          onClick={handleAddSet}
+          className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-stone-300 bg-white/60 px-4 py-3 text-sm font-medium text-stone-600 transition-colors hover:border-stone-400 hover:bg-white hover:text-stone-900"
+        >
+          <svg
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            viewBox="0 0 24 24"
+            aria-hidden
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M12 4.5v15m7.5-7.5h-15"
+            />
+          </svg>
+          Adicionar outro conjunto
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stone-200 bg-white px-4 py-3.5 sm:px-5">
+        <div className="min-w-0 text-xs text-stone-500">
+          {readyCount > 0 ? (
+            <>
+              <span className="font-semibold text-stone-800">
+                {readyCount}{" "}
+                {readyCount === 1 ? "conjunto" : "conjuntos"}
+              </span>
+              {totalPreview > 0 ? (
+                <span className="text-stone-400">
+                  {" "}
+                  · {formatPrice(totalPreview)}
+                </span>
+              ) : null}
+            </>
+          ) : (
+            <span>Preencha descrição e valor para continuar</span>
+          )}
+        </div>
         <button
           type="submit"
-          disabled={loading || !canSubmit}
-          className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={readyCount === 0}
+          className="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {loading ? "Salvando…" : "Criar e adicionar"}
+          Adicionar à venda
         </button>
       </div>
     </form>
@@ -947,13 +1157,12 @@ export function StandaloneSaleWizard({
   products,
   onClose,
   onCreated,
-  onProductCreated,
 }: Props) {
   const { settings } = useStoreSettings();
   const [step, setStep] = useState(0);
   const [lines, setLines] = useState<WizardLine[]>([]);
   const [catalog, setCatalog] = useState(products);
-  const [showQuickProduct, setShowQuickProduct] = useState(false);
+  const [showCustomSets, setShowCustomSets] = useState(false);
 
   useEffect(() => {
     setCatalog(products);
@@ -1001,6 +1210,7 @@ export function StandaloneSaleWizard({
   const maxInstallments = useMemo(
     () =>
       lines.reduce((max, l) => {
+        if (l.kind !== "catalog") return max;
         const n = Math.floor(l.product.installmentCount ?? 0);
         return n > max ? n : max;
       }, 1),
@@ -1014,7 +1224,10 @@ export function StandaloneSaleWizard({
       ? pricingByMethod[paymentMethod]
       : pricingByMethod.card ?? pricingByMethod.pix;
     if (preview) return preview.subtotalAfterItemDiscounts;
-    return lines.reduce((sum, l) => sum + l.product.price * l.quantity, 0);
+    return lines.reduce((sum, l) => {
+      const unit = l.kind === "custom" ? l.unitPrice : l.product.price;
+      return sum + unit * l.quantity;
+    }, 0);
   }, [paymentMethod, pricingByMethod, lines]);
 
   const freeShippingResult = settings
@@ -1083,12 +1296,28 @@ export function StandaloneSaleWizard({
 
   const linesPayload = useCallback(
     () =>
-      lines.map((l) => ({
-        productId: l.product.id,
-        quantity: l.quantity,
-        pieceSelections: buildCartPieceSelections(l.product.pieces, l.selections),
-        itemDiscount: buildDiscountPayload(l.itemDiscount),
-      })),
+      lines.map((l) => {
+        if (l.kind === "custom") {
+          return {
+            kind: "custom" as const,
+            description: l.description,
+            pieces: l.pieces,
+            unitPrice: l.unitPrice,
+            quantity: l.quantity,
+            itemDiscount: buildDiscountPayload(l.itemDiscount),
+          };
+        }
+        return {
+          kind: "catalog" as const,
+          productId: l.product.id,
+          quantity: l.quantity,
+          pieceSelections: buildCartPieceSelections(
+            l.product.pieces,
+            l.selections
+          ),
+          itemDiscount: buildDiscountPayload(l.itemDiscount),
+        };
+      }),
     [lines]
   );
 
@@ -1141,6 +1370,7 @@ export function StandaloneSaleWizard({
       ...prev,
       {
         key: `${product.id}-${Date.now()}`,
+        kind: "catalog",
         product,
         quantity: 1,
         selections: emptyPieceSelections(product.pieces),
@@ -1150,13 +1380,23 @@ export function StandaloneSaleWizard({
     setError(null);
   }
 
-  function handleQuickProductCreated(product: Product) {
-    setCatalog((prev) =>
-      prev.some((p) => p.id === product.id) ? prev : [product, ...prev]
-    );
-    onProductCreated?.(product);
-    addProduct(product);
-    setShowQuickProduct(false);
+  function handleCustomSetsAdded(
+    sets: Omit<WizardCustomLine, "key" | "kind" | "itemDiscount" | "quantity">[]
+  ) {
+    setLines((prev) => [
+      ...prev,
+      ...sets.map((set) => ({
+        key: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        kind: "custom" as const,
+        description: set.description,
+        pieces: set.pieces,
+        unitPrice: set.unitPrice,
+        quantity: 1,
+        itemDiscount: null,
+      })),
+    ]);
+    setShowCustomSets(false);
+    setError(null);
   }
 
   async function lookupAddressCep(digits: string) {
@@ -1185,8 +1425,16 @@ export function StandaloneSaleWizard({
     return () => clearTimeout(t);
   }, [address.destinationCep, addressFromLastOrder]);
 
-  function updateLine(idx: number, patch: Partial<WizardLine>) {
-    setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+  function updateLine(
+    idx: number,
+    patch: Partial<WizardCatalogLine> | Partial<WizardCustomLine>
+  ) {
+    setLines((prev) =>
+      prev.map((l, i) => {
+        if (i !== idx) return l;
+        return { ...l, ...patch } as WizardLine;
+      })
+    );
   }
 
   async function quoteShipping() {
@@ -1198,10 +1446,7 @@ export function StandaloneSaleWizard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           destinationCep: onlyDigits(destinationCep, 8),
-          lines: lines.map((l) => ({
-            productId: l.product.id,
-            quantity: l.quantity,
-          })),
+          lines: linesPayload(),
         }),
       });
       const data = await res.json();
@@ -1375,7 +1620,11 @@ export function StandaloneSaleWizard({
   const canGoNext =
     step === 0
       ? lines.length > 0 &&
-        lines.every((l) => pieceSelectionsAreComplete(l.product.pieces, l.selections))
+        lines.every((l) =>
+          l.kind === "custom"
+            ? true
+            : pieceSelectionsAreComplete(l.product.pieces, l.selections)
+        )
       : step === 1
         ? fulfillmentType === "ARRANGED"
           ? arrangedMode !== null
@@ -1510,16 +1759,16 @@ export function StandaloneSaleWizard({
                   <div>
                     <h3 className="text-sm font-semibold text-stone-900">Produtos</h3>
                     <p className="mt-0.5 text-xs text-stone-500">
-                      Adicione itens e configure cor, tamanho e desconto em cada um.
+                      Selecione do catálogo ou descreva conjuntos vendidos sem cadastrar produto.
                     </p>
                   </div>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
                     <ProductSearchSelect products={catalog} onSelect={addProduct} />
                     <button
                       type="button"
-                      onClick={() => setShowQuickProduct((v) => !v)}
+                      onClick={() => setShowCustomSets((v) => !v)}
                       className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border px-3 py-2.5 text-sm font-semibold transition-colors sm:min-w-[9.5rem] ${
-                        showQuickProduct
+                        showCustomSets
                           ? "border-stone-900 bg-stone-900 text-white"
                           : "border-stone-200 bg-white text-stone-700 hover:border-stone-300 hover:bg-stone-50"
                       }`}
@@ -1541,10 +1790,10 @@ export function StandaloneSaleWizard({
                       Novo produto
                     </button>
                   </div>
-                  {showQuickProduct && (
-                    <QuickSaleProductForm
-                      onCreated={handleQuickProductCreated}
-                      onCancel={() => setShowQuickProduct(false)}
+                  {showCustomSets && (
+                    <CustomSaleSetsForm
+                      onAdd={handleCustomSetsAdded}
+                      onCancel={() => setShowCustomSets(false)}
                     />
                   )}
                 </section>
@@ -1571,34 +1820,75 @@ export function StandaloneSaleWizard({
                       {lines.map((line, idx) => (
                         <li key={line.key} className="p-4 sm:p-5">
                           <div className="flex gap-3 sm:gap-4">
-                            <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-stone-100 sm:h-16 sm:w-16">
-                              {line.product.images[0]?.url && (
-                                <Image
-                                  src={line.product.images[0].url}
-                                  alt=""
-                                  fill
-                                  className="object-cover"
-                                  sizes="64px"
-                                />
-                              )}
-                            </div>
+                            {line.kind === "catalog" ? (
+                              <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-stone-100 sm:h-16 sm:w-16">
+                                {line.product.images[0]?.url && (
+                                  <Image
+                                    src={line.product.images[0].url}
+                                    alt=""
+                                    fill
+                                    className="object-cover"
+                                    sizes="64px"
+                                  />
+                                )}
+                              </div>
+                            ) : (
+                              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-stone-100 text-[10px] font-semibold uppercase tracking-wide text-stone-400 sm:h-16 sm:w-16">
+                                Conj.
+                              </div>
+                            )}
 
                             <div className="min-w-0 flex-1 space-y-3">
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
-                                  <p className="text-sm font-medium leading-snug text-stone-900 sm:text-[15px]">
-                                    {line.product.name}
-                                  </p>
-                                  {line.product.description ? (
-                                    <p className="mt-0.5 line-clamp-2 text-xs text-stone-500">
-                                      {line.product.description}
-                                    </p>
-                                  ) : null}
-                                  <ProductPrices product={line.product} quantity={line.quantity} />
+                                  {line.kind === "catalog" ? (
+                                    <>
+                                      <p className="text-sm font-medium leading-snug text-stone-900 sm:text-[15px]">
+                                        {line.product.name}
+                                      </p>
+                                      {line.product.description ? (
+                                        <p className="mt-0.5 line-clamp-2 text-xs text-stone-500">
+                                          {line.product.description}
+                                        </p>
+                                      ) : null}
+                                      <ProductPrices
+                                        product={line.product}
+                                        quantity={line.quantity}
+                                      />
+                                    </>
+                                  ) : (
+                                    <>
+                                      <p className="whitespace-pre-wrap text-sm font-medium leading-snug text-stone-900 sm:text-[15px]">
+                                        {line.description}
+                                      </p>
+                                      {line.pieces.length > 0 ? (
+                                        <ul className="mt-1 space-y-0.5 text-xs text-stone-500">
+                                          {line.pieces.map((piece, pieceIdx) => {
+                                            const details = [
+                                              piece.name,
+                                              piece.size,
+                                              piece.color,
+                                            ].filter(Boolean);
+                                            if (details.length === 0) return null;
+                                            return (
+                                              <li key={`${line.key}-piece-${pieceIdx}`}>
+                                                {details.join(" · ")}
+                                              </li>
+                                            );
+                                          })}
+                                        </ul>
+                                      ) : null}
+                                      <p className="mt-1.5 text-sm font-semibold tabular-nums text-stone-900">
+                                        {formatPrice(line.unitPrice * line.quantity)}
+                                      </p>
+                                    </>
+                                  )}
                                 </div>
                                 <button
                                   type="button"
-                                  onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))}
+                                  onClick={() =>
+                                    setLines((prev) => prev.filter((_, i) => i !== idx))
+                                  }
                                   className="shrink-0 rounded-md px-1.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 hover:text-red-800"
                                 >
                                   Remover
@@ -1654,7 +1944,7 @@ export function StandaloneSaleWizard({
                                 </div>
                               </div>
 
-                              {line.product.pieces.length > 0 && (
+                              {line.kind === "catalog" && line.product.pieces.length > 0 && (
                                 <div className="border-t border-stone-100 pt-3">
                                   <FieldLabel>Variantes</FieldLabel>
                                   <PieceSelector

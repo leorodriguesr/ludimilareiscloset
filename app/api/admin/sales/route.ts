@@ -3,6 +3,7 @@ import { DiscountMode, FulfillmentType } from "@/app/generated/prisma/client";
 import type { ArrangedDeliveryMode } from "@/lib/admin-sale/arranged-delivery";
 import { createAdminSale } from "@/lib/admin-sale/create-admin-sale";
 import { parseDiscountInputValue } from "@/lib/admin-sale/parse-discount-value";
+import { normalizeAdminSaleLineInput } from "@/lib/admin-sale/pricing";
 import { PERMISSION } from "@/lib/auth/permissions";
 import { requirePermission } from "@/lib/auth/require-permission";
 import { PAYMENT_METHOD } from "@/lib/orders/constants";
@@ -55,14 +56,7 @@ export async function POST(request: NextRequest) {
   const result = await createAdminSale({
     lines: lines.map((l) => {
       const row = l as Record<string, unknown>;
-      return {
-        productId: String(row.productId ?? ""),
-        quantity: Number(row.quantity ?? 1),
-        pieceSelections: Array.isArray(row.pieceSelections)
-          ? row.pieceSelections
-          : undefined,
-        itemDiscount: parseDiscount(row.itemDiscount),
-      };
+      return normalizeAdminSaleLineInput(row, parseDiscount(row.itemDiscount));
     }),
     fulfillmentType,
     carrierShipping:

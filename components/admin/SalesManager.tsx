@@ -2456,11 +2456,6 @@ export function SalesManager() {
           products={products}
           onClose={() => setShowWizard(false)}
           onCreated={() => void fetchOrders()}
-          onProductCreated={(product) =>
-            setProducts((prev) =>
-              prev.some((p) => p.id === product.id) ? prev : [product, ...prev]
-            )
-          }
         />
       )}
       <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5 md:justify-between md:overflow-visible">

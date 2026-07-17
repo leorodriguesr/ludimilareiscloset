@@ -108,3 +108,38 @@ export async function buildCartShippingPackage(
     products: sfProducts,
   };
 }
+
+/** Embalagem padrão para itens sem produto no catálogo (venda avulsa descritiva). */
+export function buildDefaultShippingPackage(input: {
+  quantity: number;
+  insuranceValue: number;
+}): BuiltCartPackage {
+  const qty = Math.max(1, Math.floor(Number(input.quantity)) || 1);
+  const dims = packageToSuperFreteKgCm({
+    weightGrams: DEFAULT_PKG.weightGrams,
+    lengthCm: DEFAULT_PKG.lengthCm,
+    widthCm: DEFAULT_PKG.widthCm,
+    heightCm: DEFAULT_PKG.heightCm,
+  });
+  const { insuranceValue, useInsurance } = normalizeSuperfreteInsurance(
+    Math.max(0, Number(input.insuranceValue) || 0)
+  );
+
+  return {
+    weightGrams: Math.round(DEFAULT_PKG.weightGrams * qty),
+    lengthCm: dims.lengthCm,
+    widthCm: dims.widthCm,
+    heightCm: dims.heightCm,
+    insuranceDeclared: insuranceValue ?? 0,
+    useInsurance,
+    products: [
+      {
+        quantity: qty,
+        weight: dims.weightKg,
+        height: dims.heightCm,
+        width: dims.widthCm,
+        length: dims.lengthCm,
+      },
+    ],
+  };
+}

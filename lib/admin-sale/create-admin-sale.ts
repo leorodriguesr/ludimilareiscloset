@@ -32,7 +32,10 @@ import { ORDER_STATUS, type PaymentMethod } from "@/lib/orders/constants";
 import { reserveStockForOrderLines } from "@/lib/orders/stock/reservation";
 import { prisma } from "@/lib/prisma";
 import { checkFreeShipping } from "@/lib/shipping/free-shipping";
-import { quoteShippingForCartLines } from "@/lib/shipping/quote-cart";
+import {
+  quoteShippingForCartLines,
+  quoteShippingForDefaultPackage,
+} from "@/lib/shipping/quote-cart";
 import {
   parseSuperfreteServiceId,
 } from "@/lib/shipping/service-id";
@@ -126,12 +129,30 @@ async function resolveShipping(input: CreateAdminSaleInput) {
     const destCep = normalizePostalCode(input.carrierShipping.destinationCep);
     if (!destCep) throw new Error("CEP de entrega inválido.");
 
-    const cartLines = input.lines.map((l) => ({
-      productId: l.productId,
-      quantity: l.quantity,
-    }));
+    const catalogLines = input.lines
+      .filter((l): l is Extract<AdminSaleLineInput, { kind: "catalog" }> =>
+        l.kind === "catalog"
+      )
+      .map((l) => ({
+        productId: l.productId,
+        quantity: l.quantity,
+      }));
 
-    const quote = await quoteShippingForCartLines(cartLines, destCep);
+    const customLines = input.lines.filter(
+      (l): l is Extract<AdminSaleLineInput, { kind: "custom" }> =>
+        l.kind === "custom"
+    );
+
+    const quote =
+      catalogLines.length > 0
+        ? await quoteShippingForCartLines(catalogLines, destCep)
+        : await quoteShippingForDefaultPackage(destCep, {
+            quantity: customLines.reduce((sum, l) => sum + l.quantity, 0) || 1,
+            insuranceValue: customLines.reduce(
+              (sum, l) => sum + Math.max(0, l.unitPrice) * l.quantity,
+              0
+            ),
+          });
     const chosen = quote.options.find(
       (o) => o.id === input.carrierShipping!.optionId
     );
@@ -413,22 +434,25 @@ export async function createAdminSale(
       select: { id: true, orderNumber: true },
     });
 
+    const stockLines = pricing.lines
+      .filter(
+        (l): l is typeof l & { productId: string } =>
+          typeof l.productId === "string" && l.productId.length > 0
+      )
+      .map((l) => ({
+        productId: l.productId,
+        quantity: l.quantity,
+        price: l.unitPrice,
+        pieceSelections: l.pieceSelections,
+      }));
+
     if (input.paymentAlreadyPaid) {
       const { commitStockReservations } = await import(
         "@/lib/orders/stock/reservation"
       );
       await commitStockReservations(tx, order.id);
-    } else {
-      await reserveStockForOrderLines(
-        tx,
-        order.id,
-        pricing.lines.map((l) => ({
-          productId: l.productId,
-          quantity: l.quantity,
-          price: l.unitPrice,
-          pieceSelections: l.pieceSelections,
-        }))
-      );
+    } else if (stockLines.length > 0) {
+      await reserveStockForOrderLines(tx, order.id, stockLines);
     }
 
     return order;

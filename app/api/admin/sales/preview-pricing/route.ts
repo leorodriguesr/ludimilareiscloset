@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveAdminSalePricing } from "@/lib/admin-sale/pricing";
+import {
+  normalizeAdminSaleLineInput,
+  resolveAdminSalePricing,
+} from "@/lib/admin-sale/pricing";
 import { DiscountMode } from "@/app/generated/prisma/client";
 import { parseDiscountInputValue } from "@/lib/admin-sale/parse-discount-value";
 import { PERMISSION } from "@/lib/auth/permissions";
@@ -41,14 +44,7 @@ export async function POST(request: NextRequest) {
     const pricing = await resolveAdminSalePricing({
       lines: lines.map((l) => {
         const row = l as Record<string, unknown>;
-        return {
-          productId: String(row.productId ?? ""),
-          quantity: Number(row.quantity ?? 1),
-          pieceSelections: Array.isArray(row.pieceSelections)
-            ? row.pieceSelections
-            : undefined,
-          itemDiscount: parseDiscount(row.itemDiscount),
-        };
+        return normalizeAdminSaleLineInput(row, parseDiscount(row.itemDiscount));
       }),
       paymentMethod,
       shippingAmount,
