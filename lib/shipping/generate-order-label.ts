@@ -299,11 +299,14 @@ export async function generateOrderLabel(orderId: string) {
         trackingCode: null,
         labelGeneratedAt: null,
         superfreteStatus: null,
+        // Sai de "Cancelado" antes de gerar a nova etiqueta.
+        shippingStatus: "to_pack",
       },
     });
     order.superfreteShipmentId = null;
     order.labelUrl = null;
     order.superfreteStatus = null;
+    order.shippingStatus = "to_pack";
   }
 
   let alreadyExists = false;
@@ -331,8 +334,13 @@ export async function generateOrderLabel(orderId: string) {
         superfreteStatus: result.superfreteStatus,
         labelGeneratedAt: new Date(),
         shippingServiceId: input.serviceId,
+        // Regeneração após cancelamento: etiqueta nova vai para "por enviar".
+        ...(labelCancelled ? { shippingStatus: "packed" } : {}),
       },
     });
+    if (labelCancelled) {
+      order.shippingStatus = "packed";
+    }
   }
 
   let info: Awaited<ReturnType<typeof syncOrderShipmentFromSuperfrete>> | null = null;
@@ -375,7 +383,11 @@ export async function syncOrderShipmentFromSuperfrete(
 ) {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
-    select: { superfreteShipmentId: true, labelUrl: true },
+    select: {
+      superfreteShipmentId: true,
+      labelUrl: true,
+      shippingStatus: true,
+    },
   });
   if (!order?.superfreteShipmentId) {
     throw new ShippingQuoteError(
@@ -392,6 +404,12 @@ export async function syncOrderShipmentFromSuperfrete(
       })
     : await fetchSuperfreteOrderInfo(order.superfreteShipmentId);
   const mappedStatus = mapSuperfreteStatusToShippingStatus(info.status);
+  // Etiqueta ativa na SuperFrete não pode permanecer "cancelled" no pedido.
+  const nextShippingStatus =
+    mappedStatus ??
+    (order.shippingStatus === "cancelled" && info.status !== "cancelled"
+      ? "packed"
+      : null);
 
   const labelUrl = order.labelUrl || info.labelUrl || null;
 
@@ -401,7 +419,7 @@ export async function syncOrderShipmentFromSuperfrete(
       superfreteStatus: info.status,
       ...(info.tracking ? { trackingCode: info.tracking } : {}),
       ...(labelUrl ? { labelUrl } : {}),
-      ...(mappedStatus ? { shippingStatus: mappedStatus } : {}),
+      ...(nextShippingStatus ? { shippingStatus: nextShippingStatus } : {}),
     },
   });
 
