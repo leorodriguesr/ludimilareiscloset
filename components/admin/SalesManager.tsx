@@ -27,6 +27,7 @@ import {
   ADDRESS_COMPLEMENT_MAX_LENGTH,
   ADDRESS_NUMBER_MAX_LENGTH,
   CUSTOMER_NAME_MAX_LENGTH,
+  customerContactAddressValidationError,
   isCustomerContactAddressComplete,
 } from "@/lib/admin-sale/customer-form-complete";
 import {
@@ -1702,7 +1703,7 @@ function OrderDetailsBody({
     }
   }
 
-  const canSaveCustomer = isCustomerContactAddressComplete({
+  const customerFieldsForSave = {
     name: customerForm.recipientName,
     email: customerForm.email,
     phone: customerForm.phone,
@@ -1714,7 +1715,10 @@ function OrderDetailsBody({
     neighborhood: customerForm.addressNeighborhood,
     city: customerForm.addressCity,
     state: customerForm.addressState,
-  });
+  };
+  const canSaveCustomer = isCustomerContactAddressComplete(customerFieldsForSave);
+  const customerSaveHint =
+    customerContactAddressValidationError(customerFieldsForSave);
 
   const customerName = orderCustomerName(order);
   const customerPhone = order.phone || order.user?.phone || null;
@@ -1840,6 +1844,16 @@ function OrderDetailsBody({
                     <p className="mt-1 text-xs text-amber-700">{cepLookupError}</p>
                   ) : null}
                 </EditField>
+                <div className="sm:col-span-2">
+                  <EditField label="Rua">
+                    <EditInput
+                      value={customerForm.addressStreet}
+                      onChange={(e) =>
+                        setCustomerForm((f) => ({ ...f, addressStreet: e.target.value }))
+                      }
+                    />
+                  </EditField>
+                </div>
                 <EditField label="Número">
                   <EditInput
                     maxLength={ADDRESS_NUMBER_MAX_LENGTH}
@@ -1858,36 +1872,24 @@ function OrderDetailsBody({
                     Máx. {ADDRESS_NUMBER_MAX_LENGTH} caracteres
                   </p>
                 </EditField>
-                <div className="sm:col-span-2">
-                  <EditField label="Rua">
-                    <EditInput
-                      value={customerForm.addressStreet}
-                      onChange={(e) =>
-                        setCustomerForm((f) => ({ ...f, addressStreet: e.target.value }))
-                      }
-                    />
-                  </EditField>
-                </div>
-                <div className="sm:col-span-2">
-                  <EditField label="Complemento" optional>
-                    <EditInput
-                      maxLength={ADDRESS_COMPLEMENT_MAX_LENGTH}
-                      value={customerForm.addressComplement}
-                      onChange={(e) =>
-                        setCustomerForm((f) => ({
-                          ...f,
-                          addressComplement: e.target.value.slice(
-                            0,
-                            ADDRESS_COMPLEMENT_MAX_LENGTH
-                          ),
-                        }))
-                      }
-                    />
-                    <p className="mt-1 text-[10px] text-stone-400">
-                      Máx. {ADDRESS_COMPLEMENT_MAX_LENGTH} caracteres
-                    </p>
-                  </EditField>
-                </div>
+                <EditField label="Complemento" optional>
+                  <EditInput
+                    maxLength={ADDRESS_COMPLEMENT_MAX_LENGTH}
+                    value={customerForm.addressComplement}
+                    onChange={(e) =>
+                      setCustomerForm((f) => ({
+                        ...f,
+                        addressComplement: e.target.value.slice(
+                          0,
+                          ADDRESS_COMPLEMENT_MAX_LENGTH
+                        ),
+                      }))
+                    }
+                  />
+                  <p className="mt-1 text-[10px] text-stone-400">
+                    Máx. {ADDRESS_COMPLEMENT_MAX_LENGTH} caracteres
+                  </p>
+                </EditField>
                 <EditField label="Bairro">
                   <EditInput
                     value={customerForm.addressNeighborhood}
@@ -1919,7 +1921,11 @@ function OrderDetailsBody({
               </div>
             </div>
 
-            {customerError ? <p className="text-xs text-red-600">{customerError}</p> : null}
+            {customerError ? (
+              <p className="text-xs text-red-600">{customerError}</p>
+            ) : !canSaveCustomer && customerSaveHint ? (
+              <p className="text-xs text-amber-700">{customerSaveHint}</p>
+            ) : null}
 
             <div className="flex gap-2">
               <button
