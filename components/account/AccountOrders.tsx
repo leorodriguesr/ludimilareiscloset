@@ -12,6 +12,7 @@ import {
   orderItemDisplayImageUrl,
   orderItemDisplayName,
 } from "@/lib/orders/order-item-display";
+import { formatMaxBusinessDays } from "@/lib/shipping/delivery-days-label";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -403,6 +404,7 @@ function TrackingBlock({ order }: { order: AccountOrderListItem }) {
   const trackingCode = data?.trackingCode ?? order.trackingCode;
   const deliveryMin = data?.deliveryMin ?? order.shippingDeliveryDaysMin;
   const deliveryMax = data?.deliveryMax ?? order.shippingDeliveryDaysMax;
+  const prazoEstimado = formatMaxBusinessDays(deliveryMin, deliveryMax);
 
   async function refresh() {
     setLoading(true);
@@ -463,12 +465,12 @@ function TrackingBlock({ order }: { order: AccountOrderListItem }) {
           </button>
         </div>
       )}
-      {deliveryMin != null && deliveryMax != null && (
+      {prazoEstimado ? (
         <p className="text-xs text-stone-400">
-          Prazo estimado: {deliveryMin} a {deliveryMax} dias úteis
+          Prazo estimado: {prazoEstimado}
           {order.shippingServiceName ? ` · ${order.shippingServiceName}` : ""}
         </p>
-      )}
+      ) : null}
     </div>
   );
 }

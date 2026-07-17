@@ -16,6 +16,18 @@ export function formatBusinessDaysRange(
   return `${a} a ${b} dias úteis`;
 }
 
+/** Um único prazo: o maior entre min e max (ex.: "5 dias úteis"). */
+export function formatMaxBusinessDays(
+  min: number | null | undefined,
+  max: number | null | undefined
+): string | null {
+  const a = min != null && min > 0 ? Math.floor(min) : 0;
+  const b = max != null && max > 0 ? Math.floor(max) : 0;
+  const n = Math.max(a, b);
+  if (n <= 0) return null;
+  return businessDaysCount(n);
+}
+
 /** Rótulo compacto para admin (tabelas, painel). */
 export function formatDeliveryDaysLabel(
   min: number | null | undefined,

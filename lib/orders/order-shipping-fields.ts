@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { getPackagingDays } from "@/lib/shipping/packaging-days";
 
 export type OrderShippingFieldsRow = {
   id: string;
@@ -108,14 +109,20 @@ export async function updateOrderDeliveryDaysFromSuperfrete(
   min: number | null,
   max: number | null
 ): Promise<void> {
+  const extra = await getPackagingDays();
+  const withPack = (n: number | null) => {
+    if (n == null || n < 0) return null;
+    const base = Math.floor(n);
+    return base > 0 ? base + extra : base;
+  };
   await prisma.$executeRawUnsafe(
     `UPDATE "Order" SET
       "shippingDeliveryDaysMin" = ?,
       "shippingDeliveryDaysMax" = ?,
       "updatedAt" = datetime('now')
     WHERE id = ?`,
-    min != null && min >= 0 ? Math.floor(min) : null,
-    max != null && max >= 0 ? Math.floor(max) : null,
+    withPack(min),
+    withPack(max),
     orderId
   );
 }

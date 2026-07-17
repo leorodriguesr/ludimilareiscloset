@@ -68,8 +68,9 @@ export async function GET(
       shippingStatus: order.shippingStatus,
       superfreteStatus: liveInfo.status ?? order.superfreteStatus,
       shippingServiceId: order.shippingServiceId,
-      deliveryMin: liveInfo.deliveryMin ?? order.shippingDeliveryDaysMin,
-      deliveryMax: liveInfo.deliveryMax ?? order.shippingDeliveryDaysMax,
+      // Prazo do pedido (já inclui dias de embalagem da cotação); não usar o da SuperFrete.
+      deliveryMin: order.shippingDeliveryDaysMin,
+      deliveryMax: order.shippingDeliveryDaysMax,
       liveInfo,
     });
   } catch (e) {
