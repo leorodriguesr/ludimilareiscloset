@@ -23,6 +23,13 @@ export async function GET() {
     await session.save();
     return NextResponse.json({ user: null });
   }
+
+  // Mantém a sessão alinhada com o perfil atual no banco.
+  if (session.user.role !== row.role) {
+    session.user = { userId: row.id, role: row.role };
+    await session.save();
+  }
+
   return NextResponse.json({
     user: {
       id: row.id,

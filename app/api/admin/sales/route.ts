@@ -4,7 +4,7 @@ import type { ArrangedDeliveryMode } from "@/lib/admin-sale/arranged-delivery";
 import { createAdminSale } from "@/lib/admin-sale/create-admin-sale";
 import { parseDiscountInputValue } from "@/lib/admin-sale/parse-discount-value";
 import { normalizeAdminSaleLineInput } from "@/lib/admin-sale/pricing";
-import { PERMISSION } from "@/lib/auth/permissions";
+import { hasPermission, PERMISSION } from "@/lib/auth/permissions";
 import { requirePermission } from "@/lib/auth/require-permission";
 import { PAYMENT_METHOD } from "@/lib/orders/constants";
 
@@ -51,6 +51,17 @@ export async function POST(request: NextRequest) {
   const lines = Array.isArray(b.lines) ? b.lines : [];
   if (lines.length === 0) {
     return NextResponse.json({ error: "Adicione produtos." }, { status: 400 });
+  }
+
+  const wantsAlreadyPaid = b.paymentAlreadyPaid === true;
+  if (
+    wantsAlreadyPaid &&
+    !hasPermission(gate.role, PERMISSION.ADMIN_SALE_MARK_PAID)
+  ) {
+    return NextResponse.json(
+      { error: "Apenas administradores podem registrar venda já paga." },
+      { status: 403 }
+    );
   }
 
   const result = await createAdminSale({
@@ -117,7 +128,7 @@ export async function POST(request: NextRequest) {
             state: String((b.address as Record<string, unknown>).state ?? ""),
           }
         : undefined,
-    paymentAlreadyPaid: b.paymentAlreadyPaid === true,
+    paymentAlreadyPaid: wantsAlreadyPaid,
     paymentMethod,
     orderDiscount: parseDiscount(b.orderDiscount),
     createdByUserId: gate.userId,

@@ -11,8 +11,17 @@ import {
 import { commitStockReservations } from "@/lib/orders/stock/reservation";
 import { prisma } from "@/lib/prisma";
 import { onOrderPaymentConfirmed } from "@/lib/fulfillment/fulfillment-service";
-import { OrderSource, FulfillmentType, CustomerDataStatus } from "@/app/generated/prisma/client";
+import {
+  OrderSource,
+  FulfillmentType,
+  CustomerDataStatus,
+  ExchangeBalanceStatus,
+  ExchangeStatus,
+} from "@/app/generated/prisma/client";
 import { isInfinitePayLencToken } from "@/lib/payments/infinitepay";
+import { appendCashLedgerEntry } from "@/lib/cash/ledger";
+import { EXCHANGE_BALANCE_PURPOSE } from "@/lib/exchanges/initiate-balance-payment";
+import { appendExchangeEvent } from "@/lib/exchanges/events";
 
 const AMOUNT_TOLERANCE_BRL = 0.01;
 
@@ -42,6 +51,8 @@ export type ConfirmPaymentResult = {
 type AttemptWithOrder = {
   id: string;
   orderId: string;
+  exchangeId: string | null;
+  purpose: string;
   status: string;
   amount: number;
   gateway: string;
@@ -62,6 +73,12 @@ type AttemptWithOrder = {
     destinationCep: string | null;
   };
 };
+
+function isExchangeBalanceAttempt(attempt: AttemptWithOrder): boolean {
+  return (
+    attempt.purpose === EXCHANGE_BALANCE_PURPOSE && !!attempt.exchangeId
+  );
+}
 
 async function findAttemptByGatewayReference(
   gateway: PaymentGateway,
@@ -324,6 +341,15 @@ async function confirmAttemptInTransaction(input: {
       });
 
       await commitStockReservations(tx, lockedAttempt.orderId);
+
+      await appendCashLedgerEntry(tx, {
+        direction: "IN",
+        kind: "SALE",
+        amount: lockedAttempt.amount,
+        description: `Venda · pedido ${lockedAttempt.orderId.slice(0, 8)}`,
+        orderId: lockedAttempt.orderId,
+        paymentAttemptId: lockedAttempt.id,
+      });
     });
   } catch (e) {
     if (e instanceof ConfirmPaymentRejectedError) {
@@ -344,6 +370,151 @@ async function confirmAttemptInTransaction(input: {
   });
 
   void onOrderPaymentConfirmed(input.attempt.order);
+
+  return {
+    updated: true,
+    outcome: WEBHOOK_AUDIT_OUTCOME.CONFIRMED,
+    orderId: input.attempt.orderId,
+  };
+}
+
+async function confirmExchangeBalanceInTransaction(input: {
+  attempt: AttemptWithOrder;
+  gateway: PaymentGateway;
+  source: ConfirmPaymentSource;
+  gatewayTransactionId?: string | null;
+  payload?: unknown;
+}): Promise<ConfirmPaymentResult> {
+  const exchangeId = input.attempt.exchangeId!;
+  const paidAt = new Date();
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const lockedAttempt = await tx.paymentAttempt.findUnique({
+        where: { id: input.attempt.id },
+      });
+
+      if (!lockedAttempt || !lockedAttempt.exchangeId) {
+        throw new ConfirmPaymentRejectedError({
+          updated: false,
+          outcome: WEBHOOK_AUDIT_OUTCOME.REJECTED_NOT_FOUND,
+        });
+      }
+
+      if (lockedAttempt.status === PAYMENT_ATTEMPT_STATUS.PAID) {
+        throw new ConfirmPaymentRejectedError({
+          updated: false,
+          outcome: WEBHOOK_AUDIT_OUTCOME.IGNORED_ALREADY_PAID,
+        });
+      }
+
+      if (
+        lockedAttempt.status !== PAYMENT_ATTEMPT_STATUS.ACTIVE &&
+        lockedAttempt.status !== PAYMENT_ATTEMPT_STATUS.SUPERSEDED
+      ) {
+        throw new ConfirmPaymentRejectedError({
+          updated: false,
+          outcome: WEBHOOK_AUDIT_OUTCOME.REJECTED_ATTEMPT_STATUS,
+        });
+      }
+
+      const exchange = await tx.exchange.findUnique({
+        where: { id: lockedAttempt.exchangeId },
+      });
+
+      if (!exchange || exchange.status === ExchangeStatus.CANCELLED) {
+        throw new ConfirmPaymentRejectedError({
+          updated: false,
+          outcome: WEBHOOK_AUDIT_OUTCOME.REJECTED_ORDER_STATE,
+        });
+      }
+
+      if (
+        exchange.balanceStatus === ExchangeBalanceStatus.PAID ||
+        exchange.balanceStatus === ExchangeBalanceStatus.WAIVED
+      ) {
+        throw new ConfirmPaymentRejectedError({
+          updated: false,
+          outcome: WEBHOOK_AUDIT_OUTCOME.IGNORED_ALREADY_PAID,
+        });
+      }
+
+      if (
+        exchange.balanceStatus !== ExchangeBalanceStatus.PENDING ||
+        !amountsMatch(lockedAttempt.amount, exchange.balanceAmount)
+      ) {
+        throw new ConfirmPaymentRejectedError({
+          updated: false,
+          outcome: WEBHOOK_AUDIT_OUTCOME.REJECTED_AMOUNT,
+        });
+      }
+
+      await tx.paymentAttempt.update({
+        where: { id: lockedAttempt.id },
+        data: {
+          status: PAYMENT_ATTEMPT_STATUS.PAID,
+          paidAt,
+          ...(input.gatewayTransactionId
+            ? { gatewayTransactionId: input.gatewayTransactionId }
+            : {}),
+        },
+      });
+
+      await tx.paymentAttempt.updateMany({
+        where: {
+          exchangeId: lockedAttempt.exchangeId,
+          purpose: EXCHANGE_BALANCE_PURPOSE,
+          status: PAYMENT_ATTEMPT_STATUS.ACTIVE,
+          id: { not: lockedAttempt.id },
+        },
+        data: { status: PAYMENT_ATTEMPT_STATUS.SUPERSEDED },
+      });
+
+      await tx.exchange.update({
+        where: { id: exchange.id },
+        data: {
+          balanceStatus: ExchangeBalanceStatus.PAID,
+          balancePaidAt: paidAt,
+        },
+      });
+
+      await appendExchangeEvent(tx, {
+        exchangeId: exchange.id,
+        type: "BALANCE_PAID",
+        payload: {
+          via: "payment_webhook",
+          paymentAttemptId: lockedAttempt.id,
+          amount: exchange.balanceAmount,
+        },
+      });
+
+      await appendCashLedgerEntry(tx, {
+        direction: "IN",
+        kind: "EXCHANGE_BALANCE",
+        amount: exchange.balanceAmount,
+        description: `Diferença recebida · troca #${exchange.exchangeNumber ?? exchange.id.slice(0, 6)}`,
+        orderId: exchange.orderId,
+        exchangeId: exchange.id,
+        paymentAttemptId: lockedAttempt.id,
+      });
+    });
+  } catch (e) {
+    if (e instanceof ConfirmPaymentRejectedError) {
+      return e.result;
+    }
+    throw e;
+  }
+
+  await logPaymentWebhookEvent({
+    gateway: input.gateway,
+    source: input.source,
+    outcome: WEBHOOK_AUDIT_OUTCOME.CONFIRMED,
+    orderId: input.attempt.orderId,
+    paymentAttemptId: input.attempt.id,
+    gatewayReference: input.attempt.gatewayReference,
+    reason: "Diferença de troca confirmada.",
+    payload: input.payload,
+  });
 
   return {
     updated: true,
@@ -380,6 +551,15 @@ export async function confirmPaymentFromMercadoPago(input: {
       outcome: WEBHOOK_AUDIT_OUTCOME.REJECTED_NOT_FOUND,
       reason: "Nenhuma PaymentAttempt encontrada para o mpOrderId.",
       gatewayReference: mpOrderId,
+      payload: input.payload,
+    });
+  }
+
+  if (isExchangeBalanceAttempt(attempt)) {
+    return confirmExchangeBalanceInTransaction({
+      attempt,
+      gateway: PAYMENT_GATEWAY.MERCADOPAGO,
+      source: input.source,
       payload: input.payload,
     });
   }
@@ -438,6 +618,29 @@ export async function confirmPaymentFromInfinitePay(input: {
     });
   }
 
+  if (!attempt && orderNsu.includes("-ex-")) {
+    const baseOrderId = orderNsu.split("-ex-")[0];
+    attempt = await prisma.paymentAttempt.findFirst({
+      where: {
+        orderId: baseOrderId,
+        gateway: PAYMENT_GATEWAY.INFINITEPAY,
+        purpose: EXCHANGE_BALANCE_PURPOSE,
+        status: {
+          in: [
+            PAYMENT_ATTEMPT_STATUS.ACTIVE,
+            PAYMENT_ATTEMPT_STATUS.SUPERSEDED,
+          ],
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      include: {
+        order: {
+          select: ORDER_SELECT_FOR_CONFIRMATION,
+        },
+      },
+    });
+  }
+
   if (!attempt) {
     return rejectConfirmation({
       gateway: PAYMENT_GATEWAY.INFINITEPAY,
@@ -446,6 +649,16 @@ export async function confirmPaymentFromInfinitePay(input: {
       reason: "Nenhuma PaymentAttempt encontrada para o webhook InfinitePay.",
       orderId: orderNsu || null,
       gatewayReference: slug || null,
+      payload: input.payload,
+    });
+  }
+
+  if (isExchangeBalanceAttempt(attempt)) {
+    return confirmExchangeBalanceInTransaction({
+      attempt,
+      gateway: PAYMENT_GATEWAY.INFINITEPAY,
+      source: input.source,
+      gatewayTransactionId: input.transactionNsu?.trim() || null,
       payload: input.payload,
     });
   }

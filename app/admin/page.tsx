@@ -8,6 +8,7 @@ import { CategoryManager } from "@/components/admin/CategoryManager";
 import { SectionManager } from "@/components/admin/SectionManager";
 import { SalesManager } from "@/components/admin/SalesManager";
 import { ShippingManager } from "@/components/admin/ShippingManager";
+import { ExchangeManager } from "@/components/admin/ExchangeManager";
 import { StoreSettingsManager } from "@/components/admin/StoreSettingsManager";
 import { UsersManager } from "@/components/admin/UsersManager";
 import { LogoutButton } from "@/components/auth/LogoutButton";
@@ -20,6 +21,7 @@ type AdminSection =
   | "banner"
   | "sales"
   | "shipping"
+  | "exchanges"
   | "settings"
   | "users";
 
@@ -88,6 +90,16 @@ function AdminNavIcon({ id }: { id: AdminSection }) {
             strokeLinecap="round"
             strokeLinejoin="round"
             d="M6 12 3.269 3.125A59.769 59.769 0 0121.485 12 59.768 59.768 0 013.27 20.875L5.999 12zm0 0h7.5"
+          />
+        </svg>
+      );
+    case "exchanges":
+      return (
+        <svg {...iconProps}>
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"
           />
         </svg>
       );
@@ -195,6 +207,7 @@ export default function AdminPage() {
         { id: "products" as const, label: "Produtos" },
         { id: "sales" as const, label: "Vendas" },
         { id: "shipping" as const, label: "Envios" },
+        // { id: "exchanges" as const, label: "Trocas" },
       ],
     },
     {
@@ -391,6 +404,12 @@ export default function AdminPage() {
         {activeSection === "shipping" && (
           <section>
             <ShippingManager />
+          </section>
+        )}
+
+        {activeSection === "exchanges" && (
+          <section>
+            <ExchangeManager />
           </section>
         )}
 

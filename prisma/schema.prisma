@@ -56,6 +56,102 @@ enum OrderEventType {
   NOTE_ADDED
 }
 
+enum ExchangeKind {
+  /** Troca: devolve itens e (opcionalmente) envia novos. */
+  EXCHANGE
+  /** Devolução pura: só retorno + crédito/reembolso. */
+  RETURN
+}
+
+enum ExchangeStatus {
+  AWAITING_RETURN
+  RETURN_IN_TRANSIT
+  RECEIVED
+  READY_OUTBOUND
+  OUTBOUND
+  COMPLETED
+  CANCELLED
+}
+
+enum CashLedgerDirection {
+  IN
+  OUT
+}
+
+enum CashLedgerKind {
+  SALE
+  EXCHANGE_BALANCE
+  EXCHANGE_REFUND
+  MANUAL
+}
+
+enum ExchangeReason {
+  SIZE
+  COLOR
+  DEFECT
+  REGRET
+  WRONG_PRODUCT
+  OTHER
+}
+
+enum ExchangeItemDirection {
+  RETURN
+  OUTBOUND
+}
+
+/** Destino da peça devolvida após conferência. */
+enum ExchangeItemDisposition {
+  RESELLABLE
+  DAMAGED
+  DISCARD
+  INTERNAL_USE
+}
+
+enum ExchangeShippingType {
+  RETURN
+  OUTBOUND
+}
+
+/** Como a peça vai/volta: transportadora ou operação local. */
+enum ExchangeShippingMethod {
+  CARRIER
+  STORE_PICKUP
+  LOCAL_COURIER
+}
+
+enum ExchangeShippingPaidBy {
+  STORE
+  CUSTOMER
+}
+
+enum ExchangeBalanceStatus {
+  NONE
+  PENDING
+  PAID
+  WAIVED
+  CREDIT_PENDING
+  SETTLED
+}
+
+enum ExchangeEventType {
+  CREATED
+  REVERSE_LABEL_GENERATED
+  RETURN_POSTED
+  RECEIVED
+  INSPECTED
+  STOCK_RESTORED
+  STOCK_DEBITED
+  OUTBOUND_LABEL_GENERATED
+  BALANCE_UPDATED
+  BALANCE_PAID
+  BALANCE_WAIVED
+  BALANCE_REFUND_MARKED
+  PAYMENT_LINK_CREATED
+  COMPLETED
+  CANCELLED
+  NOTE_ADDED
+}
+
 model User {
   id           String     @id @default(cuid())
   name         String
@@ -72,6 +168,7 @@ model User {
   createdAt    DateTime   @default(now())
   orders       Order[]
   ordersCreated Order[]   @relation("OrdersCreatedByStaff")
+  exchangesOpened Exchange[] @relation("ExchangesOpenedByStaff")
   favorites    Favorite[]
 }
 
@@ -189,12 +286,131 @@ model Order {
   paymentAttempts    PaymentAttempt[]
   stockReservations  StockReservation[]
   events             OrderEvent[]
+  exchanges          Exchange[]
+  cashLedgerEntries  CashLedgerEntry[]
 
   @@index([userId, status])
   @@index([email, status])
   @@index([status, expiresAt])
   @@index([orderSource])
   @@index([fulfillmentType])
+}
+
+/** Troca / devolução vinculada a um pedido (não cria nova venda). */
+model Exchange {
+  id              String         @id @default(cuid())
+  /** Número sequencial legível, ex.: #1, #2… */
+  exchangeNumber  Int?
+  orderId         String
+  order           Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  kind            ExchangeKind   @default(EXCHANGE)
+  status          ExchangeStatus @default(AWAITING_RETURN)
+  reason          ExchangeReason
+  reasonNotes     String?
+  notes           String?
+  openedByUserId  String?
+  openedBy        User?          @relation("ExchangesOpenedByStaff", fields: [openedByUserId], references: [id], onDelete: SetNull)
+  receivedAt      DateTime?
+  inspectedAt     DateTime?
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+  cancellationReason String?
+
+  /** Soma dos itens devolvidos (crédito). */
+  returnedItemsTotal   Float @default(0)
+  /** Soma dos itens novos (débito). */
+  newItemsTotal        Float @default(0)
+  /** newItemsTotal - returnedItemsTotal. */
+  productsDelta        Float @default(0)
+  /** Fretes cobrados do cliente nesta troca. */
+  shippingCustomerTotal Float @default(0)
+  /** Saldo: positivo = cliente deve; negativo = crédito. */
+  balanceAmount        Float @default(0)
+  balanceStatus        ExchangeBalanceStatus @default(NONE)
+  balancePaidAt        DateTime?
+  balancePaidByUserId  String?
+  balanceNotes         String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items            ExchangeItem[]
+  shippings        ExchangeShipping[]
+  events           ExchangeEvent[]
+  paymentAttempts  PaymentAttempt[]
+  cashLedgerEntries CashLedgerEntry[]
+
+  @@index([orderId])
+  @@index([status])
+  @@index([kind])
+  @@index([createdAt])
+}
+
+model ExchangeItem {
+  id                  String                @id @default(cuid())
+  exchangeId          String
+  exchange            Exchange              @relation(fields: [exchangeId], references: [id], onDelete: Cascade)
+  direction           ExchangeItemDirection
+  /** Linha original do pedido (itens RETURN). */
+  orderItemId         String?
+  productId           String?
+  productName         String
+  productImageUrl     String?
+  quantity            Int
+  unitPrice           Float
+  lineTotal           Float
+  pieceSelectionsJson String?
+  pieceVariantId      String?
+  /** Preenchido na conferência (só RETURN). */
+  disposition         ExchangeItemDisposition?
+  stockRestored       Boolean               @default(false)
+  stockDebited        Boolean               @default(false)
+
+  @@index([exchangeId])
+  @@index([orderItemId])
+  @@index([productId])
+}
+
+model ExchangeShipping {
+  id                    String                 @id @default(cuid())
+  exchangeId            String
+  exchange              Exchange               @relation(fields: [exchangeId], references: [id], onDelete: Cascade)
+  type                  ExchangeShippingType
+  method                ExchangeShippingMethod @default(CARRIER)
+  shippingServiceId     Int?
+  shippingServiceName   String?
+  quotedPrice           Float?
+  /** Valor debitado na SuperFrete. */
+  cost                  Float?
+  paidBy                ExchangeShippingPaidBy @default(STORE)
+  trackingCode          String?
+  superfreteShipmentId  String?
+  superfreteStatus      String?
+  labelUrl              String?
+  labelGeneratedAt      DateTime?
+  packageHeightCm       Float?
+  packageWidthCm        Float?
+  packageLengthCm       Float?
+  packageWeightKg       Float?
+  /** pending | labeled | posted | delivered | cancelled */
+  shippingStatus        String                 @default("pending")
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  @@index([exchangeId])
+  @@index([type])
+}
+
+model ExchangeEvent {
+  id          String            @id @default(cuid())
+  exchangeId  String
+  exchange    Exchange          @relation(fields: [exchangeId], references: [id], onDelete: Cascade)
+  type        ExchangeEventType
+  actorUserId String?
+  payloadJson String?
+  createdAt   DateTime          @default(now())
+
+  @@index([exchangeId, createdAt])
 }
 
 /** Histórico de eventos da venda (preparado para uso futuro). */
@@ -210,11 +426,16 @@ model OrderEvent {
   @@index([orderId, createdAt])
 }
 
-/** Tentativa de pagamento de uma Order (histórico completo; no máximo uma `active` por Order). */
+/** Tentativa de pagamento (pedido ou saldo de troca). */
 model PaymentAttempt {
   id                    String    @id @default(cuid())
   orderId               String
   order                 Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  /** Quando preenchido: cobrança do saldo da troca (não confirma o pedido). */
+  exchangeId            String?
+  exchange              Exchange? @relation(fields: [exchangeId], references: [id], onDelete: Cascade)
+  /** order | exchange_balance */
+  purpose               String    @default("order")
   /** Sequencial por Order: 1, 2, 3… */
   attemptNumber         Int
   paymentMethod         String
@@ -233,7 +454,30 @@ model PaymentAttempt {
   @@unique([orderId, attemptNumber])
   @@unique([gateway, gatewayReference])
   @@index([orderId, status])
+  @@index([exchangeId, status])
   @@index([gatewayReference])
+}
+
+/** Movimentações de caixa (vendas, diferença de troca, reembolsos). */
+model CashLedgerEntry {
+  id               String              @id @default(cuid())
+  direction        CashLedgerDirection
+  kind             CashLedgerKind
+  amount           Float
+  description      String
+  orderId          String?
+  order            Order?              @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  exchangeId       String?
+  exchange         Exchange?           @relation(fields: [exchangeId], references: [id], onDelete: SetNull)
+  paymentAttemptId String?
+  actorUserId      String?
+  createdAt        DateTime            @default(now())
+
+  @@index([createdAt])
+  @@index([direction, createdAt])
+  @@index([kind])
+  @@index([orderId])
+  @@index([exchangeId])
 }
 
 /** Auditoria de webhooks/retornos de pagamento (inclui tentativas superseded rejeitadas). */

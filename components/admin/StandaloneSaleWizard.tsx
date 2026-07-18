@@ -6,7 +6,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type FormEvent,
 } from "react";
 import Image from "next/image";
 import { PieceSelector } from "@/components/product/PieceSelector";
@@ -38,8 +37,12 @@ import {
 } from "@/lib/admin-sale/customer-form-input";
 import { cpfValidationError } from "@/lib/validation/cpf";
 import { useStoreSettings } from "@/lib/hooks/use-store-settings";
-
-const CUSTOM_SET_SIZES = ["PP", "P", "M", "G", "GG"] as const;
+import { useAuth } from "@/components/auth/AuthProvider";
+import { PERMISSION } from "@/lib/auth/permissions";
+import {
+  CustomSaleSetsForm,
+  type CustomSaleSetInput,
+} from "@/components/admin/CustomSaleSetsForm";
 
 type DiscountForm = { mode: "FIXED" | "PERCENT"; value: string };
 
@@ -58,37 +61,17 @@ type WizardCatalogLine = {
   itemDiscount: DiscountForm | null;
 };
 
-type CustomSetPiece = {
-  name: string;
-  size: string;
-  color: string;
-};
-
 type WizardCustomLine = {
   key: string;
   kind: "custom";
   description: string;
-  pieces: CustomSetPiece[];
+  pieces: CustomSaleSetInput["pieces"];
   unitPrice: number;
   quantity: number;
   itemDiscount: DiscountForm | null;
 };
 
 type WizardLine = WizardCatalogLine | WizardCustomLine;
-
-type CustomSetPieceDraft = {
-  key: string;
-  name: string;
-  size: string;
-  color: string;
-};
-
-type CustomSetDraft = {
-  key: string;
-  description: string;
-  price: string;
-  pieces: CustomSetPieceDraft[];
-};
 
 type PricingPreview = {
   subtotalOriginal: number;
@@ -168,7 +151,7 @@ function CheckboxOption({
         type="checkbox"
         checked={checked}
         onChange={onChange}
-        className="mt-0.5 h-4 w-4 shrink-0 accent-stone-900"
+        className="mt-0.5 h-4 w-4 shrink-0 accent-sky-600"
       />
       <span className="min-w-0">
         <span className="block text-sm font-medium text-stone-900">{label}</span>
@@ -294,13 +277,13 @@ function CustomerSearchSelect({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between gap-2 rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-left text-sm transition-colors hover:border-stone-300 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+        className="box-border flex h-8 w-full items-center justify-between gap-2 rounded-lg border border-stone-200 bg-white px-2.5 text-left text-xs font-medium transition-colors hover:border-stone-300 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
       >
         <span className={selected ? "truncate text-stone-900" : "text-stone-500"}>
           {selected ? selected.name : "Buscar cliente…"}
         </span>
         <svg
-          className={`h-4 w-4 shrink-0 text-stone-400 transition-transform ${open ? "rotate-180" : ""}`}
+          className={`h-3.5 w-3.5 shrink-0 text-stone-400 transition-transform ${open ? "rotate-180" : ""}`}
           fill="none"
           stroke="currentColor"
           strokeWidth={2}
@@ -372,454 +355,6 @@ function CustomerSearchSelect({
   );
 }
 
-function newCustomSetPieceDraft(): CustomSetPieceDraft {
-  return {
-    key: `piece-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    name: "",
-    size: "",
-    color: "",
-  };
-}
-
-function newCustomSetDraft(): CustomSetDraft {
-  return {
-    key: `custom-draft-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    description: "",
-    price: "",
-    pieces: [newCustomSetPieceDraft()],
-  };
-}
-
-function formatDraftPrice(raw: string): string | null {
-  const n = Number(raw.replace(",", "."));
-  if (!raw.trim() || !Number.isFinite(n) || n < 0) return null;
-  return formatPrice(n);
-}
-
-function CustomSaleSetsForm({
-  onAdd,
-  onCancel,
-}: {
-  onAdd: (
-    sets: Omit<WizardCustomLine, "key" | "kind" | "itemDiscount" | "quantity">[]
-  ) => void;
-  onCancel: () => void;
-}) {
-  const [rows, setRows] = useState<CustomSetDraft[]>(() => [newCustomSetDraft()]);
-  const [formError, setFormError] = useState<string | null>(null);
-
-  function updateSet(key: string, patch: Partial<CustomSetDraft>) {
-    setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
-  }
-
-  function updatePiece(
-    setKey: string,
-    pieceKey: string,
-    patch: Partial<CustomSetPieceDraft>
-  ) {
-    setRows((prev) =>
-      prev.map((set) =>
-        set.key !== setKey
-          ? set
-          : {
-              ...set,
-              pieces: set.pieces.map((p) =>
-                p.key === pieceKey ? { ...p, ...patch } : p
-              ),
-            }
-      )
-    );
-  }
-
-  function addPiece(setKey: string) {
-    setRows((prev) =>
-      prev.map((set) =>
-        set.key !== setKey
-          ? set
-          : {
-              ...set,
-              pieces: [...set.pieces, newCustomSetPieceDraft()],
-            }
-      )
-    );
-  }
-
-  function removePiece(setKey: string, pieceKey: string) {
-    setRows((prev) =>
-      prev.map((set) => {
-        if (set.key !== setKey || set.pieces.length <= 1) return set;
-        return {
-          ...set,
-          pieces: set.pieces.filter((p) => p.key !== pieceKey),
-        };
-      })
-    );
-  }
-
-  function handleAddSet() {
-    setRows((prev) => [...prev, newCustomSetDraft()]);
-  }
-
-  function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    const parsed: Omit<
-      WizardCustomLine,
-      "key" | "kind" | "itemDiscount" | "quantity"
-    >[] = [];
-
-    for (const row of rows) {
-      const description = row.description.trim();
-      const unitPrice = Number(row.price.replace(",", "."));
-      const pieces = row.pieces
-        .map((p) => ({
-          name: p.name.trim(),
-          size: p.size.trim(),
-          color: p.color.trim(),
-        }))
-        .filter((p) => p.name || p.size || p.color);
-
-      const empty = !description && !row.price.trim() && pieces.length === 0;
-      if (empty) continue;
-
-      if (!description || !row.price.trim()) {
-        setFormError("Preencha a descrição e o valor de cada conjunto.");
-        return;
-      }
-      if (!Number.isFinite(unitPrice) || unitPrice < 0) {
-        setFormError("Informe um valor válido para cada conjunto.");
-        return;
-      }
-
-      parsed.push({ description, pieces, unitPrice });
-    }
-
-    if (parsed.length === 0) {
-      setFormError("Adicione ao menos um conjunto.");
-      return;
-    }
-
-    setFormError(null);
-    onAdd(parsed);
-  }
-
-  const readyCount = rows.filter(
-    (r) => r.description.trim() && r.price.trim()
-  ).length;
-  const totalPreview = rows.reduce((sum, r) => {
-    const n = Number(r.price.replace(",", "."));
-    return sum + (Number.isFinite(n) && n > 0 ? n : 0);
-  }, 0);
-
-  return (
-    <form
-      onSubmit={handleSubmit}
-      className="overflow-hidden rounded-2xl border border-stone-200 bg-gradient-to-b from-stone-50 to-white shadow-sm"
-    >
-      <div className="flex items-start justify-between gap-3 border-b border-stone-200/80 bg-white/80 px-4 py-3.5 sm:px-5">
-        <div className="flex items-start gap-3">
-          {/* <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-stone-900 text-white">
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.8}
-              viewBox="0 0 24 24"
-              aria-hidden
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 4.5v15m7.5-7.5h-15"
-              />
-            </svg>
-          </div> */}
-          <div>
-            <p className="text-sm font-semibold text-stone-900">
-              Registrar venda avulsa
-            </p>
-            {/* <p className="mt-0.5 text-xs leading-relaxed text-stone-500">
-              Descreva o que saiu — sem cadastrar no catálogo.
-            </p> */}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-lg p-1.5 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700"
-          aria-label="Fechar"
-        >
-          <svg
-            className="h-4 w-4"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.8}
-            viewBox="0 0 24 24"
-            aria-hidden
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M6 18L18 6M6 6l12 12"
-            />
-          </svg>
-        </button>
-      </div>
-
-      <div className="space-y-4 px-4 py-4 sm:px-5">
-        {formError && (
-          <div className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700">
-            {formError}
-          </div>
-        )}
-
-        {rows.map((row, setIdx) => {
-          const priceLabel = formatDraftPrice(row.price);
-          return (
-            <article
-              key={row.key}
-              className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_1px_0_rgba(28,25,23,0.04)]"
-            >
-              <div className="flex items-center justify-between gap-3 border-b border-stone-100 bg-stone-50/70 px-4 py-2.5">
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-stone-900 px-1.5 text-[11px] font-semibold text-white">
-                    {setIdx + 1}
-                  </span>
-                  <span className="text-xs font-medium text-stone-600">
-                    Conjunto
-                  </span>
-                  {priceLabel ? (
-                    <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-emerald-700">
-                      {priceLabel}
-                    </span>
-                  ) : null}
-                </div>
-                {rows.length > 1 ? (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setRows((prev) => prev.filter((r) => r.key !== row.key))
-                    }
-                    className="text-xs font-medium text-stone-400 transition-colors hover:text-red-600"
-                  >
-                    Remover
-                  </button>
-                ) : null}
-              </div>
-
-              <div className="space-y-5 p-4">
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8.5rem]">
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-stone-600">
-                      O que foi vendido?
-                    </label>
-                    <textarea
-                      value={row.description}
-                      onChange={(e) =>
-                        updateSet(row.key, { description: e.target.value })
-                      }
-                      rows={2}
-                      placeholder="Ex.: Conjunto alfaiataria bege, cinto de couro…"
-                      autoFocus={setIdx === 0}
-                      className="w-full resize-none rounded-xl border border-stone-200 bg-stone-50/40 px-3.5 py-3 text-sm leading-relaxed text-stone-900 placeholder:text-stone-400 transition-colors focus:border-stone-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-stone-200"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-stone-600">
-                      Valor do conjunto
-                    </label>
-                    <div className="relative">
-                      <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-medium text-stone-400">
-                        R$
-                      </span>
-                      <input
-                        value={row.price}
-                        onChange={(e) =>
-                          updateSet(row.key, { price: e.target.value })
-                        }
-                        inputMode="decimal"
-                        placeholder="0,00"
-                        className="w-full rounded-xl border border-stone-200 bg-stone-50/40 py-3 pl-10 pr-3 text-base font-semibold tabular-nums text-stone-900 placeholder:font-normal placeholder:text-stone-400 transition-colors focus:border-stone-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-stone-200"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-xl bg-stone-50/80 p-3.5">
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <div>
-                      <p className="text-xs font-semibold text-stone-700">
-                        Peças deste conjunto
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => addPiece(row.key)}
-                      className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1.5 text-xs font-semibold text-stone-700 shadow-sm ring-1 ring-stone-200/80 transition-colors hover:bg-stone-900 hover:text-white hover:ring-stone-900"
-                    >
-                      <svg
-                        className="h-3.5 w-3.5"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                        viewBox="0 0 24 24"
-                        aria-hidden
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M12 4.5v15m7.5-7.5h-15"
-                        />
-                      </svg>
-                      Peça
-                    </button>
-                  </div>
-
-                  <div className="space-y-2.5">
-                    {row.pieces.map((piece, pieceIdx) => (
-                      <div
-                        key={piece.key}
-                        className="rounded-xl border border-stone-200/80 bg-white p-3 shadow-sm"
-                      >
-                        <div className="mb-2.5 flex items-center justify-between gap-2">
-                          <span className="text-[11px] font-medium uppercase tracking-wide text-stone-400">
-                            Peça {pieceIdx + 1}
-                          </span>
-                          {row.pieces.length > 1 ? (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                removePiece(row.key, piece.key)
-                              }
-                              className="text-[11px] font-medium text-stone-400 transition-colors hover:text-red-600"
-                            >
-                              Remover
-                            </button>
-                          ) : null}
-                        </div>
-
-                        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem]">
-                          <div>
-                            <label className="mb-1 block text-[11px] font-medium text-stone-500">
-                              Nome
-                            </label>
-                            <input
-                              value={piece.name}
-                              onChange={(e) =>
-                                updatePiece(row.key, piece.key, {
-                                  name: e.target.value,
-                                })
-                              }
-                              placeholder="Calça, blusa, cinto…"
-                              className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
-                            />
-                          </div>
-                          <div>
-                            <label className="mb-1 block text-[11px] font-medium text-stone-500">
-                              Cor
-                            </label>
-                            <input
-                              value={piece.color}
-                              onChange={(e) =>
-                                updatePiece(row.key, piece.key, {
-                                  color: e.target.value,
-                                })
-                              }
-                              placeholder="Preto"
-                              className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="mt-3">
-                          <label className="mb-1.5 block text-[11px] font-medium text-stone-500">
-                            Tamanho
-                          </label>
-                          <div className="flex flex-wrap gap-1.5">
-                            {CUSTOM_SET_SIZES.map((size) => {
-                              const active = piece.size === size;
-                              return (
-                                <button
-                                  key={size}
-                                  type="button"
-                                  onClick={() =>
-                                    updatePiece(row.key, piece.key, {
-                                      size: active ? "" : size,
-                                    })
-                                  }
-                                  className={`min-w-[2.5rem] rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all ${
-                                    active
-                                      ? "bg-stone-900 text-white shadow-sm"
-                                      : "bg-stone-100 text-stone-600 hover:bg-stone-200"
-                                  }`}
-                                >
-                                  {size}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </article>
-          );
-        })}
-
-        <button
-          type="button"
-          onClick={handleAddSet}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-stone-300 bg-white/60 px-4 py-3 text-sm font-medium text-stone-600 transition-colors hover:border-stone-400 hover:bg-white hover:text-stone-900"
-        >
-          <svg
-            className="h-4 w-4"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            viewBox="0 0 24 24"
-            aria-hidden
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M12 4.5v15m7.5-7.5h-15"
-            />
-          </svg>
-          Adicionar outro conjunto
-        </button>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stone-200 bg-white px-4 py-3.5 sm:px-5">
-        <div className="min-w-0 text-xs text-stone-500">
-          {readyCount > 0 ? (
-            <>
-              <span className="font-semibold text-stone-800">
-                {readyCount}{" "}
-                {readyCount === 1 ? "conjunto" : "conjuntos"}
-              </span>
-              {totalPreview > 0 ? (
-                <span className="text-stone-400">
-                  {" "}
-                  · {formatPrice(totalPreview)}
-                </span>
-              ) : null}
-            </>
-          ) : (
-            <span>Preencha descrição e valor para continuar</span>
-          )}
-        </div>
-        <button
-          type="submit"
-          disabled={readyCount === 0}
-          className="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Adicionar à venda
-        </button>
-      </div>
-    </form>
-  );
-}
 
 function ProductSearchSelect({
   products,
@@ -852,28 +387,28 @@ function ProductSearchSelect({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-left text-sm text-stone-500 transition-colors hover:border-stone-300 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+        className="box-border flex h-8 w-full items-center justify-between rounded-lg border border-stone-200 bg-white px-2.5 text-left text-xs font-medium text-stone-500 transition-colors hover:border-stone-300 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
       >
         <span>Selecionar produto…</span>
-        <svg className={`h-4 w-4 shrink-0 text-stone-400 transition-transform ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+        <svg className={`h-3.5 w-3.5 shrink-0 text-stone-400 transition-transform ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
         </svg>
       </button>
 
       {open && (
-        <div className="absolute left-0 right-0 z-20 mt-2 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg">
-          <div className="border-b border-stone-100 p-3">
+        <div className="absolute left-0 right-0 z-20 mt-1.5 overflow-hidden rounded-lg border border-stone-200 bg-white shadow-lg">
+          <div className="border-b border-stone-100 p-2">
             <input
               autoFocus
               placeholder="Buscar produto…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+              className="box-border h-8 w-full rounded-md border border-stone-200 px-2.5 text-xs text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-1 focus:ring-stone-200"
             />
           </div>
-          <ul className="max-h-64 overflow-y-auto overscroll-contain p-1">
+          <ul className="max-h-56 overflow-y-auto overscroll-contain p-1">
             {filtered.length === 0 ? (
-              <li className="px-3 py-6 text-center text-sm text-stone-400">
+              <li className="px-2.5 py-4 text-center text-xs text-stone-400">
                 Nenhum produto encontrado.
               </li>
             ) : (
@@ -890,15 +425,15 @@ function ProductSearchSelect({
                         setOpen(false);
                         setQuery("");
                       }}
-                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-stone-50"
+                      className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-stone-50"
                     >
-                      <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-stone-100">
+                      <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-md bg-stone-100">
                         {p.images[0]?.url && (
-                          <Image src={p.images[0].url} alt="" fill className="object-cover" sizes="48px" />
+                          <Image src={p.images[0].url} alt="" fill className="object-cover" sizes="36px" />
                         )}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="line-clamp-2 text-sm font-medium leading-snug text-stone-900">
+                        <p className="line-clamp-2 text-xs font-medium leading-snug text-stone-900">
                           {p.name}
                         </p>
                         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5">
@@ -948,10 +483,10 @@ function PaymentMethodSelector({
         <button
           type="button"
           onClick={() => onChange("pix")}
-          className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors ${
+          className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors ${
             paymentMethod === "pix"
-              ? "border-stone-900 bg-stone-100"
-              : "border-stone-200 bg-white text-stone-500 hover:border-stone-300"
+              ? "border-sky-300 bg-sky-100 text-sky-900"
+              : "border-stone-200 bg-white text-stone-500 hover:border-stone-300 hover:bg-stone-50"
           }`}
         >
           <Image
@@ -964,7 +499,7 @@ function PaymentMethodSelector({
           />
           <span
             className={`text-sm font-medium ${
-              paymentMethod === "pix" ? "text-stone-900" : "text-stone-500"
+              paymentMethod === "pix" ? "text-sky-900" : "text-stone-500"
             }`}
           >
             Pix
@@ -974,10 +509,10 @@ function PaymentMethodSelector({
         <button
           type="button"
           onClick={() => onChange("card")}
-          className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors ${
+          className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors ${
             paymentMethod === "card"
-              ? "border-stone-900 bg-stone-100"
-              : "border-stone-200 bg-white text-stone-500 hover:border-stone-300"
+              ? "border-sky-300 bg-sky-100 text-sky-900"
+              : "border-stone-200 bg-white text-stone-500 hover:border-stone-300 hover:bg-stone-50"
           }`}
         >
           <svg
@@ -996,7 +531,7 @@ function PaymentMethodSelector({
           </svg>
           <span
             className={`text-sm font-medium ${
-              paymentMethod === "card" ? "text-stone-900" : "text-stone-500"
+              paymentMethod === "card" ? "text-sky-900" : "text-stone-500"
             }`}
           >
             Cartão
@@ -1025,7 +560,7 @@ function CopyBlock({ label, value }: { label: string; value: string }) {
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
           }}
-          className="shrink-0 rounded-lg bg-stone-900 px-3 py-2 text-xs font-medium text-white hover:bg-stone-800"
+          className="shrink-0 rounded-lg bg-sky-100 px-3 py-2 text-xs font-semibold text-sky-900 ring-1 ring-sky-200/80 hover:bg-sky-200"
         >
           {copied ? "Copiado" : "Copiar"}
         </button>
@@ -1059,7 +594,7 @@ function OrderSummary({
   const cardTotal = pricing.card?.total ?? null;
   const cardInstallment =
     cardTotal != null ? installmentValueEqualParts(cardTotal, maxInstallments) : null;
-  const selectedClass = "border border-stone-900 bg-stone-100";
+  const selectedClass = "border border-sky-300 bg-sky-50";
   const idleClass = "border border-transparent bg-stone-50";
 
   return (
@@ -1159,6 +694,9 @@ export function StandaloneSaleWizard({
   onCreated,
 }: Props) {
   const { settings } = useStoreSettings();
+  const { loading: authLoading, hasPermission } = useAuth();
+  const canMarkAlreadyPaid =
+    !authLoading && hasPermission(PERMISSION.ADMIN_SALE_MARK_PAID);
   const [step, setStep] = useState(0);
   const [lines, setLines] = useState<WizardLine[]>([]);
   const [catalog, setCatalog] = useState(products);
@@ -1192,6 +730,11 @@ export function StandaloneSaleWizard({
   const [cepLookupError, setCepLookupError] = useState<string | null>(null);
   const [paymentAlreadyPaid, setPaymentAlreadyPaid] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<"pix" | "card" | null>(null);
+
+  useEffect(() => {
+    if (!canMarkAlreadyPaid) setPaymentAlreadyPaid(false);
+  }, [canMarkAlreadyPaid]);
+
   const [orderDiscount, setOrderDiscount] = useState<DiscountForm | null>(null);
   const [pricingByMethod, setPricingByMethod] = useState<{
     pix: PricingPreview | null;
@@ -1380,9 +923,7 @@ export function StandaloneSaleWizard({
     setError(null);
   }
 
-  function handleCustomSetsAdded(
-    sets: Omit<WizardCustomLine, "key" | "kind" | "itemDiscount" | "quantity">[]
-  ) {
+  function handleCustomSetsAdded(sets: CustomSaleSetInput[]) {
     setLines((prev) => [
       ...prev,
       ...sets.map((set) => ({
@@ -1503,7 +1044,7 @@ export function StandaloneSaleWizard({
                   destinationCep: onlyDigits(destinationCep, 8) || onlyDigits(address.destinationCep, 8),
                 }
               : undefined,
-          paymentAlreadyPaid,
+          paymentAlreadyPaid: canMarkAlreadyPaid && paymentAlreadyPaid,
           paymentMethod,
           orderDiscount: buildDiscountPayload(orderDiscount),
         }),
@@ -1667,7 +1208,7 @@ export function StandaloneSaleWizard({
             <button
               type="button"
               onClick={onClose}
-              className="w-full rounded-lg bg-stone-900 py-3 text-sm font-medium text-white hover:bg-stone-800"
+              className="w-full rounded-lg bg-sky-100 py-3 text-sm font-semibold text-sky-900 ring-1 ring-sky-200/80 hover:bg-sky-200"
             >
               Fechar
             </button>
@@ -1681,7 +1222,7 @@ export function StandaloneSaleWizard({
 
   return (
     <div className="fixed inset-0 z-50 flex bg-stone-900/50 backdrop-blur-sm">
-      <div className="flex h-[100dvh] w-full flex-col overflow-hidden bg-white md:m-auto md:h-auto md:max-h-[calc(100dvh-2rem)] md:max-w-6xl md:rounded-2xl md:border md:border-stone-200 md:shadow-2xl">
+      <div className="flex h-[100dvh] w-full flex-col overflow-hidden bg-white md:m-auto md:h-[min(48rem,calc(100dvh-2rem))] md:max-h-[min(48rem,calc(100dvh-2rem))] md:w-full md:max-w-6xl md:rounded-2xl md:border md:border-stone-200 md:shadow-2xl">
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-stone-100 px-4 py-4 sm:px-6">
           <div className="min-w-0 pr-3">
@@ -1702,41 +1243,78 @@ export function StandaloneSaleWizard({
           </button>
         </div>
 
-        {/* Stepper — sem stretch; em tela estreita rola na horizontal */}
+        {/* Timeline de etapas */}
         <div className="shrink-0 border-b border-stone-100 bg-stone-50/80 px-3 py-3 sm:px-6">
-          <ol className="flex gap-1.5 overflow-x-auto overscroll-x-contain p-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <ol className="flex w-full items-start gap-0 overflow-x-auto overscroll-x-contain p-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {STEPS.map((s, i) => {
               const active = i === step;
               const done = i < step;
+              const isLast = i === STEPS.length - 1;
               return (
-                <li
-                  key={s.id}
-                  className={`flex shrink-0 items-center gap-2 rounded-lg border px-2.5 py-2 whitespace-nowrap ${
-                    active
-                      ? "border-stone-300 bg-white shadow-sm"
-                      : done
-                        ? "border-transparent bg-stone-100/80"
-                        : "border-transparent"
-                  }`}
-                >
-                  <span
-                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold sm:h-7 sm:w-7 sm:text-xs ${
-                      active
-                        ? "bg-stone-900 text-white"
-                        : done
-                          ? "bg-stone-300 text-stone-800"
-                          : "border border-stone-200 bg-white text-stone-400"
-                    }`}
-                  >
-                    {done ? "✓" : i + 1}
-                  </span>
-                  <span
-                    className={`text-[11px] font-medium sm:text-xs ${
-                      active ? "text-stone-900" : done ? "text-stone-600" : "text-stone-400"
-                    }`}
-                  >
-                    {s.label}
-                  </span>
+                <li key={s.id} className="flex min-w-0 flex-1 items-start">
+                  <div className="flex w-full min-w-[4.5rem] flex-col items-center gap-1.5 sm:min-w-0">
+                    <div className="flex w-full items-center">
+                      {i > 0 ? (
+                        <span
+                          className={`h-px flex-1 ${
+                            done || active ? "bg-stone-400" : "bg-stone-200"
+                          }`}
+                          aria-hidden
+                        />
+                      ) : (
+                        <span className="flex-1" aria-hidden />
+                      )}
+                      <span
+                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold sm:h-8 sm:w-8 sm:text-xs ${
+                          active
+                            ? "bg-stone-900 text-white ring-4 ring-stone-900/10"
+                            : done
+                              ? "bg-stone-800 text-white"
+                              : "border border-stone-200 bg-white text-stone-400"
+                        }`}
+                      >
+                        {done ? (
+                          <svg
+                            className="h-3.5 w-3.5"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={2.5}
+                            viewBox="0 0 24 24"
+                            aria-hidden
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="m4.5 12.75 6 6 9-13.5"
+                            />
+                          </svg>
+                        ) : (
+                          i + 1
+                        )}
+                      </span>
+                      {!isLast ? (
+                        <span
+                          className={`h-px flex-1 ${
+                            done ? "bg-stone-400" : "bg-stone-200"
+                          }`}
+                          aria-hidden
+                        />
+                      ) : (
+                        <span className="flex-1" aria-hidden />
+                      )}
+                    </div>
+                    <span
+                      className={`max-w-full px-0.5 text-center text-[10px] font-medium leading-tight sm:text-[11px] ${
+                        active
+                          ? "text-stone-900"
+                          : done
+                            ? "text-stone-600"
+                            : "text-stone-400"
+                      }`}
+                    >
+                      {s.label}
+                    </span>
+                  </div>
                 </li>
               );
             })}
@@ -1762,19 +1340,19 @@ export function StandaloneSaleWizard({
                       Selecione do catálogo ou descreva conjuntos vendidos sem cadastrar produto.
                     </p>
                   </div>
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                  <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
                     <ProductSearchSelect products={catalog} onSelect={addProduct} />
                     <button
                       type="button"
                       onClick={() => setShowCustomSets((v) => !v)}
-                      className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border px-3 py-2.5 text-sm font-semibold transition-colors sm:min-w-[9.5rem] ${
+                      className={`inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
                         showCustomSets
-                          ? "border-stone-900 bg-stone-900 text-white"
+                          ? "border-sky-300 bg-sky-100 text-sky-900"
                           : "border-stone-200 bg-white text-stone-700 hover:border-stone-300 hover:bg-stone-50"
                       }`}
                     >
                       <svg
-                        className="h-4 w-4"
+                        className="h-3.5 w-3.5"
                         fill="none"
                         stroke="currentColor"
                         strokeWidth={2}
@@ -1792,6 +1370,7 @@ export function StandaloneSaleWizard({
                   </div>
                   {showCustomSets && (
                     <CustomSaleSetsForm
+                      compact
                       onAdd={handleCustomSetsAdded}
                       onCancel={() => setShowCustomSets(false)}
                     />
@@ -2052,7 +1631,7 @@ export function StandaloneSaleWizard({
                     ) : null}
                     <div>
                       <FieldLabel>CEP de destino</FieldLabel>
-                      <div className="flex gap-2">
+                      <div className="flex items-stretch gap-2">
                         <TextInput
                           placeholder="00000-000"
                           value={cepMask(onlyDigits(destinationCep, 8))}
@@ -2062,7 +1641,7 @@ export function StandaloneSaleWizard({
                           type="button"
                           onClick={() => void quoteShipping()}
                           disabled={loadingQuote || onlyDigits(destinationCep, 8).length !== 8}
-                          className="shrink-0 rounded-lg bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-40"
+                          className="shrink-0 rounded-lg bg-sky-100 px-4 py-2.5 text-sm font-semibold text-sky-900 ring-1 ring-sky-200/80 transition-colors hover:bg-sky-200 disabled:opacity-40"
                         >
                           {loadingQuote ? "Calculando…" : "Calcular"}
                         </button>
@@ -2078,7 +1657,7 @@ export function StandaloneSaleWizard({
                             key={opt.id}
                             className={`flex cursor-pointer items-center gap-3 rounded-xl border p-4 transition-colors ${
                               selectedShippingId === opt.id
-                                ? "border-stone-900 bg-stone-50"
+                                ? "border-sky-300 bg-sky-50"
                                 : "border-stone-200 hover:border-stone-300"
                             }`}
                           >
@@ -2087,7 +1666,7 @@ export function StandaloneSaleWizard({
                               name="shipping"
                               checked={selectedShippingId === opt.id}
                               onChange={() => setSelectedShippingId(opt.id)}
-                              className="accent-stone-900"
+                              className="accent-sky-600"
                             />
                             <div className="min-w-0 flex-1">
                               <p className="text-sm font-medium text-stone-900">
@@ -2166,7 +1745,7 @@ export function StandaloneSaleWizard({
             {/* Step 2 — Cliente */}
             {step === 2 && (
               <div className="space-y-6">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
                   <CustomerSearchSelect
                     selected={selectedCustomer}
                     onSelect={applyCustomer}
@@ -2174,10 +1753,10 @@ export function StandaloneSaleWizard({
                   <button
                     type="button"
                     onClick={startNewCustomer}
-                    className={`shrink-0 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
+                    className={`inline-flex h-8 shrink-0 items-center justify-center rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
                       customerEntryMode === "new"
-                        ? "border-stone-900 bg-stone-900 text-white"
-                        : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
+                        ? "border-sky-300 bg-sky-100 text-sky-900"
+                        : "border-stone-200 bg-white text-stone-700 hover:border-stone-300 hover:bg-stone-50"
                     }`}
                   >
                     Novo cliente
@@ -2423,25 +2002,27 @@ export function StandaloneSaleWizard({
             {/* Step 3 — Pagamento */}
             {step === 3 && (
               <div className="space-y-6">
-                <div className="space-y-2">
-                  <CheckboxOption
-                    checked={!paymentAlreadyPaid}
-                    onChange={() => setPaymentAlreadyPaid(false)}
-                    label="Aguardando pagamento"
-                    description="Gerar link PIX ou cartão"
-                  />
-                  <CheckboxOption
-                    checked={paymentAlreadyPaid}
-                    onChange={() => setPaymentAlreadyPaid(true)}
-                    label="Já foi pago"
-                    description="Registrar pagamento manual"
-                  />
-                </div>
+                {canMarkAlreadyPaid ? (
+                  <div className="space-y-2">
+                    <CheckboxOption
+                      checked={!paymentAlreadyPaid}
+                      onChange={() => setPaymentAlreadyPaid(false)}
+                      label="Aguardando pagamento"
+                      description="Gerar link PIX ou cartão"
+                    />
+                    <CheckboxOption
+                      checked={paymentAlreadyPaid}
+                      onChange={() => setPaymentAlreadyPaid(true)}
+                      label="Já foi pago"
+                      description="Registrar pagamento manual"
+                    />
+                  </div>
+                ) : null}
 
                 <PaymentMethodSelector
                   paymentMethod={paymentMethod}
                   onChange={setPaymentMethod}
-                  alreadyPaid={paymentAlreadyPaid}
+                  alreadyPaid={canMarkAlreadyPaid && paymentAlreadyPaid}
                 />
 
                 <div className="rounded-xl border border-stone-200 p-5">
@@ -2499,7 +2080,7 @@ export function StandaloneSaleWizard({
               <div
                 className={`rounded-lg px-2.5 py-2 ${
                   paymentMethod === "pix"
-                    ? "border border-stone-900 bg-stone-100"
+                    ? "border border-sky-300 bg-sky-50"
                     : "border border-transparent bg-white/70"
                 }`}
               >
@@ -2521,7 +2102,7 @@ export function StandaloneSaleWizard({
               <div
                 className={`rounded-lg px-2.5 py-2 ${
                   paymentMethod === "card"
-                    ? "border border-stone-900 bg-stone-100"
+                    ? "border border-sky-300 bg-sky-50"
                     : "border border-transparent bg-white/70"
                 }`}
               >
@@ -2568,12 +2149,12 @@ export function StandaloneSaleWizard({
         </div>
 
         {/* Footer */}
-        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-stone-100 bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-4">
+        <div className="mt-auto flex shrink-0 items-center justify-between gap-3 border-t border-stone-100 bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6">
           <button
             type="button"
             disabled={step === 0}
             onClick={() => setStep((s) => s - 1)}
-            className="rounded-lg border border-stone-200 px-4 py-2.5 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40 sm:px-5"
+            className="rounded-lg px-3 py-2 text-sm font-medium text-stone-600 transition-colors hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Voltar
           </button>
@@ -2582,7 +2163,7 @@ export function StandaloneSaleWizard({
               type="button"
               disabled={!canGoNext}
               onClick={() => setStep((s) => s + 1)}
-              className="rounded-lg bg-stone-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40 sm:px-5"
+              className="ml-auto rounded-lg bg-sky-100 px-4 py-2 text-sm font-semibold text-sky-900 ring-1 ring-sky-200/80 transition-colors hover:bg-sky-200 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Continuar
             </button>
@@ -2591,7 +2172,7 @@ export function StandaloneSaleWizard({
               type="button"
               disabled={submitting || !canGoNext}
               onClick={() => void handleSubmit()}
-              className="rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40 sm:px-5"
+              className="ml-auto rounded-lg bg-sky-100 px-4 py-2 text-sm font-semibold text-sky-900 ring-1 ring-sky-200/80 transition-colors hover:bg-sky-200 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {submitting ? "Criando…" : "Criar venda"}
             </button>

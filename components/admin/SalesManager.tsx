@@ -101,6 +101,7 @@ type AdminOrder = {
   cancelledAt: string | null;
   createdAt: string;
   user: { name: string; email: string; phone: string } | null;
+  createdBy?: { name: string | null; role?: string | null } | null;
   items: OrderItem[];
 };
 
@@ -173,6 +174,23 @@ function orderMatchesSaleDateRange(
 
   const orderDate = toLocalDateKey(order.createdAt);
   return orderDate >= normalized.from && orderDate <= normalized.to;
+}
+
+function orderMatchesOriginFilter(
+  order: AdminOrder,
+  originFilter: string | null
+): boolean {
+  if (!originFilter) return true;
+  return orderOriginLabel(order) === originFilter;
+}
+
+function collectOriginFilterOptions(orders: AdminOrder[]): string[] {
+  const labels = new Set(orders.map(orderOriginLabel));
+  const preferred = ["checkout", "Admin", "Avulsa"];
+  const rest = [...labels]
+    .filter((label) => !preferred.includes(label))
+    .sort((a, b) => a.localeCompare(b, "pt-BR"));
+  return [...preferred.filter((label) => labels.has(label)), ...rest];
 }
 
 function formatDateFilterLabel(value: string): string {
@@ -995,6 +1013,17 @@ type PaymentInfo =
 
 function orderRefLabel(order: Pick<AdminOrder, "orderNumber">): string {
   return order.orderNumber != null ? ` #${order.orderNumber}` : "";
+}
+
+/** Origem na listagem: checkout do site ou quem registrou a venda avulsa. */
+function orderOriginLabel(order: AdminOrder): string {
+  if (order.orderSource === "ADMIN_SALE") {
+    if (order.createdBy?.role === "ADMIN") return "Admin";
+    const fullName = order.createdBy?.name?.trim();
+    if (!fullName) return "Avulsa";
+    return fullName.split(/\s+/)[0] ?? "Avulsa";
+  }
+  return "checkout";
 }
 
 function shareGreeting(order: AdminOrder): string {
@@ -2299,6 +2328,7 @@ export function SalesManager() {
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterKey | null>(null);
+  const [originFilter, setOriginFilter] = useState<string | null>(null);
   const [customerSearchQuery, setCustomerSearchQuery] = useState("");
   const [saleDateRange, setSaleDateRange] = useState<SaleDateRange>(
     EMPTY_SALE_DATE_RANGE
@@ -2345,15 +2375,27 @@ export function SalesManager() {
     [orders]
   );
 
+  const originFilterOptions = useMemo(
+    () => collectOriginFilterOptions(orders),
+    [orders]
+  );
+
+  useEffect(() => {
+    if (originFilter && !originFilterOptions.includes(originFilter)) {
+      setOriginFilter(null);
+    }
+  }, [originFilter, originFilterOptions]);
+
   const visibleOrders = useMemo(() => {
     const query = customerSearchQuery.trim();
 
     return orders.filter((order) => {
       if (!orderMatchesStatusFilter(order, filter)) return false;
       if (!orderMatchesSaleDateRange(order, saleDateRange)) return false;
+      if (!orderMatchesOriginFilter(order, originFilter)) return false;
       return orderMatchesCustomerSearch(order, query);
     });
-  }, [orders, filter, customerSearchQuery, saleDateRange]);
+  }, [orders, filter, customerSearchQuery, saleDateRange, originFilter]);
 
   function toggleFilter(key: FilterKey) {
     setFilter((current) => (current === key ? null : key));
@@ -2426,9 +2468,10 @@ export function SalesManager() {
     : null;
   const hasCustomerSearch = customerSearchQuery.trim().length > 0;
   const hasSaleDateFilter = hasSaleDateRangeSelection(saleDateRange);
+  const hasOriginFilter = originFilter != null;
   const hasActiveFilter = filter !== null;
   const hasListFilters =
-    hasCustomerSearch || hasActiveFilter || hasSaleDateFilter;
+    hasCustomerSearch || hasActiveFilter || hasSaleDateFilter || hasOriginFilter;
 
   return (
     <div className="space-y-5">
@@ -2498,6 +2541,50 @@ export function SalesManager() {
             range={saleDateRange}
             onChange={setSaleDateRange}
           />
+
+          <label className="relative shrink-0">
+            <span className="sr-only">Filtrar por origem</span>
+            <select
+              value={originFilter ?? ""}
+              onChange={(e) =>
+                setOriginFilter(e.target.value ? e.target.value : null)
+              }
+              className={`appearance-none ${SALES_TOOLBAR_SIZE} rounded-lg border pr-8 transition-colors focus:outline-none focus:ring-2 focus:ring-stone-200 ${
+                hasOriginFilter
+                  ? "border-stone-900 bg-stone-900 text-white focus:ring-stone-300"
+                  : "border-stone-200 bg-white text-stone-700 hover:border-stone-300 hover:bg-stone-50 focus:border-stone-400"
+              } px-3 sm:px-3.5`}
+            >
+              <option value="" className="bg-white text-stone-900">
+                Origem
+              </option>
+              {originFilterOptions.map((label) => (
+                <option
+                  key={label}
+                  value={label}
+                  className="bg-white text-stone-900"
+                >
+                  {label}
+                </option>
+              ))}
+            </select>
+            <svg
+              className={`pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 ${
+                hasOriginFilter ? "text-white/80" : "text-stone-400"
+              }`}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              viewBox="0 0 24 24"
+              aria-hidden
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M19 9l-7 7-7-7"
+              />
+            </svg>
+          </label>
         </div>
 
         <label className="relative ml-1.5 w-full min-w-[9.5rem] shrink-0 md:ml-auto md:w-52 md:max-w-none lg:w-90">
@@ -2575,15 +2662,17 @@ export function SalesManager() {
           <p className="text-sm text-stone-500">
             {hasCustomerSearch
               ? `Nenhum pedido encontrado para “${customerSearchQuery.trim()}”.`
-              : hasSaleDateFilter
-                ? `Nenhum pedido encontrado no período ${formatSaleDateRangeLabel(saleDateRange)}.`
-                : filter === "waiting"
-                  ? "Nenhum pedido aguardando pagamento."
-                  : filter === "paid"
-                    ? "Nenhum pedido pago encontrado."
-                    : filter === "to_pack"
-                      ? "Nenhum pedido por embalar."
-                      : "Nenhuma venda encontrada."}
+              : hasOriginFilter
+                ? `Nenhum pedido encontrado com origem “${originFilter}”.`
+                : hasSaleDateFilter
+                  ? `Nenhum pedido encontrado no período ${formatSaleDateRangeLabel(saleDateRange)}.`
+                  : filter === "waiting"
+                    ? "Nenhum pedido aguardando pagamento."
+                    : filter === "paid"
+                      ? "Nenhum pedido pago encontrado."
+                      : filter === "to_pack"
+                        ? "Nenhum pedido por embalar."
+                        : "Nenhuma venda encontrada."}
           </p>
         </div>
       ) : (
@@ -2603,6 +2692,7 @@ export function SalesManager() {
                     />
                   </th>
                   <th className="px-4 py-3.5 text-left">Pedido</th>
+                  <th className="px-4 py-3.5 text-left">Origem</th>
                   <th className="px-4 py-3.5 text-left">Data</th>
                   <th className="px-4 py-3.5 text-left">Cliente</th>
                   <th className="px-4 py-3.5 text-left">Pagamento</th>
@@ -2623,6 +2713,7 @@ export function SalesManager() {
                     order.deliveryNotes
                   );
                   const adminSaleNotes = order.internalNotes?.trim() ?? "";
+                  const originLabel = orderOriginLabel(order);
 
                   return (
                     <Fragment key={order.id}>
@@ -2652,21 +2743,23 @@ export function SalesManager() {
                               <span className={`font-mono ${TABLE_CELL_PRIMARY}`}>
                                 #{order.orderNumber ?? "—"}
                               </span>
-                              {order.orderSource === "ADMIN_SALE" ? (
-                                <>
-                                  <span className="text-xs font-normal text-stone-600">Avulsa</span>
-                                  {adminSaleNotes ? (
-                                    <span onClick={(e) => e.stopPropagation()}>
-                                      <AdminSaleNotesHint notes={adminSaleNotes} />
-                                    </span>
-                                  ) : null}
-                                </>
+                              {order.orderSource === "ADMIN_SALE" && adminSaleNotes ? (
+                                <span onClick={(e) => e.stopPropagation()}>
+                                  <AdminSaleNotesHint notes={adminSaleNotes} />
+                                </span>
                               ) : null}
                             </div>
                             {isSaleCancelled ? (
                               <span className="text-xs font-normal text-red-600">Cancelado</span>
                             ) : null}
                           </div>
+                        </td>
+
+                        <td
+                          className="cursor-pointer px-4 py-3.5"
+                          onClick={() => openDetails(order.id)}
+                        >
+                          <p className={TABLE_CELL_PRIMARY}>{originLabel}</p>
                         </td>
 
                         <td

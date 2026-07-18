@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { UserRole } from "@/app/generated/prisma/client";
 import { hasPermission, type Permission } from "@/lib/auth/permissions";
 import { requireStaffApi, type StaffSession } from "@/lib/auth/require-staff-api";
 

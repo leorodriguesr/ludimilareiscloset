@@ -9,7 +9,7 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 /** Incremente após `prisma generate` que adiciona/altera campos usados em runtime. */
-const PRISMA_SCHEMA_GENERATION = 2026071013;
+const PRISMA_SCHEMA_GENERATION = 2026071803;
 
 const connection = resolveDbConnection();
 
@@ -36,7 +36,11 @@ const cacheUsable =
   typeof (cached as { section?: { findMany?: unknown } }).section?.findMany ===
     "function" &&
   typeof (cached as { favorite?: { findMany?: unknown } }).favorite?.findMany ===
-    "function";
+    "function" &&
+  typeof (cached as { exchange?: { findMany?: unknown } }).exchange?.findMany ===
+    "function" &&
+  typeof (cached as { cashLedgerEntry?: { aggregate?: unknown } })
+    .cashLedgerEntry?.aggregate === "function";
 
 if (cached != null && !cacheUsable) {
   void cached.$disconnect().catch(() => {});

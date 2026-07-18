@@ -14,6 +14,7 @@ export function LogoutButton({ className, children }: Props) {
     setLoading(true);
     try {
       await fetch("/api/auth/logout", { method: "POST" });
+      window.dispatchEvent(new Event("auth:logout"));
       // Sinaliza para o GoogleOneTap que o usuário saiu intencionalmente.
       // O script GSI não está carregado em páginas autenticadas, então
       // disableAutoSelect() não pode ser chamado diretamente aqui.

@@ -41,6 +41,7 @@ export async function GET(request: NextRequest) {
         take: limit,
         include: {
           user: { select: { name: true, email: true, phone: true } },
+          createdBy: { select: { name: true, role: true } },
           items: {
             include: {
               product: {

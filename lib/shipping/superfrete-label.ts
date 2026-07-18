@@ -20,27 +20,51 @@ export type LabelProduct = {
   unitary_value: number;
 };
 
+export type LabelParty = {
+  name: string;
+  phone?: string;
+  email?: string;
+  document?: string;
+  address: string;
+  number?: string;
+  complement?: string;
+  district?: string;
+  city: string;
+  state_abbr: string;
+  postal_code: string;
+};
+
 export type LabelInput = {
   serviceId: number;
-  to: {
-    name: string;
-    phone?: string;
-    email?: string;
-    document?: string;
-    address: string;
-    number?: string;
-    complement?: string;
-    district?: string;
-    city: string;
-    state_abbr: string;
-    postal_code: string;
-  };
+  /** Se omitido, usa o remetente da loja (SuperFrete). */
+  from?: LabelParty;
+  to: LabelParty;
   products: LabelProduct[];
   volume: { height: number; width: number; length: number; weight: number };
   insuranceValue?: number;
   tag?: string;
   orderNumber?: number | null;
 };
+
+function toSuperfreteParty(
+  party: LabelParty,
+  nameFallback: string
+): Record<string, unknown> {
+  return {
+    name: formatSuperfretePersonName(party.name, nameFallback),
+    phone: (party.phone ?? "").replace(/\D/g, "") || undefined,
+    email: party.email || undefined,
+    document: (party.document ?? "").replace(/\D/g, "") || undefined,
+    address: party.address.slice(0, 50),
+    complement: (party.complement ?? "").slice(0, 20),
+    number: (party.number ?? "S/N").slice(0, 10),
+    district: (party.district ?? "NA").slice(0, 60),
+    city: party.city.slice(0, 50),
+    state_abbr: party.state_abbr.toUpperCase().slice(0, 2),
+    postal_code: party.postal_code.replace(/\D/g, ""),
+    country_id: "BR",
+  };
+}
 
 export type LabelResult = {
   shipmentId: string;
@@ -96,6 +120,10 @@ export async function printSuperfreteLabel(shipmentId: string): Promise<string> 
 
 export async function createSuperfreteLabelForOrder(input: LabelInput): Promise<LabelResult> {
   const store = await resolveStoreSender();
+  const fromParty = input.from
+    ? toSuperfreteParty(input.from, "Remetente")
+    : store;
+  const toParty = toSuperfreteParty(input.to, "Destinatário");
 
   const insurance = normalizeSuperfreteInsurance(
     input.insuranceValue ?? 0,
@@ -105,21 +133,8 @@ export async function createSuperfreteLabelForOrder(input: LabelInput): Promise<
   const cartBody: Record<string, unknown> = {
     service: input.serviceId,
     agency: 0,
-    from: store,
-    to: {
-      name: formatSuperfretePersonName(input.to.name, "Destinatário"),
-      phone: (input.to.phone ?? "").replace(/\D/g, "") || undefined,
-      email: input.to.email || undefined,
-      document: (input.to.document ?? "").replace(/\D/g, "") || undefined,
-      address: input.to.address.slice(0, 50),
-      complement: (input.to.complement ?? "").slice(0, 20),
-      number: (input.to.number ?? "S/N").slice(0, 10),
-      district: (input.to.district ?? "NA").slice(0, 60),
-      city: input.to.city.slice(0, 50),
-      state_abbr: input.to.state_abbr.toUpperCase().slice(0, 2),
-      postal_code: input.to.postal_code.replace(/\D/g, ""),
-      country_id: "BR",
-    },
+    from: fromParty,
+    to: toParty,
     products: input.products.map((p) => ({
       name: p.name.slice(0, 100),
       quantity: p.quantity,

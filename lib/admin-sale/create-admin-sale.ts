@@ -451,6 +451,15 @@ export async function createAdminSale(
         "@/lib/orders/stock/reservation"
       );
       await commitStockReservations(tx, order.id);
+      const { appendCashLedgerEntry } = await import("@/lib/cash/ledger");
+      await appendCashLedgerEntry(tx, {
+        direction: "IN",
+        kind: "SALE",
+        amount: pricing.total,
+        description: `Venda avulsa · pedido #${order.orderNumber ?? order.id.slice(0, 8)}`,
+        orderId: order.id,
+        actorUserId: input.createdByUserId,
+      });
     } else if (stockLines.length > 0) {
       await reserveStockForOrderLines(tx, order.id, stockLines);
     }
