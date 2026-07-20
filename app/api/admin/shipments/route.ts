@@ -74,6 +74,30 @@ export async function GET(request: NextRequest) {
           labelUrl: true,
           paidAt: true,
           createdAt: true,
+          items: {
+            select: {
+              id: true,
+              quantity: true,
+              price: true,
+              pieceSelectionsJson: true,
+              productId: true,
+              productName: true,
+              productDescription: true,
+              productImageUrl: true,
+              product: {
+                select: {
+                  id: true,
+                  name: true,
+                  description: true,
+                  images: {
+                    orderBy: { order: "asc" },
+                    take: 1,
+                    select: { url: true },
+                  },
+                },
+              },
+            },
+          },
         },
       }),
       prisma.order.count({ where }),

@@ -3,7 +3,10 @@ import {
   CustomerDataStatus,
   FulfillmentType,
 } from "@/app/generated/prisma/client";
-import { isCarrierShippingStatusLocked } from "@/lib/fulfillment/shipping-status-policy";
+import {
+  canManuallyMarkCarrierAsShipped,
+  isCarrierShippingStatusLocked,
+} from "@/lib/fulfillment/shipping-status-policy";
 import { prisma } from "@/lib/prisma";
 import { requireAdminApi } from "@/lib/require-admin-api";
 import { cpfValidationError } from "@/lib/validation/cpf";
@@ -58,7 +61,7 @@ export async function PATCH(
 
     const order = await prisma.order.findUnique({
       where: { id },
-      select: { fulfillmentType: true, shippingStatus: true },
+      select: { fulfillmentType: true, shippingStatus: true, trackingCode: true },
     });
     if (!order) {
       return NextResponse.json({ error: "Pedido não encontrado." }, { status: 404 });
@@ -78,13 +81,25 @@ export async function PATCH(
       order.fulfillmentType === FulfillmentType.CARRIER &&
       (s === "shipped" || s === "delivered")
     ) {
-      return NextResponse.json(
-        {
-          error:
-            "Pedidos com transportadora só avançam para enviado/recebido via SuperFrete.",
-        },
-        { status: 400 }
-      );
+      const allowManualShipped =
+        s === "shipped" &&
+        canManuallyMarkCarrierAsShipped({
+          fulfillmentType: order.fulfillmentType,
+          shippingStatus: order.shippingStatus,
+          trackingCode: order.trackingCode,
+        });
+
+      if (!allowManualShipped) {
+        return NextResponse.json(
+          {
+            error:
+              s === "shipped"
+                ? "Só é possível marcar como enviado manualmente quando já houver código de rastreio."
+                : "Pedidos com transportadora só avançam para recebido via SuperFrete.",
+          },
+          { status: 400 }
+        );
+      }
     }
 
     updates.shippingStatus = s;

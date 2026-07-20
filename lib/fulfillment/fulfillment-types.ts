@@ -43,5 +43,6 @@ export function canGenerateLabelForFulfillment(type: FulfillmentType): boolean {
 
 export {
   canManuallyChangeShippingStatus,
+  canManuallyMarkCarrierAsShipped,
   isCarrierShippingStatusLocked,
 } from "@/lib/fulfillment/shipping-status-policy";

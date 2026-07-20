@@ -651,14 +651,19 @@ function displayOrDash(v: string | null | undefined): string {
   return t ? t : "—";
 }
 
+type ShippingTone = "amber" | "blue" | "emerald" | "red";
+
 const SHIPPING_STATUS = [
-  { value: "to_pack", label: "Por embalar", dot: "bg-amber-400" },
-  { value: "packed", label: "Por enviar", dot: "bg-blue-500" },
-  { value: "shipped", label: "Enviado", dot: "bg-emerald-500" },
-  { value: "delivered", label: "Entregue", dot: "bg-emerald-500" },
-  { value: "cancelled", label: "Cancelado", dot: "bg-red-400" },
-] as const;
-function sInfo(v: string) { return SHIPPING_STATUS.find((s) => s.value === v) ?? SHIPPING_STATUS[0]; }
+  { value: "to_pack", label: "Por embalar", tone: "amber" },
+  { value: "packed", label: "Por enviar", tone: "blue" },
+  { value: "shipped", label: "Enviado", tone: "emerald" },
+  { value: "delivered", label: "Entregue", tone: "emerald" },
+  { value: "cancelled", label: "Cancelado", tone: "red" },
+] as const satisfies ReadonlyArray<{ value: string; label: string; tone: ShippingTone }>;
+
+function sInfo(v: string) {
+  return SHIPPING_STATUS.find((s) => s.value === v) ?? SHIPPING_STATUS[0];
+}
 
 function payBadge(order: AdminOrder) {
   if (order.paidAt) return { label: "Pago", cls: "bg-emerald-50 text-emerald-700 ring-emerald-200" };
@@ -750,7 +755,13 @@ function tableShippingLabel(status: string): string {
   return TABLE_SHIPPING_LABELS[status] ?? sInfo(status).label;
 }
 
-function TruckIcon({ className = "h-3.5 w-3.5 shrink-0" }: { className?: string }) {
+function StatusIcon({
+  className = "h-3.5 w-3.5 shrink-0",
+  children,
+}: {
+  className?: string;
+  children: ReactNode;
+}) {
   return (
     <svg
       className={className}
@@ -762,32 +773,79 @@ function TruckIcon({ className = "h-3.5 w-3.5 shrink-0" }: { className?: string 
       viewBox="0 0 24 24"
       aria-hidden
     >
+      {children}
+    </svg>
+  );
+}
+
+function TruckIcon({ className = "h-3.5 w-3.5 shrink-0" }: { className?: string }) {
+  return (
+    <StatusIcon className={className}>
       <path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2" />
       <path d="M15 18H9" />
       <path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14" />
       <circle cx="17" cy="18" r="2" />
       <circle cx="7" cy="18" r="2" />
-    </svg>
+    </StatusIcon>
   );
 }
+
+function shippingStatusIcon(status: string) {
+  switch (status) {
+    case "to_pack":
+      return (
+        <StatusIcon>
+          <path d="m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+        </StatusIcon>
+      );
+    case "packed":
+      return (
+        <StatusIcon>
+          <path d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
+        </StatusIcon>
+      );
+    case "shipped":
+      return <TruckIcon />;
+    case "delivered":
+      return (
+        <StatusIcon>
+          <path d="M9 12.75 11.25 15 15 9.75" />
+          <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+        </StatusIcon>
+      );
+    case "cancelled":
+      return (
+        <StatusIcon>
+          <path d="m9.75 9.75 4.5 4.5m0-4.5-4.5 4.5" />
+          <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+        </StatusIcon>
+      );
+    default:
+      return <TruckIcon />;
+  }
+}
+
+const SHIPPING_TONE_CLASS: Record<ShippingTone, string> = {
+  amber: "bg-amber-50 text-amber-800 ring-amber-200",
+  blue: "bg-blue-50 text-blue-900 ring-blue-200",
+  emerald: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  red: "bg-red-50 text-red-700 ring-red-200",
+};
 
 function ShippingStatusBadge({
   label,
   tone,
+  status,
 }: {
   label: string;
-  tone: "blue" | "emerald";
+  tone: ShippingTone;
+  status: string;
 }) {
-  const toneClass =
-    tone === "blue"
-      ? "bg-blue-50 text-blue-900 ring-blue-200"
-      : "bg-emerald-50 text-emerald-700 ring-emerald-200";
-
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${toneClass}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${SHIPPING_TONE_CLASS[tone]}`}
     >
-      <TruckIcon />
+      {shippingStatusIcon(status)}
       {label}
     </span>
   );
@@ -803,36 +861,11 @@ function TableShippingStatus({
   const label = tableShippingLabel(status);
   const ss = sInfo(status);
 
-  if (status === "packed") {
-    return (
-      <>
-        <ShippingStatusBadge label={label} tone="blue" />
-        {shippingMethod ? (
-          <p className={`mt-1 ${TABLE_CELL_SECONDARY}`}>{shippingMethod}</p>
-        ) : null}
-      </>
-    );
-  }
-
-  if (status === "delivered") {
-    return (
-      <>
-        <ShippingStatusBadge label={label} tone="emerald" />
-        {shippingMethod ? (
-          <p className={`mt-1 ${TABLE_CELL_SECONDARY}`}>{shippingMethod}</p>
-        ) : null}
-      </>
-    );
-  }
-
   return (
     <>
-      <span className={`inline-flex items-center gap-1.5 ${TABLE_CELL_PRIMARY}`}>
-        <span className={`h-2 w-2 shrink-0 rounded-full ${ss.dot}`} />
-        {label}
-      </span>
+      <ShippingStatusBadge label={label} tone={ss.tone} status={status} />
       {shippingMethod ? (
-        <p className={TABLE_CELL_SECONDARY}>{shippingMethod}</p>
+        <p className={`mt-1 ${TABLE_CELL_SECONDARY}`}>{shippingMethod}</p>
       ) : null}
     </>
   );
@@ -2085,22 +2118,11 @@ function OrderDetailsBody({
               <>
                 <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2.5">
                   <p className="mb-1.5 text-xs font-medium text-stone-500">Status do envio</p>
-                  {order.shippingStatus === "delivered" ? (
-                    <ShippingStatusBadge
-                      label={tableShippingLabel(order.shippingStatus)}
-                      tone="emerald"
-                    />
-                  ) : order.shippingStatus === "packed" ? (
-                    <ShippingStatusBadge
-                      label={tableShippingLabel(order.shippingStatus)}
-                      tone="blue"
-                    />
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 text-sm font-medium text-stone-800">
-                      <span className={`h-2 w-2 shrink-0 rounded-full ${shippingStatusInfo.dot}`} />
-                      {tableShippingLabel(order.shippingStatus)}
-                    </span>
-                  )}
+                  <ShippingStatusBadge
+                    label={tableShippingLabel(order.shippingStatus)}
+                    tone={shippingStatusInfo.tone}
+                    status={order.shippingStatus}
+                  />
                   <p className="mt-1.5 text-xs text-stone-500">
                     Embalagem e etiqueta são gerenciadas em Envios.
                   </p>
