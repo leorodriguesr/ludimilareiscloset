@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
-import { createClient } from "@libsql/client";
+import { createClient, type Client } from "@libsql/client";
 import { resolveDbConnection, type DbTarget } from "../lib/db/target";
 
 /**
@@ -42,6 +42,51 @@ function listMigrations(): { name: string; sql: string }[] {
     });
 }
 
+/** Divide o SQL em statements, ignorando comentários de linha. */
+function splitSqlStatements(sql: string): string[] {
+  const withoutBlockComments = sql.replace(/\/\*[\s\S]*?\*\//g, "");
+  return withoutBlockComments
+    .split(";")
+    .map((part) =>
+      part
+        .split("\n")
+        .filter((line) => !/^\s*--/.test(line))
+        .join("\n")
+        .trim()
+    )
+    .filter(Boolean);
+}
+
+function isIgnorableAlreadyAppliedError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("duplicate column name") ||
+    lower.includes("already exists") ||
+    lower.includes("duplicate column")
+  );
+}
+
+async function applyMigrationSql(client: Client, sql: string, migrationName: string) {
+  const statements = splitSqlStatements(sql);
+  for (const statement of statements) {
+    try {
+      await client.execute(statement);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (isIgnorableAlreadyAppliedError(message)) {
+        console.warn(
+          `[turso-migrate] Já aplicado (ok): ${migrationName}\n  → ${statement.slice(0, 120)}…`
+        );
+        continue;
+      }
+      console.error(
+        `[turso-migrate] Statement falhou em ${migrationName}:\n${statement}`
+      );
+      throw error;
+    }
+  }
+}
+
 async function main() {
   const target = parseTarget();
   const connection = resolveDbConnection(target);
@@ -76,7 +121,7 @@ async function main() {
 
   for (const migration of pending) {
     console.log(`[turso-migrate] Aplicando: ${migration.name}`);
-    await client.executeMultiple(migration.sql);
+    await applyMigrationSql(client, migration.sql, migration.name);
     await client.execute({
       sql: `INSERT INTO ${TRACKING_TABLE} (name) VALUES (?);`,
       args: [migration.name],

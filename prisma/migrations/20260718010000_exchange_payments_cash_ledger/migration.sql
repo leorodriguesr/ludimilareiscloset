@@ -11,10 +11,9 @@ ALTER TABLE "PaymentAttempt" ADD COLUMN "purpose" TEXT NOT NULL DEFAULT 'order';
 -- CreateIndex
 CREATE INDEX "PaymentAttempt_exchangeId_status_idx" ON "PaymentAttempt"("exchangeId", "status");
 
--- AddForeignKey
-ALTER TABLE "PaymentAttempt" ADD CONSTRAINT "PaymentAttempt_exchangeId_fkey" FOREIGN KEY ("exchangeId") REFERENCES "Exchange"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
 -- CreateTable
+-- Nota: FK via ALTER TABLE ADD CONSTRAINT não é suportada no SQLite/Turso.
+-- As FKs de CashLedgerEntry ficam inline no CREATE (suportado).
 CREATE TABLE "CashLedgerEntry" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "direction" TEXT NOT NULL,
