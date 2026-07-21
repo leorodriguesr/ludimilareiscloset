@@ -31,6 +31,7 @@ import {
   orderItemDisplayName,
 } from "@/lib/orders/order-item-display";
 import type { CartPieceSelection } from "@/lib/cart/types";
+import { cepMask, onlyDigits } from "@/lib/admin-sale/customer-form-input";
 
 /* ─── Tipos ───────────────────────────────────────────────────────── */
 
@@ -828,6 +829,149 @@ function PackingSlipModal({
       </div>
     </div>,
     document.body
+  );
+}
+
+/* ─── Modal cotação rápida de frete ───────────────────────────────── */
+
+const QUICK_QUOTE_PACKAGE_LABEL = "30 × 20 × 10 cm · 1 kg · seguro R$ 200";
+
+function QuickFreightQuoteModal({ onClose }: { onClose: () => void }) {
+  const [cep, setCep] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [options, setOptions] = useState<NormalizedShippingOption[]>([]);
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  async function calculate() {
+    const digits = onlyDigits(cep, 8);
+    if (digits.length !== 8) {
+      setError("Informe um CEP válido com 8 dígitos.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setOptions([]);
+    try {
+      const res = await fetch("/api/admin/shipments/quote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ destinationCep: digits }),
+      });
+      const data = (await res.json()) as {
+        options?: NormalizedShippingOption[];
+        error?: string;
+      };
+      if (!res.ok) {
+        setError(data.error ?? "Erro ao calcular frete.");
+        return;
+      }
+      setOptions(data.options ?? []);
+      if (!(data.options?.length)) {
+        setError("Nenhuma opção de frete disponível para este CEP.");
+      }
+    } catch {
+      setError("Erro de conexão.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[110] flex items-center justify-center bg-stone-900/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md rounded-xl border border-stone-200 bg-white shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Calcular frete"
+      >
+        <div className="border-b border-stone-100 px-5 py-4">
+          <h3 className="text-base font-semibold text-stone-900">Calcular frete</h3>
+        </div>
+
+        <div className="space-y-4 px-5 py-4">
+          <div>
+            <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-stone-500">
+              CEP de destino
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="00000-000"
+                value={cepMask(onlyDigits(cep, 8))}
+                onChange={(e) => setCep(onlyDigits(e.target.value, 8))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void calculate();
+                  }
+                }}
+                className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+              />
+              <button
+                type="button"
+                disabled={loading || onlyDigits(cep, 8).length !== 8}
+                onClick={() => void calculate()}
+                className="shrink-0 rounded-lg bg-stone-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:opacity-50"
+              >
+                {loading ? "…" : "Calcular"}
+              </button>
+            </div>
+          </div>
+
+          {error ? (
+            <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {error}
+            </p>
+          ) : null}
+
+          {options.length > 0 ? (
+            <ul className="max-h-[min(50vh,360px)] space-y-2 overflow-y-auto">
+              {options.map((opt) => (
+                <li
+                  key={opt.id}
+                  className="flex items-start justify-between gap-3 rounded-lg border border-stone-200 px-4 py-3"
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium text-stone-900">
+                      {opt.carrierName} — {opt.serviceName}
+                    </p>
+                    <p className="mt-0.5 text-xs text-stone-500">
+                      {formatDeliveryDaysLabel(opt.deliveryDaysMin, opt.deliveryDaysMax)}
+                    </p>
+                  </div>
+                  <p className="shrink-0 font-semibold tabular-nums text-stone-900">
+                    {formatPrice(opt.price)}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+
+        <div className="border-t border-stone-100 px-5 py-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full rounded-lg border border-stone-200 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50"
+          >
+            Fechar
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1630,6 +1774,7 @@ export function ShippingManager() {
   const [packingModalOrder, setPackingModalOrder] = useState<ShipmentOrder | null>(null);
   const [packingBusy, setPackingBusy] = useState(false);
   const [printingPackingList, setPrintingPackingList] = useState(false);
+  const [showFreightQuoteModal, setShowFreightQuoteModal] = useState(false);
   const allRef = useRef<HTMLInputElement>(null);
 
   const fetchWallet = useCallback(async () => {
@@ -1785,27 +1930,37 @@ export function ShippingManager() {
               : `${orders.length} envio${orders.length !== 1 ? "s" : ""}`}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={refreshAll}
-          disabled={loading}
-          className={`inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50 ${SHIPPING_TOOLBAR_SIZE}`}
-        >
-          <svg
-            className={`h-3 w-3 ${loading ? "animate-spin" : ""}`}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            viewBox="0 0 24 24"
-            aria-hidden
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowFreightQuoteModal(true)}
+            className={`inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 ${SHIPPING_TOOLBAR_SIZE}`}
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"
-            />
-          </svg>
-        </button>
+            <TruckIcon className="h-3.5 w-3.5" />
+            Calcular frete
+          </button>
+          <button
+            type="button"
+            onClick={refreshAll}
+            disabled={loading}
+            className={`inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50 ${SHIPPING_TOOLBAR_SIZE}`}
+          >
+            <svg
+              className={`h-3 w-3 ${loading ? "animate-spin" : ""}`}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              viewBox="0 0 24 24"
+              aria-hidden
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"
+              />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm sm:p-5">
@@ -2013,6 +2168,10 @@ export function ShippingManager() {
           onClose={() => setShippingModalOrder(null)}
           onSaved={refreshAll}
         />
+      ) : null}
+
+      {showFreightQuoteModal ? (
+        <QuickFreightQuoteModal onClose={() => setShowFreightQuoteModal(false)} />
       ) : null}
 
       {packingModalOrder ? (

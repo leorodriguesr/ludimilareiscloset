@@ -2239,16 +2239,19 @@ function SaleOrderDrawer({
   useEffect(() => {
     if (open && order) {
       setDisplayOrder(order);
-      setMounted(true);
-      setEntered(false);
-      let inner = 0;
-      const outer = requestAnimationFrame(() => {
-        inner = requestAnimationFrame(() => setEntered(true));
-      });
-      return () => {
-        cancelAnimationFrame(outer);
-        if (inner) cancelAnimationFrame(inner);
-      };
+      if (!mounted) {
+        setMounted(true);
+        setEntered(false);
+        let inner = 0;
+        const outer = requestAnimationFrame(() => {
+          inner = requestAnimationFrame(() => setEntered(true));
+        });
+        return () => {
+          cancelAnimationFrame(outer);
+          if (inner) cancelAnimationFrame(inner);
+        };
+      }
+      return;
     }
 
     if (!open) {
@@ -2259,7 +2262,7 @@ function SaleOrderDrawer({
       }, DETAILS_DRAWER_MS);
       return () => clearTimeout(t);
     }
-  }, [open, order]);
+  }, [open, order, mounted]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -2375,7 +2378,8 @@ export function SalesManager() {
   const allRef = useRef<HTMLInputElement>(null);
 
   const fetchOrders = useCallback(async () => {
-    setLoading(true); setSelectedIds(new Set()); setDetailsOrderId(null);
+    setLoading(true);
+    setSelectedIds(new Set());
     try {
       const res = await fetch("/api/admin/orders");
       const data = (await res.json()) as ApiResponse;
