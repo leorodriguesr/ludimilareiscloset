@@ -568,16 +568,16 @@ function buildPixShareMessage(
   amount: number
 ): string {
   return [
-    "",
-    `Seu pedido${orderRefLabel(orderNumber)} foi gerado com sucesso!`,
-    "",
-    `Valor: ${formatPrice(amount)}`,
-    "",
-    "Para realizar o pagamento, copie o código abaixo e cole na opção 'Pix Copia e Cola' do aplicativo do seu banco:",
-    "",
+    // "",
+    // `Seu pedido${orderRefLabel(orderNumber)} foi gerado com sucesso!`,
+    // "",
+    // `Valor: ${formatPrice(amount)}`,
+    // "",
+    // "Para realizar o pagamento, copie o código abaixo e cole na opção 'Pix Copia e Cola' do aplicativo do seu banco:",
+    // "",
     pixCode,
-    "",
-    "Assim que o pagamento for confirmado, avisaremos você por aqui. 😊",
+    // "",
+    // "Assim que o pagamento for confirmado, avisaremos você por aqui. 😊",
   ].join("\n");
 }
 
