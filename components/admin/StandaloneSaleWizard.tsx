@@ -542,7 +542,55 @@ function PaymentMethodSelector({
   );
 }
 
-function CopyBlock({ label, value }: { label: string; value: string }) {
+function orderRefLabel(orderNumber: number | null | undefined): string {
+  return orderNumber != null ? ` #${orderNumber}` : "";
+}
+
+/** Mensagem pronta para WhatsApp (link de preenchimento de dados). */
+function buildCustomerDataShareMessage(
+  orderNumber: number,
+  url: string
+): string {
+  return [
+    "",
+    `📦 Para prosseguirmos com a entrega do seu pedido${orderRefLabel(orderNumber)}, por favor, preencha seus dados neste link:`,
+    "",
+    url,
+    "",
+    "Qualquer dúvida, é só me chamar por aqui.",
+  ].join("\n");
+}
+
+/** Mensagem pronta para WhatsApp (pagamento Pix com código copia e cola). */
+function buildPixShareMessage(
+  orderNumber: number,
+  pixCode: string,
+  amount: number
+): string {
+  return [
+    "",
+    `Seu pedido${orderRefLabel(orderNumber)} foi gerado com sucesso!`,
+    "",
+    `Valor: ${formatPrice(amount)}`,
+    "",
+    "Para realizar o pagamento, copie o código abaixo e cole na opção 'Pix Copia e Cola' do aplicativo do seu banco:",
+    "",
+    pixCode,
+    "",
+    "Assim que o pagamento for confirmado, avisaremos você por aqui. 😊",
+  ].join("\n");
+}
+
+function CopyBlock({
+  label,
+  value,
+  copyValue,
+}: {
+  label: string;
+  value: string;
+  /** Texto enviado à área de transferência (padrão: `value`). */
+  copyValue?: string;
+}) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="rounded-xl border border-stone-200 bg-stone-50 p-4">
@@ -556,7 +604,7 @@ function CopyBlock({ label, value }: { label: string; value: string }) {
         <button
           type="button"
           onClick={() => {
-            void navigator.clipboard.writeText(value);
+            void navigator.clipboard.writeText(copyValue ?? value);
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
           }}
@@ -1194,10 +1242,25 @@ export function StandaloneSaleWizard({
             </p>
             <div className="mt-6 space-y-3">
               {result.customerDataUrl && (
-                <CopyBlock label="Link para o cliente preencher dados" value={result.customerDataUrl} />
+                <CopyBlock
+                  label="Link para o cliente preencher dados"
+                  value={result.customerDataUrl}
+                  copyValue={buildCustomerDataShareMessage(
+                    result.orderNumber,
+                    result.customerDataUrl
+                  )}
+                />
               )}
               {result.payment?.type === "pix" && result.payment.pixCode && (
-                <CopyBlock label="Código PIX" value={result.payment.pixCode} />
+                <CopyBlock
+                  label="Código PIX"
+                  value={result.payment.pixCode}
+                  copyValue={buildPixShareMessage(
+                    result.orderNumber,
+                    result.payment.pixCode,
+                    result.total
+                  )}
+                />
               )}
               {result.payment?.type === "card" && result.payment.checkoutUrl && (
                 <CopyBlock label="Link de pagamento (cartão)" value={result.payment.checkoutUrl} />

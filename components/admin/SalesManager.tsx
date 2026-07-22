@@ -1072,7 +1072,6 @@ function shareGreeting(order: AdminOrder): string {
 /** Mensagem pronta para WhatsApp (link de preenchimento de dados). */
 function buildCustomerDataShareMessage(order: AdminOrder, url: string): string {
   return [
-    shareGreeting(order),
     "",
     `📦 Para prosseguirmos com a entrega do seu pedido${orderRefLabel(order)}, por favor, preencha seus dados neste link:`,
     "",
@@ -1105,16 +1104,16 @@ function buildPixShareMessage(
 /** Mensagem pronta para WhatsApp (pagamento com cartão). */
 function buildCardShareMessage(order: AdminOrder, checkoutUrl: string): string {
   return [
-    "",
-    `Seu pedido${orderRefLabel(order)} foi gerado com sucesso!`,
-    "",
-    `Valor: ${formatPrice(order.total)}`,
-    "",
-    "Para realizar o pagamento, acesse o link abaixo e conclua com cartão de crédito:",
-    "",
+    // "",
+    // `Seu pedido${orderRefLabel(order)} foi gerado com sucesso!`,
+    // "",
+    // `Valor: ${formatPrice(order.total)}`,
+    // "",
+    // "Para realizar o pagamento, acesse o link abaixo e conclua com cartão de crédito:",
+    // "",
     checkoutUrl,
-    "",
-    "Assim que o pagamento for confirmado, avisaremos você por aqui. 😊",
+    // "",
+    // "Assim que o pagamento for confirmado, avisaremos você por aqui. 😊",
   ].join("\n");
 }
 
