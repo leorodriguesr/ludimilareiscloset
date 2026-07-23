@@ -1313,7 +1313,6 @@ function OrderRowActionsMenu({
 
   const isCancelled = order.status === "cancelled";
   const isPaid = Boolean(order.paidAt);
-  const isArranged = order.fulfillmentType === "ARRANGED";
   const showCustomerLink = shouldOfferCustomerDataFillLink(order);
   const showPaymentLink =
     order.orderSource === "ADMIN_SALE" &&
@@ -1364,16 +1363,6 @@ function OrderRowActionsMenu({
     );
     setMenuPos({ top: rect.bottom + 6, left });
     setOpen(true);
-  }
-
-  async function handleMarkShipped() {
-    setBusy("shipped");
-    try {
-      await fetch(`/api/admin/sales/${order.id}/mark-shipped`, { method: "POST" });
-      onRefresh();
-    } finally {
-      setBusy(null);
-    }
   }
 
   async function handleMarkPaid() {
@@ -1459,23 +1448,6 @@ function OrderRowActionsMenu({
   const actions = useMemo(() => {
     const items: MenuAction[] = [];
 
-    if (
-      !isCancelled &&
-      isPaid &&
-      isArranged &&
-      order.shippingStatus !== "shipped" &&
-      order.shippingStatus !== "delivered"
-    ) {
-      items.push({
-        id: "notify",
-        label: "Notificar envio",
-        separatorBefore: items.length > 0,
-        disabled: busy === "shipped",
-        icon: <TruckIcon className="h-[18px] w-[18px]" />,
-        onClick: () => void handleMarkShipped(),
-      });
-    }
-
     items.push({
       id: "details",
       label: isDetailsOpen ? "Fechar detalhes" : "Detalhes da venda",
@@ -1554,14 +1526,11 @@ function OrderRowActionsMenu({
     return items;
   }, [
     busy,
-    isArranged,
     isCancelled,
     isDetailsOpen,
-    isPaid,
     onRequestCancel,
     onToggleDetails,
     order.customerDataToken,
-    order.shippingStatus,
     showCustomerLink,
     showMarkPaid,
     showPaymentLink,
@@ -2284,20 +2253,6 @@ function OrderDetailsBody({
                   <p className="text-xs text-stone-500">
                     Rastreio: <span className="font-mono text-stone-700">{order.trackingCode}</span>
                   </p>
-                ) : null}
-                {order.fulfillmentType === "ARRANGED" &&
-                  order.shippingStatus !== "shipped" &&
-                  order.shippingStatus !== "delivered" ? (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await fetch(`/api/admin/sales/${order.id}/mark-shipped`, { method: "POST" });
-                      onRefresh();
-                    }}
-                    className="flex w-full items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 py-2 text-sm font-medium text-emerald-800 transition-colors hover:bg-emerald-100"
-                  >
-                    Marcar enviado
-                  </button>
                 ) : null}
               </>
             ) : (
