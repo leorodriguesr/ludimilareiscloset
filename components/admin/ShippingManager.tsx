@@ -63,6 +63,7 @@ type ShipmentOrder = {
   fulfillmentType?: string;
   shippingServiceName: string | null;
   deliveryNotes?: string | null;
+  internalNotes?: string | null;
   shippingServiceId: number | null;
   shippingStatus: string;
   superfreteStatus: string | null;
@@ -697,6 +698,12 @@ function PackingListPrint({
                 <div className="min-w-0 flex-1">
                   <p className="font-semibold leading-snug">{name}</p>
                   <p className="mt-0.5 text-sm">Frete: {freight}</p>
+                  {order.internalNotes?.trim() ? (
+                    <p className="mt-1 text-sm">
+                      <span className="font-semibold">Obs.:</span>{" "}
+                      {order.internalNotes.trim()}
+                    </p>
+                  ) : null}
                   {items.length > 0 ? (
                     <div className="mt-2 flex flex-wrap gap-x-8 gap-y-3">
                       {items.map((item) => {

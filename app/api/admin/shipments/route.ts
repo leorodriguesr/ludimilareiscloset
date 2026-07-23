@@ -68,6 +68,7 @@ export async function GET(request: NextRequest) {
           customerDataStatus: true,
           shippingServiceName: true,
           deliveryNotes: true,
+          internalNotes: true,
           shippingStatus: true,
           recipientName: true,
           superfreteShipmentId: true,
