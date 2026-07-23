@@ -12,6 +12,7 @@ import { ExchangeManager } from "@/components/admin/ExchangeManager";
 import { StoreSettingsManager } from "@/components/admin/StoreSettingsManager";
 import { UsersManager } from "@/components/admin/UsersManager";
 import { LogoutButton } from "@/components/auth/LogoutButton";
+import { useAuth } from "@/components/auth/AuthProvider";
 import type { Product } from "@/lib/types";
 
 type AdminSection =
@@ -27,6 +28,36 @@ type AdminSection =
 
 const ADMIN_SEARCH_INPUT_SIZE =
   "box-border h-9 text-sm font-medium leading-none sm:h-8";
+
+const ADMIN_NAV_GROUPS: {
+  title: string;
+  items: { id: AdminSection; label: string }[];
+}[] = [
+  {
+    title: "Operação",
+    items: [
+      { id: "products", label: "Produtos" },
+      { id: "sales", label: "Vendas" },
+      { id: "shipping", label: "Envios" },
+      // { id: "exchanges", label: "Trocas" },
+    ],
+  },
+  {
+    title: "Vitrine",
+    items: [
+      { id: "sections", label: "Seções" },
+      { id: "categories", label: "Categorias" },
+      { id: "banner", label: "Banner" },
+    ],
+  },
+  {
+    title: "Loja",
+    items: [
+      { id: "settings", label: "Configurações" },
+      { id: "users", label: "Usuários" },
+    ],
+  },
+];
 
 function normalizeSearchText(value: string): string {
   return value
@@ -159,12 +190,23 @@ function AdminNavIcon({ id }: { id: AdminSection }) {
 }
 
 export default function AdminPage() {
+  const { isAdmin } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [bannerUrl, setBannerUrl] = useState("");
   const [bannerMobileUrl, setBannerMobileUrl] = useState("");
   const [activeSection, setActiveSection] = useState<AdminSection>("products");
   const [showProductModal, setShowProductModal] = useState(false);
   const [productSearchQuery, setProductSearchQuery] = useState("");
+
+  const navGroups = useMemo(() => {
+    if (isAdmin) return ADMIN_NAV_GROUPS;
+    return ADMIN_NAV_GROUPS.filter((group) => group.title === "Operação");
+  }, [isAdmin]);
+
+  const allowedSections = useMemo(
+    () => new Set(navGroups.flatMap((group) => group.items.map((item) => item.id))),
+    [navGroups]
+  );
 
   const filteredProducts = useMemo(() => {
     const query = productSearchQuery.trim();
@@ -200,32 +242,11 @@ export default function AdminPage() {
     setProductSearchQuery("");
   }, [activeSection]);
 
-  const navGroups = [
-    {
-      title: "Operação",
-      items: [
-        { id: "products" as const, label: "Produtos" },
-        { id: "sales" as const, label: "Vendas" },
-        { id: "shipping" as const, label: "Envios" },
-        // { id: "exchanges" as const, label: "Trocas" },
-      ],
-    },
-    {
-      title: "Vitrine",
-      items: [
-        { id: "sections" as const, label: "Seções" },
-        { id: "categories" as const, label: "Categorias" },
-        { id: "banner" as const, label: "Banner" },
-      ],
-    },
-    {
-      title: "Loja",
-      items: [
-        { id: "settings" as const, label: "Configurações" },
-        { id: "users" as const, label: "Usuários" },
-      ],
-    },
-  ];
+  useEffect(() => {
+    if (!allowedSections.has(activeSection)) {
+      setActiveSection("products");
+    }
+  }, [allowedSections, activeSection]);
 
   return (
     <div className="min-h-screen bg-stone-50">
@@ -413,7 +434,7 @@ export default function AdminPage() {
           </section>
         )}
 
-        {activeSection === "sections" && (
+        {activeSection === "sections" && isAdmin && (
           <section>
             <h2 className="text-lg font-medium text-stone-900 mb-4">
               Seções da vitrine
@@ -427,7 +448,7 @@ export default function AdminPage() {
           </section>
         )}
 
-        {activeSection === "categories" && (
+        {activeSection === "categories" && isAdmin && (
           <section>
             <h2 className="text-lg font-medium text-stone-900 mb-4">
               Categorias da loja
@@ -440,7 +461,7 @@ export default function AdminPage() {
           </section>
         )}
 
-        {activeSection === "banner" && (
+        {activeSection === "banner" && isAdmin && (
           <section>
             <h2 className="text-lg font-medium text-stone-900 mb-4">
               Configuração do Banner
@@ -455,7 +476,7 @@ export default function AdminPage() {
           </section>
         )}
 
-        {activeSection === "settings" && (
+        {activeSection === "settings" && isAdmin && (
           <section>
             <h2 className="text-lg font-medium text-stone-900 mb-2">
               Configurações da loja
@@ -467,7 +488,7 @@ export default function AdminPage() {
           </section>
         )}
 
-        {activeSection === "users" && (
+        {activeSection === "users" && isAdmin && (
           <section>
             <UsersManager />
           </section>

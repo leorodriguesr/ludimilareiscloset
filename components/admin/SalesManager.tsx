@@ -38,6 +38,8 @@ import {
   phoneFmt,
 } from "@/lib/admin-sale/customer-form-input";
 import { cpfValidationError } from "@/lib/validation/cpf";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { PERMISSION } from "@/lib/auth/permissions";
 
 /* ─── Tipos ───────────────────────────────────────────────────────── */
 
@@ -1256,6 +1258,8 @@ function OrderRowActionsMenu({
   onRefresh: () => void;
   onRequestCancel: () => void;
 }) {
+  const { hasPermission } = useAuth();
+  const canMarkPaid = hasPermission(PERMISSION.ADMIN_SALE_MARK_PAID);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -1271,6 +1275,12 @@ function OrderRowActionsMenu({
     !order.paidAt &&
     !isCancelled &&
     order.paymentChannel !== "MANUAL";
+  const showMarkPaid =
+    canMarkPaid &&
+    order.orderSource === "ADMIN_SALE" &&
+    !isPaid &&
+    !isCancelled &&
+    order.status === "pending_payment";
 
   useEffect(() => setMounted(true), []);
 
@@ -1313,6 +1323,28 @@ function OrderRowActionsMenu({
     setBusy("shipped");
     try {
       await fetch(`/api/admin/sales/${order.id}/mark-shipped`, { method: "POST" });
+      onRefresh();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleMarkPaid() {
+    const label = order.orderNumber != null ? `#${order.orderNumber}` : "esta venda";
+    const confirmed = window.confirm(
+      `Marcar a venda ${label} como paga? Isso registra pagamento manual e libera o pedido para envio.`
+    );
+    if (!confirmed) return;
+    setBusy("mark-paid");
+    try {
+      const res = await fetch(`/api/admin/sales/${order.id}/mark-paid`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        window.alert(data?.error ?? "Não foi possível marcar a venda como paga.");
+        return;
+      }
       onRefresh();
     } finally {
       setBusy(null);
@@ -1415,6 +1447,21 @@ function OrderRowActionsMenu({
       });
     }
 
+    if (showMarkPaid) {
+      items.push({
+        id: "mark-paid",
+        label: busy === "mark-paid" ? "Marcando…" : "Marcar como paga",
+        disabled: busy === "mark-paid",
+        separatorBefore: items.length > 0,
+        icon: (
+          <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          </svg>
+        ),
+        onClick: () => void handleMarkPaid(),
+      });
+    }
+
     if (!isCancelled) {
       items.push({
         id: "cancel",
@@ -1442,6 +1489,7 @@ function OrderRowActionsMenu({
     order.customerDataToken,
     order.shippingStatus,
     showCustomerLink,
+    showMarkPaid,
     showPaymentLink,
   ]);
 
@@ -1578,10 +1626,14 @@ function OrderDetailsBody({
   openCancelForm?: boolean;
   onCancelIntentHandled?: () => void;
 }) {
+  const { hasPermission } = useAuth();
+  const canMarkPaid = hasPermission(PERMISSION.ADMIN_SALE_MARK_PAID);
   const [showCancelForm, setShowCancelForm] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [markingPaid, setMarkingPaid] = useState(false);
+  const [markPaidError, setMarkPaidError] = useState<string | null>(null);
   const [editingCustomer, setEditingCustomer] = useState(false);
   const [customerForm, setCustomerForm] = useState<CustomerEditForm>(() =>
     customerEditFormFromOrder(order)
@@ -1663,6 +1715,32 @@ function OrderDetailsBody({
       setCancelError("Erro de conexão.");
     } finally {
       setCancelling(false);
+    }
+  }
+
+  async function markSalePaid() {
+    const label = order.orderNumber != null ? `#${order.orderNumber}` : "esta venda";
+    const confirmed = window.confirm(
+      `Marcar a venda ${label} como paga? Isso registra pagamento manual e libera o pedido para envio.`
+    );
+    if (!confirmed) return;
+
+    setMarkingPaid(true);
+    setMarkPaidError(null);
+    try {
+      const res = await fetch(`/api/admin/sales/${order.id}/mark-paid`, {
+        method: "POST",
+      });
+      const data = (await res.json().catch(() => null)) as { error?: string } | null;
+      if (!res.ok) {
+        setMarkPaidError(data?.error ?? "Não foi possível marcar a venda como paga.");
+        return;
+      }
+      onRefresh();
+    } catch {
+      setMarkPaidError("Erro de conexão.");
+    } finally {
+      setMarkingPaid(false);
     }
   }
 
@@ -2151,6 +2229,25 @@ function OrderDetailsBody({
                 Status de envio disponível após o pagamento.
               </p>
             )}
+
+            {canMarkPaid &&
+            order.orderSource === "ADMIN_SALE" &&
+            !order.paidAt &&
+            order.status === "pending_payment" ? (
+              <div className="space-y-2 border-t border-stone-100 pt-3">
+                <button
+                  type="button"
+                  disabled={markingPaid}
+                  onClick={() => void markSalePaid()}
+                  className="flex w-full items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 py-2 text-sm font-medium text-emerald-800 transition-colors hover:bg-emerald-100 disabled:opacity-50"
+                >
+                  {markingPaid ? "Marcando…" : "Marcar como paga"}
+                </button>
+                {markPaidError ? (
+                  <p className="text-xs text-red-600">{markPaidError}</p>
+                ) : null}
+              </div>
+            ) : null}
 
             {showCancelForm ? (
               <div className="space-y-2 border-t border-stone-100 pt-3">

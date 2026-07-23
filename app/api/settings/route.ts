@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAdminApi } from "@/lib/require-admin-api";
+import { PERMISSION } from "@/lib/auth/permissions";
+import { requirePermission } from "@/lib/auth/require-permission";
 
 const DEFAULT_SETTINGS = {
   id: "default",
@@ -26,7 +27,7 @@ export async function GET() {
 }
 
 export async function PUT(request: NextRequest) {
-  const gate = await requireAdminApi();
+  const gate = await requirePermission(PERMISSION.SETTINGS_MANAGE);
   if (gate instanceof NextResponse) return gate;
 
   const body = await request.json();

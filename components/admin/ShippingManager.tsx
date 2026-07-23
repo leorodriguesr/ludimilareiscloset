@@ -32,6 +32,7 @@ import {
 } from "@/lib/orders/order-item-display";
 import type { CartPieceSelection } from "@/lib/cart/types";
 import { cepMask, onlyDigits } from "@/lib/admin-sale/customer-form-input";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 /* ─── Tipos ───────────────────────────────────────────────────────── */
 
@@ -1761,11 +1762,12 @@ function ShipmentRow({
 /* ─── Componente principal ────────────────────────────────────────── */
 
 export function ShippingManager() {
+  const { isAdmin } = useAuth();
   const [orders, setOrders] = useState<ShipmentOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterKey | null>(null);
   const [wallet, setWallet] = useState<WalletInfo | null>(null);
-  const [walletLoading, setWalletLoading] = useState(true);
+  const [walletLoading, setWalletLoading] = useState(false);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
@@ -1823,8 +1825,14 @@ export function ShippingManager() {
   }, [fetchShipments]);
 
   useEffect(() => {
+    if (!isAdmin) {
+      setWallet(null);
+      setWalletError(null);
+      setWalletLoading(false);
+      return;
+    }
     void fetchWallet();
-  }, [fetchWallet]);
+  }, [fetchWallet, isAdmin]);
 
   const filterCounts = useMemo(
     () => ({
@@ -1864,7 +1872,7 @@ export function ShippingManager() {
 
   const refreshAll = () => {
     void fetchShipments();
-    void fetchWallet();
+    if (isAdmin) void fetchWallet();
   };
 
   function toggleFilter(key: FilterKey) {
@@ -1916,7 +1924,7 @@ export function ShippingManager() {
     }
   }
 
-  const lowBalance = wallet != null && wallet.balance < 20;
+  const lowBalance = isAdmin && wallet != null && wallet.balance < 20;
   const hasActiveFilter = filter !== null;
 
   return (
@@ -1963,6 +1971,7 @@ export function ShippingManager() {
         </div>
       </div>
 
+      {isAdmin ? (
       <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm sm:p-5">
         {wallet?.environment === "sandbox" ? (
           <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -2046,6 +2055,7 @@ export function ShippingManager() {
           </div>
         </div>
       </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-1.5">
         <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5">

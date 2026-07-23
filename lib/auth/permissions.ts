@@ -29,9 +29,14 @@ const ALL_PERMISSIONS: readonly Permission[] = [
 /** Mapa role → permissões. */
 export const ROLE_PERMISSIONS: Record<AppRole, readonly Permission[]> = {
   ADMIN: ALL_PERMISSIONS,
-  GESTOR: ALL_PERMISSIONS.filter(
-    (p) => p !== PERMISSION.ADMIN_SALE_MARK_PAID
-  ),
+  /** Operação: produtos, vendas, envios e trocas — sem vitrine/loja (config e usuários). */
+  GESTOR: [
+    PERMISSION.PRODUCTS_MANAGE,
+    PERMISSION.SALES_MANAGE,
+    PERMISSION.ADMIN_SALE_CREATE,
+    PERMISSION.SHIPPING_MANAGE,
+    PERMISSION.EXCHANGES_MANAGE,
+  ],
   CLIENT: [],
 };
 

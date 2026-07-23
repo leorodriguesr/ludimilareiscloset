@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { UserRole } from "@/app/generated/prisma/client";
 import {
   fetchSuperfreteUserInfo,
   superfreteWalletUrl,
@@ -8,11 +9,14 @@ import {
   superfreteTargetLabel,
 } from "@/lib/shipping/superfrete-client";
 import { ShippingQuoteError } from "@/lib/shipping/types";
-import { requireAdminApi } from "@/lib/require-admin-api";
+import { requireStaffApi } from "@/lib/auth/require-staff-api";
 
 export async function GET() {
-  const gate = await requireAdminApi();
+  const gate = await requireStaffApi();
   if (gate instanceof NextResponse) return gate;
+  if (gate.role !== UserRole.ADMIN) {
+    return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
+  }
 
   try {
     const user = await fetchSuperfreteUserInfo();
