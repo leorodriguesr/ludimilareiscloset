@@ -621,6 +621,14 @@ function resolvePaymentMethodKind(method: string | null): "pix" | "card" | null 
   return null;
 }
 
+function selectedPaymentGatewayLabel(order: AdminOrder): string | null {
+  if (order.paymentChannel === "MANUAL") return null;
+  const selectedMethod = resolvePaymentMethodKind(order.paymentMethod ?? null);
+  if (selectedMethod === "pix") return "Mercado Pago";
+  if (selectedMethod === "card") return "InfinitePay";
+  return null;
+}
+
 const TABLE_CELL_PRIMARY = "text-sm font-medium text-stone-900 truncate";
 const TABLE_CELL_SECONDARY = "text-xs font-normal text-stone-500 truncate";
 
@@ -727,9 +735,8 @@ function TablePaymentCell({
   isSaleCancelled: boolean;
 }) {
   const paymentStatus = tablePaymentStatus(order);
-  const methodKind = resolvePaymentMethodKind(
-    order.paymentCaptureMethod ?? order.paymentMethod ?? null
-  );
+  // Exibe a opção escolhida ao criar o link, não o meio usado dentro do gateway.
+  const methodKind = resolvePaymentMethodKind(order.paymentMethod ?? null);
   const showElapsed = !order.paidAt && !isSaleCancelled;
 
   return (
@@ -2805,7 +2812,7 @@ export function SalesManager() {
         /* ─── Tabela ─── */
         <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-sm">
+            <table className="w-full min-w-[860px] text-sm">
               <thead>
                 <tr className="border-b border-stone-200 bg-stone-50/80 text-xs font-medium text-stone-500">
                   <th className="w-10 px-4 py-3.5">
@@ -2821,6 +2828,7 @@ export function SalesManager() {
                   <th className="px-4 py-3.5 text-left">Origem</th>
                   <th className="px-4 py-3.5 text-left">Data</th>
                   <th className="px-4 py-3.5 text-left">Cliente</th>
+                  <th className="px-4 py-3.5 text-left">Gateway</th>
                   <th className="px-4 py-3.5 text-left">Pagamento</th>
                   <th className="px-4 py-3.5 text-right">Total</th>
                   <th className="px-4 py-3.5 text-left">Envio</th>
@@ -2900,6 +2908,12 @@ export function SalesManager() {
                         <td className="px-4 py-3.5">
                           <p className={`truncate max-w-[200px] ${TABLE_CELL_PRIMARY}`}>
                             {customerName}
+                          </p>
+                        </td>
+
+                        <td className="px-4 py-3.5">
+                          <p className={TABLE_CELL_PRIMARY}>
+                            {selectedPaymentGatewayLabel(order) ?? "—"}
                           </p>
                         </td>
 
