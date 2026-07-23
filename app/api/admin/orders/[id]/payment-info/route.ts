@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ensureOrderPaymentToken } from "@/lib/admin-sale/payment-page";
 import { continueOrderPayment } from "@/lib/orders/continue-order-payment";
 import { requireStaffApi } from "@/lib/auth/require-staff-api";
 
@@ -43,11 +44,28 @@ export async function GET(
   }
 
   if (result.type === "pix") {
-    return NextResponse.json({
-      type: "pix",
-      pixCode: result.pixCode,
-      amount: result.amount,
-    });
+    try {
+      const token = await ensureOrderPaymentToken(result.orderId);
+      return NextResponse.json({
+        type: "pix",
+        pixCode: result.pixCode,
+        amount: result.amount,
+        ...(token
+          ? {
+              paymentUrl: token.paymentUrl,
+              paymentPath: token.paymentPath,
+              paymentToken: token.token,
+            }
+          : {}),
+      });
+    } catch (e) {
+      console.error("[payment-info] ensureOrderPaymentToken", e);
+      return NextResponse.json({
+        type: "pix",
+        pixCode: result.pixCode,
+        amount: result.amount,
+      });
+    }
   }
 
   return NextResponse.json({

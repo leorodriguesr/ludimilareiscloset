@@ -561,23 +561,23 @@ function buildCustomerDataShareMessage(
   ].join("\n");
 }
 
-/** Mensagem pronta para WhatsApp (pagamento Pix com código copia e cola). */
+/** Mensagem pronta para WhatsApp (link da página de pagamento Pix). */
 function buildPixShareMessage(
   orderNumber: number,
-  pixCode: string,
+  paymentUrl: string,
   amount: number
 ): string {
   return [
-    // "",
-    // `Seu pedido${orderRefLabel(orderNumber)} foi gerado com sucesso!`,
-    // "",
-    // `Valor: ${formatPrice(amount)}`,
-    // "",
-    // "Para realizar o pagamento, copie o código abaixo e cole na opção 'Pix Copia e Cola' do aplicativo do seu banco:",
-    // "",
-    pixCode,
-    // "",
-    // "Assim que o pagamento for confirmado, avisaremos você por aqui. 😊",
+    "",
+    `Seu pedido${orderRefLabel(orderNumber)} foi gerado com sucesso!`,
+    "",
+    `Valor: ${formatPrice(amount)}`,
+    "",
+    "Para realizar o pagamento, acesse o link abaixo e pague com Pix:",
+    "",
+    paymentUrl,
+    "",
+    "Assim que o pagamento for confirmado, avisaremos você por aqui. 😊",
   ].join("\n");
 }
 
@@ -795,7 +795,13 @@ export function StandaloneSaleWizard({
     orderNumber: number;
     total: number;
     customerDataUrl?: string;
-    payment?: { type: string; pixCode?: string; checkoutUrl?: string };
+    payment?: {
+      type: string;
+      paymentUrl?: string;
+      paymentPath?: string;
+      pixCode?: string;
+      checkoutUrl?: string;
+    };
   } | null>(null);
 
   const maxInstallments = useMemo(
@@ -1225,6 +1231,13 @@ export function StandaloneSaleWizard({
   /* ─── Success screen ───────────────────────────────────────── */
 
   if (result) {
+    const pixShareUrl =
+      result.payment?.type === "pix"
+        ? result.payment.paymentPath
+          ? `${window.location.origin}${result.payment.paymentPath}`
+          : result.payment.paymentUrl ?? null
+        : null;
+
     return (
       <div className="fixed inset-0 z-50 flex bg-stone-900/50 backdrop-blur-sm">
         <div className="flex h-[100dvh] w-full flex-col overflow-hidden bg-white md:m-auto md:h-auto md:max-h-[calc(100dvh-2rem)] md:max-w-lg md:rounded-2xl md:border md:border-stone-200 md:shadow-xl">
@@ -1251,15 +1264,23 @@ export function StandaloneSaleWizard({
                   )}
                 />
               )}
-              {result.payment?.type === "pix" && result.payment.pixCode && (
+              {pixShareUrl && (
+                <CopyBlock
+                  label="Link de pagamento (Pix)"
+                  value={pixShareUrl}
+                  copyValue={buildPixShareMessage(
+                    result.orderNumber,
+                    pixShareUrl,
+                    result.total
+                  )}
+                />
+              )}
+              {result.payment?.type === "pix" &&
+                !pixShareUrl &&
+                result.payment.pixCode && (
                 <CopyBlock
                   label="Código PIX"
                   value={result.payment.pixCode}
-                  copyValue={buildPixShareMessage(
-                    result.orderNumber,
-                    result.payment.pixCode,
-                    result.total
-                  )}
                 />
               )}
               {result.payment?.type === "card" && result.payment.checkoutUrl && (

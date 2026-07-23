@@ -71,6 +71,7 @@ type AdminOrder = {
   fulfillmentType?: string;
   customerDataStatus?: string | null;
   customerDataToken?: string | null;
+  paymentToken?: string | null;
   paymentChannel?: string | null;
   subtotalOriginal?: number | null;
   itemsDiscountTotal?: number;
@@ -1042,9 +1043,45 @@ function ReceiptLine({ label, value, bold = false }: { label: string; value: str
 }
 
 type PaymentInfo =
-  | { type: "pix"; pixCode: string; amount: number }
+  | {
+      type: "pix";
+      pixCode: string;
+      amount: number;
+      paymentUrl?: string;
+      paymentPath?: string;
+      paymentToken?: string;
+    }
   | { type: "card"; checkoutUrl: string }
   | { type: "paid" };
+
+function orderPaymentPageUrl(order: AdminOrder, info?: PaymentInfo | null): string | null {
+  if (info?.type === "pix" && info.paymentPath) {
+    return `${window.location.origin}${info.paymentPath}`;
+  }
+  if (info?.type === "pix" && info.paymentToken) {
+    return `${window.location.origin}/venda-avulsa/pagar/${info.paymentToken}`;
+  }
+  if (order.paymentToken) {
+    return `${window.location.origin}/venda-avulsa/pagar/${order.paymentToken}`;
+  }
+  if (info?.type === "pix" && info.paymentUrl) {
+    try {
+      const parsed = new URL(info.paymentUrl);
+      if (
+        parsed.protocol === "https:" &&
+        (parsed.hostname === "localhost" ||
+          parsed.hostname === "127.0.0.1" ||
+          parsed.hostname === "0.0.0.0")
+      ) {
+        parsed.protocol = "http:";
+      }
+      return parsed.toString();
+    } catch {
+      return info.paymentUrl;
+    }
+  }
+  return null;
+}
 
 function orderRefLabel(order: Pick<AdminOrder, "orderNumber">): string {
   return order.orderNumber != null ? ` #${order.orderNumber}` : "";
@@ -1083,23 +1120,23 @@ function buildCustomerDataShareMessage(order: AdminOrder, url: string): string {
   ].join("\n");
 }
 
-/** Mensagem pronta para WhatsApp (pagamento Pix com código copia e cola). */
+/** Mensagem pronta para WhatsApp (link da página de pagamento Pix). */
 function buildPixShareMessage(
   order: AdminOrder,
-  pixCode: string,
+  paymentUrl: string,
   amount: number
 ): string {
   return [
-    // "",
-    // `Seu pedido${orderRefLabel(order)} foi gerado com sucesso!`,
-    // "",
-    // `Valor: ${formatPrice(amount)}`,
-    // "",
-    // "Para realizar o pagamento, copie o código abaixo e cole na opção 'Pix Copia e Cola' do aplicativo do seu banco:",
-    // "",
-    pixCode,
-    // "",
-    // "Assim que o pagamento for confirmado, avisaremos você por aqui. 😊",
+    "",
+    `Seu pedido${orderRefLabel(order)} foi gerado com sucesso!`,
+    "",
+    `Valor: ${formatPrice(amount)}`,
+    "",
+    "Para realizar o pagamento, acesse o link abaixo e pague com Pix:",
+    "",
+    paymentUrl,
+    "",
+    "Assim que o pagamento for confirmado, avisaremos você por aqui. 😊",
   ].join("\n");
 }
 
@@ -1136,6 +1173,8 @@ function AdminSaleLinks({
     !order.paidAt &&
     order.status !== "cancelled" &&
     order.paymentChannel !== "MANUAL";
+  const isPixPayment = order.paymentMethod === "pix";
+  const isCardPayment = order.paymentMethod === "card";
 
   useEffect(() => {
     if (!showPaymentLink) return;
@@ -1176,6 +1215,8 @@ function AdminSaleLinks({
       ? `${window.location.origin}/venda-avulsa/completar/${order.customerDataToken}`
       : "";
 
+  const pixPaymentUrl = orderPaymentPageUrl(order, paymentInfo);
+
   return (
     <div className="flex flex-col gap-2">
       {showPaymentLink && (
@@ -1186,21 +1227,25 @@ function AdminSaleLinks({
           {paymentError && (
             <p className="text-xs text-red-600">{paymentError}</p>
           )}
-          {paymentInfo?.type === "pix" && (
+          {(isPixPayment || paymentInfo?.type === "pix") && pixPaymentUrl && (
             <button
               type="button"
               onClick={() =>
                 void copyText(
-                  buildPixShareMessage(order, paymentInfo.pixCode, paymentInfo.amount),
+                  buildPixShareMessage(
+                    order,
+                    pixPaymentUrl,
+                    paymentInfo?.type === "pix" ? paymentInfo.amount : order.total
+                  ),
                   "pix"
                 )
               }
               className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
             >
-              {copied === "pix" ? "Mensagem copiada!" : "Copiar chave PIX"}
+              {copied === "pix" ? "Mensagem copiada!" : "Copiar link Pix"}
             </button>
           )}
-          {paymentInfo?.type === "card" && (
+          {isCardPayment && paymentInfo?.type === "card" && (
             <button
               type="button"
               onClick={() =>
@@ -1211,7 +1256,7 @@ function AdminSaleLinks({
               }
               className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
             >
-              {copied === "card" ? "Mensagem copiada!" : "Copiar link de pagamento"}
+              {copied === "card" ? "Mensagem copiada!" : "Copiar link cartão"}
             </button>
           )}
           {paymentInfo?.type === "paid" && (
@@ -1281,6 +1326,8 @@ function OrderRowActionsMenu({
     !isPaid &&
     !isCancelled &&
     order.status === "pending_payment";
+  const isPixPayment = order.paymentMethod === "pix";
+  const isCardPayment = order.paymentMethod === "card";
 
   useEffect(() => setMounted(true), []);
 
@@ -1366,11 +1413,32 @@ function OrderRowActionsMenu({
     try {
       const res = await fetch(`/api/admin/orders/${order.id}/payment-info`);
       const data = (await res.json()) as PaymentInfo & { error?: string };
-      if (!res.ok) return;
-      if (data.type === "pix") {
-        await copyText(buildPixShareMessage(order, data.pixCode, data.amount));
+      if (!res.ok) {
+        window.alert(data.error ?? "Não foi possível carregar o pagamento.");
+        return;
       }
-      if (data.type === "card") {
+      if (data.type === "paid") {
+        window.alert("Pagamento já confirmado.");
+        return;
+      }
+      if (isPixPayment || data.type === "pix") {
+        if (data.type !== "pix") {
+          window.alert("Esta venda é Pix, mas o link de pagamento não está disponível.");
+          return;
+        }
+        const url = orderPaymentPageUrl(order, data);
+        if (!url) {
+          window.alert("Não foi possível gerar o link Pix. Tente novamente.");
+          return;
+        }
+        await copyText(buildPixShareMessage(order, url, data.amount));
+        return;
+      }
+      if (isCardPayment || data.type === "card") {
+        if (data.type !== "card") {
+          window.alert("Link de cartão indisponível para esta venda.");
+          return;
+        }
         await copyText(buildCardShareMessage(order, data.checkoutUrl));
       }
     } finally {
@@ -1436,7 +1504,13 @@ function OrderRowActionsMenu({
     if (showPaymentLink) {
       items.push({
         id: "payment-link",
-        label: busy === "payment" ? "Copiando…" : "Copiar link de pagamento",
+        label: busy === "payment"
+          ? "Copiando…"
+          : isPixPayment
+            ? "Copiar link Pix"
+            : isCardPayment
+              ? "Copiar link cartão"
+              : "Copiar link de pagamento",
         disabled: busy === "payment",
         icon: (
           <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
@@ -1491,6 +1565,8 @@ function OrderRowActionsMenu({
     showCustomerLink,
     showMarkPaid,
     showPaymentLink,
+    isPixPayment,
+    isCardPayment,
   ]);
 
   return (

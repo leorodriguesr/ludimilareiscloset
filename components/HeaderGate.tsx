@@ -1,9 +1,9 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { WhatsAppButton } from "@/components/WhatsAppButton";
+import type { ReactNode } from "react";
 
-export function WhatsAppButtonGate() {
+export function HeaderGate({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   if (
     pathname?.startsWith("/admin") ||
@@ -12,5 +12,5 @@ export function WhatsAppButtonGate() {
   ) {
     return null;
   }
-  return <WhatsAppButton />;
+  return children;
 }

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { Header } from "@/components/Header";
+import { HeaderGate } from "@/components/HeaderGate";
 import { FooterGate } from "@/components/FooterGate";
 import { AppProviders } from "@/components/providers/AppProviders";
 import { GoogleOneTapGate } from "@/components/GoogleOneTapGate";
@@ -53,7 +54,9 @@ export default function RootLayout({
       <body className="flex min-h-screen w-full min-w-0 flex-col bg-white font-sans text-stone-900">
         <AppProviders>
           <PwaRegister />
-          <Header />
+          <HeaderGate>
+            <Header />
+          </HeaderGate>
           <GoogleOneTapGate />
           <main className="min-w-0 w-full flex-1">{children}</main>
           <FooterGate />

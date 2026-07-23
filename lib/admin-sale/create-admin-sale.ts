@@ -18,6 +18,7 @@ import {
   buildCustomerDataUrl,
   generateCustomerDataToken,
 } from "@/lib/admin-sale/complete-customer-data";
+import { ensureOrderPaymentToken } from "@/lib/admin-sale/payment-page";
 import {
   ADDRESS_COMPLEMENT_MAX_LENGTH,
   ADDRESS_NUMBER_MAX_LENGTH,
@@ -86,6 +87,8 @@ export type CreateAdminSaleResult =
       customerDataUrl?: string;
       payment?: {
         type: "pix";
+        paymentUrl: string;
+        paymentPath: string;
         pixCode: string;
         pixQrBase64: string | null;
         amount: number;
@@ -490,6 +493,8 @@ export async function createAdminSale(
   let payment:
     | {
         type: "pix";
+        paymentUrl: string;
+        paymentPath: string;
         pixCode: string;
         pixQrBase64: string | null;
         amount: number;
@@ -506,8 +511,17 @@ export async function createAdminSale(
       return { ok: false, error: pay.error };
     }
     if (pay.type === "pix") {
+      const token = await ensureOrderPaymentToken(created.id);
+      if (!token) {
+        return {
+          ok: false,
+          error: "Não foi possível gerar o link de pagamento Pix.",
+        };
+      }
       payment = {
         type: "pix",
+        paymentUrl: token.paymentUrl,
+        paymentPath: token.paymentPath,
         pixCode: pay.pixCode,
         pixQrBase64: pay.pixQrBase64,
         amount: pay.amount,

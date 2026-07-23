@@ -1,0 +1,129 @@
+import { randomBytes } from "crypto";
+import { OrderSource } from "@/app/generated/prisma/client";
+import { ORDER_STATUS, PAYMENT_METHOD } from "@/lib/orders/constants";
+import { prisma } from "@/lib/prisma";
+import { getAppBaseUrl } from "@/lib/site-url";
+
+const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+export function generatePaymentToken(): {
+  token: string;
+  expiresAt: Date;
+} {
+  return {
+    token: randomBytes(32).toString("hex"),
+    expiresAt: new Date(Date.now() + TOKEN_TTL_MS),
+  };
+}
+
+export function buildPaymentPageUrl(token: string): string {
+  return `${getAppBaseUrl()}/venda-avulsa/pagar/${token}`;
+}
+
+/** Caminho relativo — o admin monta a URL absoluta com `window.location.origin`. */
+export function buildPaymentPagePath(token: string): string {
+  return `/venda-avulsa/pagar/${token}`;
+}
+
+/** Garante token de pagamento para venda avulsa PIX pendente. */
+export async function ensureOrderPaymentToken(
+  orderId: string
+): Promise<{ token: string; paymentUrl: string; paymentPath: string } | null> {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true,
+      orderSource: true,
+      status: true,
+      paymentMethod: true,
+      paidAt: true,
+      paymentToken: true,
+      paymentTokenExpiresAt: true,
+    },
+  });
+
+  if (!order) return null;
+  if (order.orderSource !== OrderSource.ADMIN_SALE) return null;
+  if (order.paymentMethod !== PAYMENT_METHOD.PIX) return null;
+  if (order.paidAt || order.status === ORDER_STATUS.PAID) return null;
+  if (
+    order.status === ORDER_STATUS.CANCELLED ||
+    order.status === ORDER_STATUS.EXPIRED
+  ) {
+    return null;
+  }
+
+  const now = new Date();
+  if (
+    order.paymentToken &&
+    (!order.paymentTokenExpiresAt || order.paymentTokenExpiresAt > now)
+  ) {
+    return {
+      token: order.paymentToken,
+      paymentUrl: buildPaymentPageUrl(order.paymentToken),
+      paymentPath: buildPaymentPagePath(order.paymentToken),
+    };
+  }
+
+  const generated = generatePaymentToken();
+  await prisma.order.update({
+    where: { id: order.id },
+    data: {
+      paymentToken: generated.token,
+      paymentTokenExpiresAt: generated.expiresAt,
+    },
+  });
+
+  return {
+    token: generated.token,
+    paymentUrl: buildPaymentPageUrl(generated.token),
+    paymentPath: buildPaymentPagePath(generated.token),
+  };
+}
+
+export async function validatePaymentToken(token: string): Promise<
+  | {
+      ok: true;
+      orderId: string;
+      paid: boolean;
+    }
+  | { ok: false; error: string }
+> {
+  const order = await prisma.order.findFirst({
+    where: {
+      paymentToken: token,
+      orderSource: OrderSource.ADMIN_SALE,
+    },
+    select: {
+      id: true,
+      status: true,
+      paidAt: true,
+      paymentMethod: true,
+      paymentTokenExpiresAt: true,
+    },
+  });
+
+  if (!order) {
+    return { ok: false, error: "Link inválido ou expirado." };
+  }
+
+  if (
+    order.paymentTokenExpiresAt &&
+    order.paymentTokenExpiresAt < new Date()
+  ) {
+    return { ok: false, error: "Este link expirou. Solicite um novo ao vendedor." };
+  }
+
+  if (order.status === ORDER_STATUS.CANCELLED) {
+    return { ok: false, error: "Esta venda foi cancelada." };
+  }
+
+  if (order.paymentMethod !== PAYMENT_METHOD.PIX) {
+    return { ok: false, error: "Este link não é de pagamento Pix." };
+  }
+
+  const paid =
+    order.status === ORDER_STATUS.PAID || Boolean(order.paidAt);
+
+  return { ok: true, orderId: order.id, paid };
+}

@@ -205,6 +205,9 @@ model Order {
   /** Token exclusivo para o cliente preencher dados (venda avulsa). */
   customerDataToken   String?         @unique
   customerDataTokenExpiresAt DateTime?
+  /** Token exclusivo para o cliente pagar via página pública (venda avulsa PIX). */
+  paymentToken        String?         @unique
+  paymentTokenExpiresAt DateTime?
   /** Canal de pagamento: gateway online ou registro manual. */
   paymentChannel      PaymentChannel?
   manualPaidByUserId  String?

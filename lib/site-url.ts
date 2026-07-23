@@ -4,10 +4,31 @@
  */
 export function getAppBaseUrl(): string {
   const explicit = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "");
-  if (explicit) return explicit;
+  if (explicit) return normalizeLocalhostProtocol(explicit);
   if (process.env.VERCEL_URL)
     return `https://${process.env.VERCEL_URL.replace(/\/$/, "")}`;
   return "http://localhost:3000";
+}
+
+/**
+ * Localhost sem TLS: evita `https://localhost` (ERR_SSL_PROTOCOL_ERROR).
+ */
+export function normalizeLocalhostProtocol(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (
+      parsed.protocol === "https:" &&
+      (parsed.hostname === "localhost" ||
+        parsed.hostname === "127.0.0.1" ||
+        parsed.hostname === "0.0.0.0")
+    ) {
+      parsed.protocol = "http:";
+      return parsed.toString().replace(/\/$/, "");
+    }
+  } catch {
+    /* ignore */
+  }
+  return url.replace(/\/$/, "");
 }
 
 const LOCAL_RE = /^(https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?/i;
