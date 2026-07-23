@@ -3,11 +3,51 @@
  * Em dev sem variáveis, cai em localhost — não acessível pela internet.
  */
 export function getAppBaseUrl(): string {
-  const explicit = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "");
-  if (explicit) return normalizeLocalhostProtocol(explicit);
-  if (process.env.VERCEL_URL)
-    return `https://${process.env.VERCEL_URL.replace(/\/$/, "")}`;
+  const candidates = [
+    process.env.NEXT_PUBLIC_SITE_URL,
+    process.env.PAYMENT_CALLBACK_BASE_URL,
+    process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : undefined,
+    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined,
+  ];
+
+  for (const raw of candidates) {
+    const normalized = normalizePublicBaseUrl(raw);
+    if (!normalized) continue;
+    // Em produção, nunca aceite localhost vindo de env de build local.
+    if (process.env.NODE_ENV === "production" && isLocalhostUrl(normalized)) {
+      continue;
+    }
+    return normalized;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    console.error(
+      "[getAppBaseUrl] NEXT_PUBLIC_SITE_URL / VERCEL_URL ausentes em produção."
+    );
+  }
   return "http://localhost:3000";
+}
+
+function isLocalhostUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return (
+      host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0"
+    );
+  } catch {
+    return /localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(url);
+  }
+}
+
+function normalizePublicBaseUrl(raw: string | undefined | null): string | null {
+  const trimmed = raw?.trim().replace(/\/$/, "");
+  if (!trimmed) return null;
+  const withProtocol = /^https?:\/\//i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
+  return normalizeLocalhostProtocol(withProtocol);
 }
 
 /**
@@ -43,9 +83,15 @@ const LOCAL_RE = /^(https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?/i;
  * Ordem: `PAYMENT_CALLBACK_BASE_URL` → `NEXT_PUBLIC_SITE_URL` → `VERCEL_URL` → localhost
  */
 export function getPaymentCallbackBaseUrl(): string {
-  const onlyPayment =
-    process.env.PAYMENT_CALLBACK_BASE_URL?.trim().replace(/\/$/, "");
-  if (onlyPayment) return onlyPayment;
+  const onlyPayment = normalizePublicBaseUrl(
+    process.env.PAYMENT_CALLBACK_BASE_URL
+  );
+  if (
+    onlyPayment &&
+    !(process.env.NODE_ENV === "production" && isLocalhostUrl(onlyPayment))
+  ) {
+    return onlyPayment;
+  }
   return getAppBaseUrl();
 }
 

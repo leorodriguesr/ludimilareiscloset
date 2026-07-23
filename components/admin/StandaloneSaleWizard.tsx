@@ -1231,12 +1231,34 @@ export function StandaloneSaleWizard({
   /* ─── Success screen ───────────────────────────────────────── */
 
   if (result) {
-    const pixShareUrl =
-      result.payment?.type === "pix"
-        ? result.payment.paymentPath
-          ? `${window.location.origin}${result.payment.paymentPath}`
-          : result.payment.paymentUrl ?? null
-        : null;
+    const absoluteFromMaybeLocal = (url: string | undefined) => {
+      if (!url) return null;
+      try {
+        const parsed = new URL(url);
+        const host = parsed.hostname;
+        if (
+          host === "localhost" ||
+          host === "127.0.0.1" ||
+          host === "0.0.0.0"
+        ) {
+          return `${window.location.origin}${parsed.pathname}${parsed.search}`;
+        }
+        return parsed.toString();
+      } catch {
+        if (url.startsWith("/")) return `${window.location.origin}${url}`;
+        return url;
+      }
+    };
+
+    const customerShareUrl = absoluteFromMaybeLocal(result.customerDataUrl);
+
+    const pixShareUrl = (() => {
+      if (result.payment?.type !== "pix") return null;
+      if (result.payment.paymentPath) {
+        return `${window.location.origin}${result.payment.paymentPath}`;
+      }
+      return absoluteFromMaybeLocal(result.payment.paymentUrl);
+    })();
 
     return (
       <div className="fixed inset-0 z-50 flex bg-stone-900/50 backdrop-blur-sm">
@@ -1254,13 +1276,13 @@ export function StandaloneSaleWizard({
               Total: {formatPrice(result.total)}
             </p>
             <div className="mt-6 space-y-3">
-              {result.customerDataUrl && (
+              {customerShareUrl && (
                 <CopyBlock
                   label="Link para o cliente preencher dados"
-                  value={result.customerDataUrl}
+                  value={customerShareUrl}
                   copyValue={buildCustomerDataShareMessage(
                     result.orderNumber,
-                    result.customerDataUrl
+                    customerShareUrl
                   )}
                 />
               )}

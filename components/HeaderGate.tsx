@@ -6,7 +6,6 @@ import type { ReactNode } from "react";
 export function HeaderGate({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   if (
-    pathname?.startsWith("/admin") ||
     pathname?.startsWith("/checkout") ||
     pathname?.startsWith("/venda-avulsa")
   ) {

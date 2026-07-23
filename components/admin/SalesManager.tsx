@@ -1055,25 +1055,25 @@ type PaymentInfo =
   | { type: "paid" };
 
 function orderPaymentPageUrl(order: AdminOrder, info?: PaymentInfo | null): string | null {
+  const origin = window.location.origin;
   if (info?.type === "pix" && info.paymentPath) {
-    return `${window.location.origin}${info.paymentPath}`;
+    return `${origin}${info.paymentPath}`;
   }
   if (info?.type === "pix" && info.paymentToken) {
-    return `${window.location.origin}/venda-avulsa/pagar/${info.paymentToken}`;
+    return `${origin}/venda-avulsa/pagar/${info.paymentToken}`;
   }
   if (order.paymentToken) {
-    return `${window.location.origin}/venda-avulsa/pagar/${order.paymentToken}`;
+    return `${origin}/venda-avulsa/pagar/${order.paymentToken}`;
   }
   if (info?.type === "pix" && info.paymentUrl) {
     try {
       const parsed = new URL(info.paymentUrl);
-      if (
-        parsed.protocol === "https:" &&
-        (parsed.hostname === "localhost" ||
-          parsed.hostname === "127.0.0.1" ||
-          parsed.hostname === "0.0.0.0")
-      ) {
-        parsed.protocol = "http:";
+      const host = parsed.hostname;
+      const isLocal =
+        host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0";
+      // Se o servidor gerou localhost (env de build), reescreve com a origem atual.
+      if (isLocal) {
+        return `${origin}${parsed.pathname}${parsed.search}`;
       }
       return parsed.toString();
     } catch {
@@ -1478,7 +1478,7 @@ function OrderRowActionsMenu({
 
     items.push({
       id: "details",
-      label: isDetailsOpen ? "Fechar detalhes" : "Ver detalhes",
+      label: isDetailsOpen ? "Fechar detalhes" : "Detalhes da venda",
       separatorBefore: items.length > 0,
       icon: (
         <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
@@ -2411,21 +2411,10 @@ function SaleOrderDrawer({
   useEffect(() => {
     if (open && order) {
       setDisplayOrder(order);
-      if (!mounted) {
-        setMounted(true);
-        setEntered(false);
-        let inner = 0;
-        const outer = requestAnimationFrame(() => {
-          inner = requestAnimationFrame(() => setEntered(true));
-        });
-        return () => {
-          cancelAnimationFrame(outer);
-          if (inner) cancelAnimationFrame(inner);
-        };
-      }
-      return;
     }
+  }, [open, order]);
 
+  useEffect(() => {
     if (!open) {
       setEntered(false);
       const t = window.setTimeout(() => {
@@ -2434,7 +2423,18 @@ function SaleOrderDrawer({
       }, DETAILS_DRAWER_MS);
       return () => clearTimeout(t);
     }
-  }, [open, order, mounted]);
+
+    setMounted(true);
+    setEntered(false);
+    let inner = 0;
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => setEntered(true));
+    });
+    return () => {
+      cancelAnimationFrame(outer);
+      if (inner) cancelAnimationFrame(inner);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -2916,7 +2916,17 @@ export function SalesManager() {
                   return (
                     <Fragment key={order.id}>
                       <tr
-                        className={`border-b border-stone-100 transition-colors ${isSaleCancelled
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Detalhes da venda #${order.orderNumber ?? "—"}`}
+                        onClick={() => openDetails(order.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            openDetails(order.id);
+                          }
+                        }}
+                        className={`cursor-pointer border-b border-stone-100 transition-colors ${isSaleCancelled
                             ? "bg-stone-50"
                             : isDetailsOpen
                               ? "bg-stone-50/70"
@@ -2932,10 +2942,7 @@ export function SalesManager() {
                           />
                         </td>
 
-                        <td
-                          className="cursor-pointer px-4 py-3.5"
-                          onClick={() => openDetails(order.id)}
-                        >
+                        <td className="px-4 py-3.5">
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-1.5">
                               <span className={`font-mono ${TABLE_CELL_PRIMARY}`}>
@@ -2953,50 +2960,32 @@ export function SalesManager() {
                           </div>
                         </td>
 
-                        <td
-                          className="cursor-pointer px-4 py-3.5"
-                          onClick={() => openDetails(order.id)}
-                        >
+                        <td className="px-4 py-3.5">
                           <p className={TABLE_CELL_PRIMARY}>{originLabel}</p>
                         </td>
 
-                        <td
-                          className="cursor-pointer px-4 py-3.5"
-                          onClick={() => openDetails(order.id)}
-                        >
+                        <td className="px-4 py-3.5">
                           <p className={TABLE_CELL_PRIMARY}>{fmtDate(order.createdAt)}</p>
                           <p className={TABLE_CELL_SECONDARY}>{fmtTime(order.createdAt)}</p>
                         </td>
 
-                        <td
-                          className="cursor-pointer px-4 py-3.5"
-                          onClick={() => openDetails(order.id)}
-                        >
+                        <td className="px-4 py-3.5">
                           <p className={`truncate max-w-[200px] ${TABLE_CELL_PRIMARY}`}>
                             {customerName}
                           </p>
                         </td>
 
-                        <td
-                          className="cursor-pointer px-4 py-3.5"
-                          onClick={() => openDetails(order.id)}
-                        >
+                        <td className="px-4 py-3.5">
                           <TablePaymentCell order={order} isSaleCancelled={isSaleCancelled} />
                         </td>
 
-                        <td
-                          className="cursor-pointer px-4 py-3.5 text-right"
-                          onClick={() => openDetails(order.id)}
-                        >
+                        <td className="px-4 py-3.5 text-right">
                           <p className={`tabular-nums ${TABLE_CELL_PRIMARY}`}>
                             {formatPrice(order.total)}
                           </p>
                         </td>
 
-                        <td
-                          className="cursor-pointer px-4 py-3.5"
-                          onClick={() => openDetails(order.id)}
-                        >
+                        <td className="px-4 py-3.5">
                           {isSaleCancelled ? (
                             <span className="text-xs text-stone-400">—</span>
                           ) : order.paidAt ? (
