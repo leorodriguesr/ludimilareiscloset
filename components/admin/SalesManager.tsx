@@ -73,6 +73,9 @@ type AdminOrder = {
   customerDataToken?: string | null;
   paymentToken?: string | null;
   paymentChannel?: string | null;
+  paymentShare?:
+    | { type: "pix"; paymentPath: string; paymentToken: string }
+    | { type: "card"; checkoutUrl: string };
   subtotalOriginal?: number | null;
   itemsDiscountTotal?: number;
   orderDiscountAmount?: number;
@@ -1042,45 +1045,19 @@ function ReceiptLine({ label, value, bold = false }: { label: string; value: str
   );
 }
 
-type PaymentInfo =
-  | {
-      type: "pix";
-      pixCode: string;
-      amount: number;
-      paymentUrl?: string;
-      paymentPath?: string;
-      paymentToken?: string;
+/** URL absoluta para compartilhar pagamento — usa dados já vindos da listagem. */
+function orderPaymentShareAbsoluteUrl(order: AdminOrder): string | null {
+  const share = order.paymentShare;
+  if (!share) {
+    if (order.paymentToken) {
+      return `${window.location.origin}/venda-avulsa/pagar/${order.paymentToken}`;
     }
-  | { type: "card"; checkoutUrl: string }
-  | { type: "paid" };
-
-function orderPaymentPageUrl(order: AdminOrder, info?: PaymentInfo | null): string | null {
-  const origin = window.location.origin;
-  if (info?.type === "pix" && info.paymentPath) {
-    return `${origin}${info.paymentPath}`;
+    return null;
   }
-  if (info?.type === "pix" && info.paymentToken) {
-    return `${origin}/venda-avulsa/pagar/${info.paymentToken}`;
+  if (share.type === "pix") {
+    return `${window.location.origin}${share.paymentPath}`;
   }
-  if (order.paymentToken) {
-    return `${origin}/venda-avulsa/pagar/${order.paymentToken}`;
-  }
-  if (info?.type === "pix" && info.paymentUrl) {
-    try {
-      const parsed = new URL(info.paymentUrl);
-      const host = parsed.hostname;
-      const isLocal =
-        host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0";
-      // Se o servidor gerou localhost (env de build), reescreve com a origem atual.
-      if (isLocal) {
-        return `${origin}${parsed.pathname}${parsed.search}`;
-      }
-      return parsed.toString();
-    } catch {
-      return info.paymentUrl;
-    }
-  }
-  return null;
+  return share.checkoutUrl;
 }
 
 function orderRefLabel(order: Pick<AdminOrder, "orderNumber">): string {
@@ -1161,9 +1138,6 @@ function AdminSaleLinks({
 }: {
   order: AdminOrder;
 }) {
-  const [paymentInfo, setPaymentInfo] = useState<PaymentInfo | null>(null);
-  const [paymentLoading, setPaymentLoading] = useState(false);
-  const [paymentError, setPaymentError] = useState<string | null>(null);
   const [copied, setCopied] = useState<"data" | "pix" | "card" | null>(null);
 
   const showCustomerLink = shouldOfferCustomerDataFillLink(order);
@@ -1173,41 +1147,22 @@ function AdminSaleLinks({
     !order.paidAt &&
     order.status !== "cancelled" &&
     order.paymentChannel !== "MANUAL";
-  const isPixPayment = order.paymentMethod === "pix";
-  const isCardPayment = order.paymentMethod === "card";
-
-  useEffect(() => {
-    if (!showPaymentLink) return;
-    let cancelled = false;
-    setPaymentLoading(true);
-    setPaymentError(null);
-    void fetch(`/api/admin/orders/${order.id}/payment-info`)
-      .then(async (res) => {
-        const data = (await res.json()) as PaymentInfo & { error?: string };
-        if (cancelled) return;
-        if (!res.ok) {
-          setPaymentError(data.error ?? "Não foi possível carregar o pagamento.");
-          return;
-        }
-        setPaymentInfo(data);
-      })
-      .catch(() => {
-        if (!cancelled) setPaymentError("Erro de conexão.");
-      })
-      .finally(() => {
-        if (!cancelled) setPaymentLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [order.id, showPaymentLink]);
+  const isPixPayment =
+    order.paymentMethod === "pix" || order.paymentShare?.type === "pix";
+  const isCardPayment =
+    order.paymentMethod === "card" || order.paymentShare?.type === "card";
+  const paymentUrl = orderPaymentShareAbsoluteUrl(order);
 
   if (!showCustomerLink && !showPaymentLink) return null;
 
   async function copyText(value: string, key: "data" | "pix" | "card") {
-    await navigator.clipboard.writeText(value);
-    setCopied(key);
-    setTimeout(() => setCopied(null), 2000);
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(key);
+      setTimeout(() => setCopied(null), 2000);
+    } catch {
+      window.alert("Não foi possível copiar. Tente novamente.");
+    }
   }
 
   const customerUrl =
@@ -1215,28 +1170,21 @@ function AdminSaleLinks({
       ? `${window.location.origin}/venda-avulsa/completar/${order.customerDataToken}`
       : "";
 
-  const pixPaymentUrl = orderPaymentPageUrl(order, paymentInfo);
-
   return (
     <div className="flex flex-col gap-2">
       {showPaymentLink && (
         <>
-          {paymentLoading && (
-            <p className="text-xs text-stone-500">Carregando pagamento…</p>
-          )}
-          {paymentError && (
-            <p className="text-xs text-red-600">{paymentError}</p>
-          )}
-          {(isPixPayment || paymentInfo?.type === "pix") && pixPaymentUrl && (
+          {!paymentUrl ? (
+            <p className="text-xs text-stone-500">
+              Link de pagamento indisponível. Atualize a lista e tente de novo.
+            </p>
+          ) : null}
+          {isPixPayment && paymentUrl ? (
             <button
               type="button"
               onClick={() =>
                 void copyText(
-                  buildPixShareMessage(
-                    order,
-                    pixPaymentUrl,
-                    paymentInfo?.type === "pix" ? paymentInfo.amount : order.total
-                  ),
+                  buildPixShareMessage(order, paymentUrl, order.total),
                   "pix"
                 )
               }
@@ -1244,24 +1192,18 @@ function AdminSaleLinks({
             >
               {copied === "pix" ? "Mensagem copiada!" : "Copiar link Pix"}
             </button>
-          )}
-          {isCardPayment && paymentInfo?.type === "card" && (
+          ) : null}
+          {isCardPayment && paymentUrl ? (
             <button
               type="button"
               onClick={() =>
-                void copyText(
-                  buildCardShareMessage(order, paymentInfo.checkoutUrl),
-                  "card"
-                )
+                void copyText(buildCardShareMessage(order, paymentUrl), "card")
               }
               className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
             >
               {copied === "card" ? "Mensagem copiada!" : "Copiar link cartão"}
             </button>
-          )}
-          {paymentInfo?.type === "paid" && (
-            <p className="text-xs text-emerald-700">Pagamento já confirmado.</p>
-          )}
+          ) : null}
         </>
       )}
 
@@ -1398,40 +1340,25 @@ function OrderRowActionsMenu({
   }
 
   async function handleCopyPaymentLink() {
-    setBusy("payment");
+    const url = orderPaymentShareAbsoluteUrl(order);
+    if (!url) {
+      window.alert(
+        "Link de pagamento indisponível. Atualize a lista e tente de novo."
+      );
+      return;
+    }
     try {
-      const res = await fetch(`/api/admin/orders/${order.id}/payment-info`);
-      const data = (await res.json()) as PaymentInfo & { error?: string };
-      if (!res.ok) {
-        window.alert(data.error ?? "Não foi possível carregar o pagamento.");
+      if (isPixPayment || order.paymentShare?.type === "pix") {
+        await copyText(buildPixShareMessage(order, url, order.total));
         return;
       }
-      if (data.type === "paid") {
-        window.alert("Pagamento já confirmado.");
+      if (isCardPayment || order.paymentShare?.type === "card") {
+        await copyText(buildCardShareMessage(order, url));
         return;
       }
-      if (isPixPayment || data.type === "pix") {
-        if (data.type !== "pix") {
-          window.alert("Esta venda é Pix, mas o link de pagamento não está disponível.");
-          return;
-        }
-        const url = orderPaymentPageUrl(order, data);
-        if (!url) {
-          window.alert("Não foi possível gerar o link Pix. Tente novamente.");
-          return;
-        }
-        await copyText(buildPixShareMessage(order, url, data.amount));
-        return;
-      }
-      if (isCardPayment || data.type === "card") {
-        if (data.type !== "card") {
-          window.alert("Link de cartão indisponível para esta venda.");
-          return;
-        }
-        await copyText(buildCardShareMessage(order, data.checkoutUrl));
-      }
-    } finally {
-      setBusy(null);
+      window.alert("Método de pagamento sem link para copiar.");
+    } catch {
+      window.alert("Não foi possível copiar. Tente novamente.");
     }
   }
 
@@ -1476,14 +1403,11 @@ function OrderRowActionsMenu({
     if (showPaymentLink) {
       items.push({
         id: "payment-link",
-        label: busy === "payment"
-          ? "Copiando…"
-          : isPixPayment
-            ? "Copiar link Pix"
-            : isCardPayment
-              ? "Copiar link cartão"
-              : "Copiar link de pagamento",
-        disabled: busy === "payment",
+        label: isPixPayment
+          ? "Copiar link Pix"
+          : isCardPayment
+            ? "Copiar link cartão"
+            : "Copiar link de pagamento",
         icon: (
           <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z" />
@@ -1531,6 +1455,9 @@ function OrderRowActionsMenu({
     onRequestCancel,
     onToggleDetails,
     order.customerDataToken,
+    order.paymentShare,
+    order.paymentToken,
+    order.total,
     showCustomerLink,
     showMarkPaid,
     showPaymentLink,

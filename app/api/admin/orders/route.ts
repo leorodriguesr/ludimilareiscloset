@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { attachOrderPaymentShare } from "@/lib/admin-sale/order-payment-share";
 import { prisma } from "@/lib/prisma";
 import {
   fetchOrderContactAddressByIds,
@@ -75,8 +76,14 @@ export async function GET(request: NextRequest) {
     );
     const withAddress = mergeOrderContactAddress(orders, contactAddressById);
     const enrichedOrders = mergeOrderShippingFields(withAddress, shippingById);
+    const withPaymentShare = await attachOrderPaymentShare(enrichedOrders);
 
-    return NextResponse.json({ orders: enrichedOrders, total, page, limit });
+    return NextResponse.json({
+      orders: withPaymentShare,
+      total,
+      page,
+      limit,
+    });
   } catch (e) {
     console.error("[GET /api/admin/orders]", e);
     return NextResponse.json({ error: "Erro ao listar pedidos." }, { status: 500 });
