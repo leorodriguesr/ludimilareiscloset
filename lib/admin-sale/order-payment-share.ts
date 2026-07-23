@@ -10,7 +10,10 @@ import {
   PAYMENT_METHOD,
 } from "@/lib/orders/constants";
 import { continueOrderPayment } from "@/lib/orders/continue-order-payment";
-import { infinitePayCheckoutUrlFromSlug } from "@/lib/payments/infinitepay";
+import {
+  infinitePayCheckoutUrlFromSlug,
+  isReusableInfinitePayCheckoutReference,
+} from "@/lib/payments/infinitepay";
 import { prisma } from "@/lib/prisma";
 
 export type OrderPaymentShare =
@@ -146,6 +149,10 @@ export async function attachOrderPaymentShare<T extends OrderShareSource>(
 
     for (const [orderId, attempt] of bestByOrder) {
       if (!attempt.gatewayReference) continue;
+      // Slug curto de fatura NÃO abre o checkout (Invalid checkout link params).
+      if (!isReusableInfinitePayCheckoutReference(attempt.gatewayReference)) {
+        continue;
+      }
       try {
         cardShareById.set(orderId, {
           type: "card",
@@ -156,7 +163,7 @@ export async function attachOrderPaymentShare<T extends OrderShareSource>(
       }
     }
 
-    // Sem tentativa reutilizável: regenera link (mesmo fluxo do payment-info).
+    // Sem URL reutilizável: regenera link na InfinitePay.
     const missingCardIds = cardOrderIds.filter((id) => !cardShareById.has(id));
     await Promise.all(
       missingCardIds.map(async (orderId) => {

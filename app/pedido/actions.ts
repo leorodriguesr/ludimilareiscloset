@@ -4,6 +4,7 @@ import { confirmPaymentFromInfinitePay } from "@/lib/orders/confirm-payment";
 import { getActivePaymentAttempt } from "@/lib/orders/get-active-payment-attempt";
 import { PAYMENT_GATEWAY } from "@/lib/orders/constants";
 import {
+  expandInfinitePayPaymentReferences,
   infinitePayPaymentCheckWithFallback,
 } from "@/lib/payments/infinitepay";
 import { prisma } from "@/lib/prisma";
@@ -54,13 +55,13 @@ export async function syncOrderPaymentFromReturn(
     }),
   ]);
 
-  const references: Array<string | null | undefined> = [
+  const references = expandInfinitePayPaymentReferences([
     slugFromUrl,
     attempt?.gateway === PAYMENT_GATEWAY.INFINITEPAY
       ? attempt.gatewayReference
       : null,
     orderRow?.infinitePayInvoiceSlug,
-  ];
+  ]);
 
   const verified = await infinitePayPaymentCheckWithFallback({
     orderNsu: orderId,

@@ -23,6 +23,7 @@ import {
   infinitePayCheckoutUrlFromSlug,
   infinitePayOrderRedirectUrl,
   infinitePayWebhookUrl,
+  isReusableInfinitePayCheckoutReference,
 } from "@/lib/payments/infinitepay";
 import { orderToInfinitePayItems } from "@/lib/payments/order-to-infinitepay-items";
 import { buildInfinitePayCustomer } from "@/lib/order/payment/infinitepay-customer";
@@ -434,7 +435,8 @@ export async function continueOrderPayment(input: {
 
   if (
     activeAttempt?.gateway === PAYMENT_GATEWAY.INFINITEPAY &&
-    activeAttempt.gatewayReference
+    activeAttempt.gatewayReference &&
+    isReusableInfinitePayCheckoutReference(activeAttempt.gatewayReference)
   ) {
     return {
       ok: true,

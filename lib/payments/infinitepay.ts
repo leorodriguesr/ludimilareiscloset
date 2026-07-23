@@ -69,7 +69,8 @@ function pickSlug(data: Record<string, unknown>): string | null {
 function gatewayReferenceFromCheckoutUrl(url: string): string | null {
   try {
     const parsed = new URL(url);
-    for (const key of ["slug", "lenc"]) {
+    // Checkout moderno usa `lenc`; `slug` é o código da fatura (payment_check).
+    for (const key of ["lenc", "slug"]) {
       const value = parsed.searchParams.get(key)?.trim();
       if (value) return value;
     }
@@ -79,15 +80,47 @@ function gatewayReferenceFromCheckoutUrl(url: string): string | null {
   return null;
 }
 
-/** Identificador da fatura (slug legado ou token `lenc` na URL). */
+/**
+ * Referência persistida da tentativa InfinitePay.
+ * Preferimos a URL completa do checkout — remontar com `?slug=` gera
+ * "Invalid checkout link params" no checkout atual (que espera `lenc`).
+ */
 export function extractInfinitePayGatewayReference(input: {
   response: Record<string, unknown>;
   checkoutUrl: string;
 }): string | null {
+  const checkoutUrl = input.checkoutUrl.trim();
+  if (/^https?:\/\//i.test(checkoutUrl)) return checkoutUrl;
   return (
-    pickSlug(input.response) ??
-    gatewayReferenceFromCheckoutUrl(input.checkoutUrl)
+    gatewayReferenceFromCheckoutUrl(checkoutUrl) ?? pickSlug(input.response)
   );
+}
+
+/** Extrai `lenc` / `slug` de uma URL ou devolve a própria referência. */
+export function expandInfinitePayPaymentReferences(
+  references: Array<string | null | undefined>
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of references) {
+    const ref = raw?.trim();
+    if (!ref || seen.has(ref)) continue;
+    seen.add(ref);
+    out.push(ref);
+    if (!/^https?:\/\//i.test(ref)) continue;
+    try {
+      const parsed = new URL(ref);
+      for (const key of ["lenc", "slug"]) {
+        const value = parsed.searchParams.get(key)?.trim();
+        if (!value || seen.has(value)) continue;
+        seen.add(value);
+        out.push(value);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return out;
 }
 
 /**
@@ -177,6 +210,17 @@ function isInfinitePayLencToken(reference: string): boolean {
 
 export { isInfinitePayLencToken };
 
+/** True quando a referência ainda abre o checkout (URL ou token lenc). */
+export function isReusableInfinitePayCheckoutReference(
+  reference: string | null | undefined
+): boolean {
+  const trimmed = reference?.trim();
+  if (!trimmed) return false;
+  if (/^https?:\/\//i.test(trimmed)) return true;
+  // Token lenc (checkout). Slug curto de fatura NÃO abre o checkout.
+  return isInfinitePayLencToken(trimmed);
+}
+
 function paymentCheckRequestBody(
   handle: string,
   input: PaymentCheckInput
@@ -240,11 +284,9 @@ export async function infinitePayPaymentCheckWithFallback(input: {
   transactionNsu: string;
   references: Array<string | null | undefined>;
 }): Promise<{ check: PaymentCheckResult; reference: string } | null> {
-  const seen = new Set<string>();
-  for (const raw of input.references) {
-    const ref = raw?.trim();
-    if (!ref || seen.has(ref)) continue;
-    seen.add(ref);
+  for (const ref of expandInfinitePayPaymentReferences(input.references)) {
+    // payment_check não aceita URL completa — só lenc/slug.
+    if (/^https?:\/\//i.test(ref)) continue;
     const check = await infinitePayPaymentCheck({
       orderNsu: input.orderNsu,
       transactionNsu: input.transactionNsu,
@@ -266,9 +308,16 @@ export function infinitePayOrderRedirectUrl(orderId: string): string {
   return `${getPaymentCallbackBaseUrl()}/pedido/${orderId}`;
 }
 
-/** Reconstrói URL de checkout a partir do slug ou token lenc salvos na tentativa. */
+/**
+ * Resolve URL de checkout a partir do que foi salvo na tentativa.
+ * Se já for URL completa, devolve como está (caso preferido).
+ */
 export function infinitePayCheckoutUrlFromSlug(reference: string): string {
+  const trimmed = reference.trim();
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
   const handle = getInfinitePayHandle();
-  const param = reference.includes(".v1.") ? "lenc" : "slug";
-  return `https://checkout.infinitepay.io/${encodeURIComponent(handle)}?${param}=${encodeURIComponent(reference)}`;
+  const param = isInfinitePayLencToken(trimmed) ? "lenc" : "slug";
+  return `https://checkout.infinitepay.io/${encodeURIComponent(handle)}?${param}=${encodeURIComponent(trimmed)}`;
 }
