@@ -193,7 +193,7 @@ export function AdminSalePixPaymentPage({ token }: Props) {
               : "Recebemos o pagamento do seu pedido."}
           </p>
           <p className="mt-2 text-sm text-stone-500">
-            Em breve a loja entrará em contato sobre a entrega.
+            Seu pedido já está sendo preparado e logo será enviado.
           </p>
         </div>
         {summary ? <OrderItemsCard data={summary} /> : null}
