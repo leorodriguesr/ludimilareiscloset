@@ -9,6 +9,7 @@ import {
   PAYMENT_GATEWAY,
   PAYMENT_METHOD,
 } from "@/lib/orders/constants";
+import { continueOrderPayment } from "@/lib/orders/continue-order-payment";
 import { infinitePayCheckoutUrlFromSlug } from "@/lib/payments/infinitepay";
 import { prisma } from "@/lib/prisma";
 
@@ -39,6 +40,14 @@ function needsPaymentShare(order: OrderShareSource): boolean {
   );
 }
 
+function attemptRank(status: string): number {
+  if (status === PAYMENT_ATTEMPT_STATUS.ACTIVE) return 0;
+  if (status === PAYMENT_ATTEMPT_STATUS.CREATED) return 1;
+  if (status === PAYMENT_ATTEMPT_STATUS.SUPERSEDED) return 2;
+  if (status === PAYMENT_ATTEMPT_STATUS.EXPIRED) return 3;
+  return 9;
+}
+
 /**
  * Anexa dados de compartilhamento de pagamento (path Pix / URL cartão)
  * para cópia imediata no admin, sem fetch no clique.
@@ -54,9 +63,10 @@ export async function attachOrderPaymentShare<T extends OrderShareSource>(
   const pixOrders = candidates.filter(
     (order) => order.paymentMethod === PAYMENT_METHOD.PIX
   );
-  const cardOrderIds = candidates
-    .filter((order) => order.paymentMethod === PAYMENT_METHOD.CARD)
-    .map((order) => order.id);
+  const cardOrders = candidates.filter(
+    (order) => order.paymentMethod === PAYMENT_METHOD.CARD
+  );
+  const cardOrderIds = cardOrders.map((order) => order.id);
 
   const pixShareById = new Map<string, OrderPaymentShare>();
   await Promise.all(
@@ -97,30 +107,77 @@ export async function attachOrderPaymentShare<T extends OrderShareSource>(
     const attempts = await prisma.paymentAttempt.findMany({
       where: {
         orderId: { in: cardOrderIds },
-        status: PAYMENT_ATTEMPT_STATUS.ACTIVE,
         gateway: PAYMENT_GATEWAY.INFINITEPAY,
-        purpose: "order",
+        gatewayReference: { not: null },
+        status: {
+          in: [
+            PAYMENT_ATTEMPT_STATUS.ACTIVE,
+            PAYMENT_ATTEMPT_STATUS.CREATED,
+            PAYMENT_ATTEMPT_STATUS.SUPERSEDED,
+            PAYMENT_ATTEMPT_STATUS.EXPIRED,
+          ],
+        },
       },
       select: {
         orderId: true,
         gatewayReference: true,
         attemptNumber: true,
+        status: true,
       },
-      orderBy: { attemptNumber: "desc" },
     });
 
+    const bestByOrder = new Map<string, (typeof attempts)[number]>();
     for (const attempt of attempts) {
-      if (cardShareById.has(attempt.orderId)) continue;
+      if (!attempt.gatewayReference) continue;
+      const current = bestByOrder.get(attempt.orderId);
+      if (!current) {
+        bestByOrder.set(attempt.orderId, attempt);
+        continue;
+      }
+      const byStatus =
+        attemptRank(attempt.status) - attemptRank(current.status);
+      if (
+        byStatus < 0 ||
+        (byStatus === 0 && attempt.attemptNumber > current.attemptNumber)
+      ) {
+        bestByOrder.set(attempt.orderId, attempt);
+      }
+    }
+
+    for (const [orderId, attempt] of bestByOrder) {
       if (!attempt.gatewayReference) continue;
       try {
-        cardShareById.set(attempt.orderId, {
+        cardShareById.set(orderId, {
           type: "card",
           checkoutUrl: infinitePayCheckoutUrlFromSlug(attempt.gatewayReference),
         });
       } catch (e) {
-        console.error("[attachOrderPaymentShare] card url", attempt.orderId, e);
+        console.error("[attachOrderPaymentShare] card url", orderId, e);
       }
     }
+
+    // Sem tentativa reutilizável: regenera link (mesmo fluxo do payment-info).
+    const missingCardIds = cardOrderIds.filter((id) => !cardShareById.has(id));
+    await Promise.all(
+      missingCardIds.map(async (orderId) => {
+        try {
+          const result = await continueOrderPayment({
+            orderId,
+            userId: "system",
+            userEmail: "",
+            staffBypass: true,
+          });
+          if (result.ok && result.type === "card") {
+            cardShareById.set(orderId, {
+              type: "card",
+              checkoutUrl: result.checkoutUrl,
+            });
+          }
+        } catch (e) {
+          console.error("[attachOrderPaymentShare] card restart", orderId, e);
+        }
+      })
+    );
   }
 
   return orders.map((order) => {

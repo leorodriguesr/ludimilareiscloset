@@ -1340,25 +1340,67 @@ function OrderRowActionsMenu({
   }
 
   async function handleCopyPaymentLink() {
-    const url = orderPaymentShareAbsoluteUrl(order);
-    if (!url) {
-      window.alert(
-        "Link de pagamento indisponível. Atualize a lista e tente de novo."
-      );
-      return;
-    }
+    const shareUrl = orderPaymentShareAbsoluteUrl(order);
+    const isPix = isPixPayment || order.paymentShare?.type === "pix";
+    const isCard = isCardPayment || order.paymentShare?.type === "card";
+
     try {
-      if (isPixPayment || order.paymentShare?.type === "pix") {
-        await copyText(buildPixShareMessage(order, url, order.total));
+      if (shareUrl) {
+        if (isPix) {
+          await copyText(buildPixShareMessage(order, shareUrl, order.total));
+          return;
+        }
+        if (isCard) {
+          await copyText(buildCardShareMessage(order, shareUrl));
+          return;
+        }
+      }
+
+      // Fallback: regenera o link no servidor (ex.: tentativa InfinitePay ausente).
+      setBusy("payment");
+      const res = await fetch(`/api/admin/orders/${order.id}/payment-info`);
+      const data = (await res.json()) as {
+        type?: "pix" | "card" | "paid";
+        paymentPath?: string;
+        paymentToken?: string;
+        checkoutUrl?: string;
+        amount?: number;
+        error?: string;
+      };
+      if (!res.ok) {
+        window.alert(data.error ?? "Não foi possível carregar o pagamento.");
         return;
       }
-      if (isCardPayment || order.paymentShare?.type === "card") {
-        await copyText(buildCardShareMessage(order, url));
+      if (data.type === "paid") {
+        window.alert("Pagamento já confirmado.");
         return;
       }
-      window.alert("Método de pagamento sem link para copiar.");
+      if (data.type === "pix") {
+        const path =
+          data.paymentPath ??
+          (data.paymentToken ? `/venda-avulsa/pagar/${data.paymentToken}` : null);
+        if (!path) {
+          window.alert("Não foi possível gerar o link Pix. Tente novamente.");
+          return;
+        }
+        await copyText(
+          buildPixShareMessage(
+            order,
+            `${window.location.origin}${path}`,
+            data.amount ?? order.total
+          )
+        );
+        return;
+      }
+      if (data.type === "card" && data.checkoutUrl) {
+        await copyText(buildCardShareMessage(order, data.checkoutUrl));
+        return;
+      }
+      window.alert("Link de pagamento indisponível. Atualize a lista e tente de novo.");
     } catch {
       window.alert("Não foi possível copiar. Tente novamente.");
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -1403,11 +1445,15 @@ function OrderRowActionsMenu({
     if (showPaymentLink) {
       items.push({
         id: "payment-link",
-        label: isPixPayment
-          ? "Copiar link Pix"
-          : isCardPayment
-            ? "Copiar link cartão"
-            : "Copiar link de pagamento",
+        label:
+          busy === "payment"
+            ? "Copiando…"
+            : isPixPayment
+              ? "Copiar link Pix"
+              : isCardPayment
+                ? "Copiar link cartão"
+                : "Copiar link de pagamento",
+        disabled: busy === "payment",
         icon: (
           <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z" />
