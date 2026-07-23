@@ -6,6 +6,10 @@ import { getAppSession } from "@/lib/auth-session";
 import { prisma } from "@/lib/prisma";
 import { describeCartPieceSelection } from "@/lib/cart/format-piece-selections";
 import type { CartPieceSelection } from "@/lib/cart/types";
+import {
+  resolveShippingFeeDisplay,
+  shippingFeeDisplayText,
+} from "@/lib/admin-sale/arranged-delivery";
 import { formatPrice } from "@/lib/format";
 import { ClearCartOnPaymentSuccess } from "@/components/cart/ClearCartOnPaymentSuccess";
 import { PAYMENT_GATEWAY } from "@/lib/orders/constants";
@@ -92,6 +96,12 @@ export default async function PedidoPage({ params, searchParams }: PageProps) {
   const loggedIn = Boolean(session.user);
 
   const subtotal = order.items.reduce((a, it) => a + it.price * it.quantity, 0);
+  const shippingFee = resolveShippingFeeDisplay({
+    shippingServiceName: order.shippingServiceName,
+    deliveryNotes: order.deliveryNotes,
+    shippingAmount: order.shippingAmount,
+  });
+  const shippingFeeLabel = shippingFeeDisplayText(shippingFee, formatPrice);
 
   return (
     <div className="min-h-screen bg-stone-50">
@@ -331,8 +341,14 @@ export default async function PedidoPage({ params, searchParams }: PageProps) {
               {order.shippingServiceName && (
                 <div className="mt-2 flex items-center justify-between border-t border-stone-100 pt-2">
                   <p className="text-xs text-stone-500">{order.shippingServiceName}</p>
-                  <span className={`text-xs font-semibold tabular-nums ${order.shippingAmount === 0 ? "text-emerald-600" : "text-stone-900"}`}>
-                    {order.shippingAmount === 0 ? "Grátis" : formatPrice(order.shippingAmount)}
+                  <span
+                    className={`text-xs font-semibold tabular-nums ${
+                      shippingFee.kind === "free"
+                        ? "text-emerald-600"
+                        : "text-stone-900"
+                    }`}
+                  >
+                    {shippingFeeLabel}
                   </span>
                 </div>
               )}
@@ -420,10 +436,10 @@ export default async function PedidoPage({ params, searchParams }: PageProps) {
               <span>Subtotal</span>
               <span className="tabular-nums">{formatPrice(subtotal)}</span>
             </div>
-            {order.shippingAmount > 0 && (
+            {(shippingFee.kind === "priced" || shippingFee.kind === "to_arrange") && (
               <div className="flex justify-between text-stone-500">
                 <span>Frete{order.shippingServiceName ? ` · ${order.shippingServiceName}` : ""}</span>
-                <span className="tabular-nums">{formatPrice(order.shippingAmount)}</span>
+                <span className="tabular-nums">{shippingFeeLabel}</span>
               </div>
             )}
             <div className="flex justify-between border-t border-stone-200 pt-1.5 font-semibold text-stone-900">

@@ -49,8 +49,8 @@ export function splitArrangedDeliveryNotes(deliveryNotes: string | null | undefi
 }
 
 export function resolveArrangedDeliveryDisplay(input: {
-  shippingServiceName: string | null | undefined;
-  deliveryNotes: string | null | undefined;
+  shippingServiceName?: string | null;
+  deliveryNotes?: string | null;
   shippingAmount: number;
 }): {
   typeLabel: string;
@@ -74,7 +74,43 @@ export function resolveArrangedDeliveryDisplay(input: {
 
   return {
     typeLabel,
-    showPrice: typeLabel === ARRANGED_DELIVERY_LABELS.store_delivery,
+    // Entregador da loja ficou a combinar (como Uber); só mostra preço se houver valor legado.
+    showPrice:
+      typeLabel === ARRANGED_DELIVERY_LABELS.store_delivery &&
+      input.shippingAmount > 0,
     userNotes,
   };
+}
+
+export type ShippingFeeDisplay =
+  | { kind: "to_arrange" }
+  | { kind: "free" }
+  | { kind: "priced"; amount: number };
+
+/** Rótulo de frete para cliente/admin: Entregador da loja e Uber → A combinar. */
+export function resolveShippingFeeDisplay(input: {
+  shippingServiceName?: string | null;
+  deliveryNotes?: string | null;
+  shippingAmount: number;
+}): ShippingFeeDisplay {
+  const { typeLabel } = resolveArrangedDeliveryDisplay(input);
+  if (
+    typeLabel === ARRANGED_DELIVERY_LABELS.store_delivery ||
+    typeLabel === ARRANGED_DELIVERY_LABELS.uber
+  ) {
+    return { kind: "to_arrange" };
+  }
+  if (input.shippingAmount > 0) {
+    return { kind: "priced", amount: input.shippingAmount };
+  }
+  return { kind: "free" };
+}
+
+export function shippingFeeDisplayText(
+  display: ShippingFeeDisplay,
+  formatPrice: (amount: number) => string
+): string {
+  if (display.kind === "to_arrange") return "A combinar";
+  if (display.kind === "free") return "Grátis";
+  return formatPrice(display.amount);
 }

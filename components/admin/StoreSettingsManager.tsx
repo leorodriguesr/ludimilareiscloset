@@ -264,8 +264,8 @@ export function StoreSettingsManager() {
           </div>
           <p className="mt-2 text-xs text-stone-500">
             {storeDeliveryFeeVal > 0
-              ? `Nas vendas avulsas com entregador da loja, o frete será ${formatPrice(storeDeliveryFeeVal)}.`
-              : "Com valor zero, a entrega pelo entregador da loja será gratuita."}
+              ? `Valor salvo (${formatPrice(storeDeliveryFeeVal)}). Por enquanto, entregador da loja nas vendas avulsas fica como frete a combinar (não soma no pedido).`
+              : "Por enquanto, entregador da loja nas vendas avulsas fica como frete a combinar."}
           </p>
         </div>
       </section>

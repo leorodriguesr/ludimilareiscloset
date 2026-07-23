@@ -4,6 +4,10 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import {
+  resolveShippingFeeDisplay,
+  shippingFeeDisplayText,
+} from "@/lib/admin-sale/arranged-delivery";
 import { formatPrice } from "@/lib/format";
 import { describeCartPieceSelection } from "@/lib/cart/format-piece-selections";
 import type { CartPieceSelection } from "@/lib/cart/types";
@@ -588,7 +592,13 @@ function OrderCard({ order }: { order: AccountOrderListItem }) {
                 ) : null}
               </dt>
               <dd className="tabular-nums self-start">
-                {order.shippingAmount > 0 ? formatPrice(order.shippingAmount) : "Grátis"}
+                {shippingFeeDisplayText(
+                  resolveShippingFeeDisplay({
+                    shippingServiceName: order.shippingServiceName,
+                    shippingAmount: order.shippingAmount,
+                  }),
+                  formatPrice
+                )}
               </dd>
             </div>
             <div className="flex justify-between border-t border-stone-200 pt-2 font-semibold text-stone-900">

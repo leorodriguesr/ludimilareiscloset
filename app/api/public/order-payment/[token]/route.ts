@@ -33,6 +33,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       orderNumber: true,
       total: true,
       shippingAmount: true,
+      shippingServiceName: true,
+      deliveryNotes: true,
       status: true,
       paidAt: true,
       items: {
@@ -84,6 +86,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     total: order.total,
     totalFormatted: formatPrice(order.total),
     shippingAmount: order.shippingAmount,
+    shippingServiceName: order.shippingServiceName,
+    deliveryNotes: order.deliveryNotes,
     items,
   };
 

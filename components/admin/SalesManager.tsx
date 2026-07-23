@@ -20,6 +20,8 @@ import {
 } from "@/lib/orders/order-item-display";
 import {
   resolveArrangedDeliveryDisplay,
+  resolveShippingFeeDisplay,
+  shippingFeeDisplayText,
   splitArrangedDeliveryNotes,
   arrangedDeliveryLabelFromServiceName,
 } from "@/lib/admin-sale/arranged-delivery";
@@ -2146,7 +2148,10 @@ function OrderDetailsBody({
                   {arrangedDelivery.typeLabel}
                   {arrangedDelivery.showPrice
                     ? ` · ${order.shippingAmount > 0 ? formatPrice(order.shippingAmount) : "Grátis"}`
-                    : null}
+                    : arrangedDelivery.typeLabel === "Entregador da loja" ||
+                        arrangedDelivery.typeLabel === "Uber"
+                      ? " · A combinar"
+                      : null}
                 </p>
               ) : shippingMethod ? (
                 <p className="mt-2 text-xs text-stone-500">
@@ -2194,7 +2199,14 @@ function OrderDetailsBody({
           ) : null}
           <ReceiptLine
             label="Frete"
-            value={order.shippingAmount > 0 ? formatPrice(order.shippingAmount) : "Grátis"}
+            value={shippingFeeDisplayText(
+              resolveShippingFeeDisplay({
+                shippingServiceName: order.shippingServiceName,
+                deliveryNotes: order.deliveryNotes,
+                shippingAmount: order.shippingAmount,
+              }),
+              formatPrice
+            )}
           />
           {(order.orderDiscountAmount ?? 0) > 0 ? (
             <ReceiptLine label="Desc. geral" value={`-${formatPrice(order.orderDiscountAmount!)}`} />

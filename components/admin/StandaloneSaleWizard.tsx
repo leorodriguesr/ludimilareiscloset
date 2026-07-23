@@ -814,7 +814,6 @@ export function StandaloneSaleWizard({
     [lines]
   );
 
-  const storeDeliveryFee = Math.max(0, Number(settings?.storeDeliveryFee ?? 0) || 0);
 
   const merchandiseTotal = useMemo(() => {
     const preview = paymentMethod
@@ -844,9 +843,7 @@ export function StandaloneSaleWizard({
 
   const shippingAmount = useMemo(() => {
     if (fulfillmentType === "ARRANGED") {
-      if (arrangedMode === "store_delivery") {
-        return isFreeShipping ? 0 : storeDeliveryFee;
-      }
+      // Entregador da loja / Uber: a combinar; retirada: grátis.
       return 0;
     }
     const opt = shippingOptions.find((o) => o.id === selectedShippingId);
@@ -855,8 +852,6 @@ export function StandaloneSaleWizard({
     return opt.price;
   }, [
     fulfillmentType,
-    arrangedMode,
-    storeDeliveryFee,
     shippingOptions,
     selectedShippingId,
     isFreeShipping,
@@ -866,11 +861,8 @@ export function StandaloneSaleWizard({
   const shippingLabel = useMemo(() => {
     if (fulfillmentType === "ARRANGED") {
       if (!arrangedMode) return "A definir";
-      if (arrangedMode === "store_delivery") {
-        if (isFreeShipping || storeDeliveryFee <= 0) return "Grátis";
-        return formatPrice(storeDeliveryFee);
-      }
       if (arrangedMode === "pickup") return "Grátis";
+      // store_delivery e uber
       return "A combinar";
     }
     const opt = shippingOptions.find((o) => o.id === selectedShippingId);
@@ -880,7 +872,6 @@ export function StandaloneSaleWizard({
   }, [
     fulfillmentType,
     arrangedMode,
-    storeDeliveryFee,
     shippingOptions,
     selectedShippingId,
     isFreeShipping,
@@ -1816,11 +1807,7 @@ export function StandaloneSaleWizard({
                         checked={arrangedMode === "store_delivery"}
                         onChange={() => setArrangedMode("store_delivery")}
                         label="Entregador da loja"
-                        description={
-                          isFreeShipping || storeDeliveryFee <= 0
-                            ? "Frete grátis"
-                            : `Frete: ${formatPrice(storeDeliveryFee)}`
-                        }
+                        description="Frete a combinar"
                       />
                       <CheckboxOption
                         checked={arrangedMode === "pickup"}
@@ -1831,6 +1818,7 @@ export function StandaloneSaleWizard({
                         checked={arrangedMode === "uber"}
                         onChange={() => setArrangedMode("uber")}
                         label="Uber"
+                        description="Frete a combinar"
                       />
                     </div>
                   </div>

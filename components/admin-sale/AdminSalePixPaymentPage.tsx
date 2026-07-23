@@ -2,6 +2,10 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
+import {
+  resolveShippingFeeDisplay,
+  shippingFeeDisplayText,
+} from "@/lib/admin-sale/arranged-delivery";
 import { formatPrice } from "@/lib/format";
 
 type PaymentPiece = {
@@ -25,6 +29,8 @@ type PendingPayment = {
   orderNumber: number | null;
   total: number;
   shippingAmount: number;
+  shippingServiceName?: string | null;
+  deliveryNotes?: string | null;
   items: PaymentItem[];
   pixCode: string;
   pixQrBase64: string | null;
@@ -37,6 +43,8 @@ type PaidPayment = {
   orderNumber: number | null;
   total: number;
   shippingAmount: number;
+  shippingServiceName?: string | null;
+  deliveryNotes?: string | null;
   items: PaymentItem[];
 };
 
@@ -126,6 +134,8 @@ export function AdminSalePixPaymentPage({ token }: Props) {
             orderNumber: pending.orderNumber,
             total: pending.total,
             shippingAmount: pending.shippingAmount,
+            shippingServiceName: pending.shippingServiceName,
+            deliveryNotes: pending.deliveryNotes,
             items: pending.items,
           });
           setPending(null);
@@ -381,9 +391,17 @@ function OrderItemsCard({
     orderNumber: number | null;
     total: number;
     shippingAmount: number;
+    shippingServiceName?: string | null;
+    deliveryNotes?: string | null;
     items: PaymentItem[];
   };
 }) {
+  const shippingFee = resolveShippingFeeDisplay({
+    shippingServiceName: data.shippingServiceName,
+    deliveryNotes: data.deliveryNotes,
+    shippingAmount: data.shippingAmount,
+  });
+  const shippingFeeLabel = shippingFeeDisplayText(shippingFee, formatPrice);
   return (
     <div className="rounded-2xl border border-stone-200/80 bg-white p-4 shadow-[0_8px_30px_-20px_rgba(28,25,23,0.25)]">
       <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
@@ -444,10 +462,10 @@ function OrderItemsCard({
         })}
       </ul>
       <div className="mt-4 space-y-1 border-t border-stone-100 pt-3 text-sm">
-        {data.shippingAmount > 0 ? (
+        {shippingFee.kind === "priced" || shippingFee.kind === "to_arrange" ? (
           <div className="flex justify-between text-stone-500">
             <span>Frete</span>
-            <span className="tabular-nums">{formatPrice(data.shippingAmount)}</span>
+            <span className="tabular-nums">{shippingFeeLabel}</span>
           </div>
         ) : null}
         <div className="flex justify-between font-semibold text-stone-900">

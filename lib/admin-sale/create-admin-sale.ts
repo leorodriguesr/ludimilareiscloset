@@ -26,7 +26,6 @@ import {
   customerContactAddressValidationError,
   customerNamePhoneValidationError,
 } from "@/lib/admin-sale/customer-form-complete";
-import { getStoreDeliveryFee } from "@/lib/admin-sale/store-delivery-fee";
 import { getFulfillmentStrategy } from "@/lib/fulfillment/fulfillment-types";
 import { initiateOrderPayment } from "@/lib/order/payment/initiate-payment";
 import { ORDER_STATUS, type PaymentMethod } from "@/lib/orders/constants";
@@ -188,10 +187,8 @@ async function resolveShipping(input: CreateAdminSaleInput) {
     };
   }
 
-  const arrangedAmount =
-    input.arrangedMode === "store_delivery"
-      ? await getStoreDeliveryFee()
-      : Math.max(0, Number(input.arrangedShippingAmount ?? 0));
+  // Entregador da loja / Uber: frete a combinar (não soma no pedido).
+  const arrangedAmount = Math.max(0, Number(input.arrangedShippingAmount ?? 0));
   if (!Number.isFinite(arrangedAmount)) {
     throw new Error("Valor da entrega inválido.");
   }
@@ -259,14 +256,12 @@ export async function createAdminSale(
   ).isFree;
 
   let chargedShippingAmount = shipping.shippingAmount;
-  if (qualifiesForFreeShipping) {
-    if (input.fulfillmentType === FulfillmentType.CARRIER) {
-      if (shipping.isCheapestCarrierOption) {
-        chargedShippingAmount = 0;
-      }
-    } else if (input.arrangedMode === "store_delivery") {
-      chargedShippingAmount = 0;
-    }
+  if (
+    qualifiesForFreeShipping &&
+    input.fulfillmentType === FulfillmentType.CARRIER &&
+    shipping.isCheapestCarrierOption
+  ) {
+    chargedShippingAmount = 0;
   }
 
   let pricing;
