@@ -71,6 +71,8 @@ export type LabelResult = {
   /** Pode ser string vazia se o PDF ainda não estiver disponível após checkout. */
   labelUrl: string;
   superfreteStatus: string;
+  /** Preenchido quando o envio foi criado mas o pagamento (checkout) falhou. */
+  checkoutError?: string;
 };
 
 export type SuperfreteOrderInfo = {
@@ -116,6 +118,22 @@ export async function printSuperfreteLabel(shipmentId: string): Promise<string> 
     );
   }
   return url;
+}
+
+/** Tenta pagar/liberar etiquetas com saldo da carteira SuperFrete. */
+export async function checkoutSuperfreteOrders(shipmentIds: string[]): Promise<void> {
+  if (shipmentIds.length === 0) return;
+  console.debug("[SuperFrete label] POST /api/v0/checkout", { orders: shipmentIds });
+  await superfreteRequest("POST", "/api/v0/checkout", { orders: shipmentIds });
+}
+
+async function resolveStatusAfterCart(shipmentId: string, fallback: string): Promise<string> {
+  try {
+    const info = await fetchSuperfreteOrderInfo(shipmentId);
+    return info.status || fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export async function createSuperfreteLabelForOrder(input: LabelInput): Promise<LabelResult> {
@@ -168,14 +186,29 @@ export async function createSuperfreteLabelForOrder(input: LabelInput): Promise<
     );
   }
 
-  console.debug("[SuperFrete label] POST /api/v0/checkout", { orders: [shipmentId] });
-  await superfreteRequest("POST", "/api/v0/checkout", { orders: [shipmentId] });
+  try {
+    await checkoutSuperfreteOrders([shipmentId]);
+  } catch (e) {
+    // Carrinho já criou o envio na SuperFrete — persistimos como pending para sync depois.
+    const checkoutError =
+      e instanceof Error ? e.message : "Falha no checkout SuperFrete.";
+    console.warn(
+      `[SuperFrete label] checkout falhou para ${shipmentId}; mantendo pending:`,
+      checkoutError
+    );
+    return {
+      shipmentId,
+      labelUrl: "",
+      superfreteStatus: await resolveStatusAfterCart(shipmentId, "pending"),
+      checkoutError,
+    };
+  }
 
   // PDF via /api/admin/orders/:id/label/pdf (tag/print sob demanda).
   return {
     shipmentId,
     labelUrl: "",
-    superfreteStatus: "released",
+    superfreteStatus: await resolveStatusAfterCart(shipmentId, "released"),
   };
 }
 

@@ -3,6 +3,7 @@ import { buildCartShippingPackage } from "@/lib/shipping/cart-package";
 import { packageToSuperFreteKgCm } from "@/lib/shipping/superfrete";
 import {
   cancelSuperfreteOrder,
+  checkoutSuperfreteOrders,
   createSuperfreteLabelForOrder,
   fetchSuperfreteOrderInfo,
   fetchSuperfreteOrderInfoWithTrackingPoll,
@@ -310,6 +311,7 @@ export async function generateOrderLabel(orderId: string) {
   }
 
   let alreadyExists = false;
+  let checkoutError: string | undefined;
 
   if (order.superfreteShipmentId && order.labelUrl) {
     alreadyExists = true;
@@ -319,12 +321,25 @@ export async function generateOrderLabel(orderId: string) {
       superfreteStatus: order.superfreteStatus ?? "released",
       tracking: null,
       alreadyExists: true,
+      paymentPending: false,
     };
   } else if (order.superfreteShipmentId && !order.labelUrl) {
     alreadyExists = true;
+    // Reaproveita o envio já criado (ex.: pending por saldo) e tenta checkout de novo.
+    try {
+      await checkoutSuperfreteOrders([order.superfreteShipmentId]);
+    } catch (e) {
+      checkoutError =
+        e instanceof Error ? e.message : "Falha no checkout SuperFrete.";
+      console.warn(
+        `[generateOrderLabel] checkout retry falhou para ${order.superfreteShipmentId}:`,
+        checkoutError
+      );
+    }
   } else {
     const input = buildLabelInput(order);
     const result = await createSuperfreteLabelForOrder(input);
+    checkoutError = result.checkoutError;
 
     await prisma.order.update({
       where: { id: orderId },
@@ -348,6 +363,7 @@ export async function generateOrderLabel(orderId: string) {
     info = await syncOrderShipmentFromSuperfrete(orderId, {
       pollTracking: true,
       maxWaitMs: 12_000,
+      tryCheckout: !checkoutError,
     });
   } catch (e) {
     console.warn(
@@ -368,18 +384,35 @@ export async function generateOrderLabel(orderId: string) {
 
   await clearLabelAutoGenerateError(orderId);
 
+  const superfreteStatus =
+    info?.status ?? updated?.superfreteStatus ?? "released";
+  const paymentPending = superfreteStatus === "pending" || Boolean(checkoutError);
+
   return {
     shipmentId: updated?.superfreteShipmentId ?? "",
     labelUrl: updated?.labelUrl ?? info?.labelUrl ?? "",
-    superfreteStatus: info?.status ?? updated?.superfreteStatus ?? "released",
+    superfreteStatus,
     tracking: info?.tracking ?? updated?.trackingCode ?? null,
     alreadyExists,
+    paymentPending,
+    ...(checkoutError && paymentPending
+      ? {
+          message:
+            "Etiqueta criada na SuperFrete, mas falta pagar (saldo insuficiente). Após pagar lá, use Sincronizar status.",
+          checkoutError,
+        }
+      : {}),
   };
 }
 
 export async function syncOrderShipmentFromSuperfrete(
   orderId: string,
-  options?: { pollTracking?: boolean; maxWaitMs?: number }
+  options?: {
+    pollTracking?: boolean;
+    maxWaitMs?: number;
+    /** Tenta checkout se a SuperFrete ainda estiver pending (saldo). Default: true. */
+    tryCheckout?: boolean;
+  }
 ) {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
@@ -397,12 +430,28 @@ export async function syncOrderShipmentFromSuperfrete(
     );
   }
 
-  const info = options?.pollTracking
-    ? await fetchSuperfreteOrderInfoWithTrackingPoll(order.superfreteShipmentId, {
-        maxWaitMs: options.maxWaitMs ?? 12_000,
-        intervalMs: 1500,
-      })
-    : await fetchSuperfreteOrderInfo(order.superfreteShipmentId);
+  const shipmentId = order.superfreteShipmentId;
+  let info = await fetchSuperfreteOrderInfo(shipmentId);
+
+  if (options?.tryCheckout !== false && info.status === "pending") {
+    try {
+      await checkoutSuperfreteOrders([shipmentId]);
+      info = await fetchSuperfreteOrderInfo(shipmentId);
+    } catch (e) {
+      console.warn(
+        `[syncOrderShipmentFromSuperfrete] checkout pending falhou para ${shipmentId}:`,
+        e instanceof Error ? e.message : e
+      );
+    }
+  }
+
+  if (options?.pollTracking && !info.tracking && info.status !== "pending") {
+    info = await fetchSuperfreteOrderInfoWithTrackingPoll(shipmentId, {
+      maxWaitMs: options.maxWaitMs ?? 12_000,
+      intervalMs: 1500,
+    });
+  }
+
   const mappedStatus = mapSuperfreteStatusToShippingStatus(info.status);
   // Etiqueta ativa na SuperFrete não pode permanecer "cancelled" no pedido.
   const nextShippingStatus =
@@ -411,7 +460,22 @@ export async function syncOrderShipmentFromSuperfrete(
       ? "packed"
       : null);
 
-  const labelUrl = order.labelUrl || info.labelUrl || null;
+  let labelUrl = order.labelUrl || info.labelUrl || null;
+  if (
+    !labelUrl &&
+    info.status !== "pending" &&
+    info.status !== "cancelled" &&
+    info.status !== "unknown"
+  ) {
+    try {
+      labelUrl = await printSuperfreteLabel(shipmentId);
+    } catch (e) {
+      console.warn(
+        `[syncOrderShipmentFromSuperfrete] print falhou para ${shipmentId}:`,
+        e instanceof Error ? e.message : e
+      );
+    }
+  }
 
   await prisma.order.update({
     where: { id: orderId },
@@ -423,9 +487,9 @@ export async function syncOrderShipmentFromSuperfrete(
     },
   });
 
-  await persistSuperfreteOrderMeta(orderId, info);
+  await persistSuperfreteOrderMeta(orderId, { ...info, labelUrl });
 
-  return info;
+  return { ...info, labelUrl };
 }
 
 export async function cancelOrderLabel(orderId: string, reason?: string) {

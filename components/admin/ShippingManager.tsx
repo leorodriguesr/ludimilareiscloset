@@ -1227,15 +1227,29 @@ function useShipmentActions(order: ShipmentOrder, onRefresh: () => void) {
       });
       const data = (await res.json()) as {
         error?: string;
+        message?: string;
         labelUrl?: string;
         shipmentId?: string;
         tracking?: string | null;
+        paymentPending?: boolean;
+        superfreteStatus?: string;
+        status?: string;
       };
       if (!res.ok) {
         setError(data.error ?? "Erro na operação.");
         return false;
       }
-      if (opts?.openPdf !== false && data.shipmentId) {
+      const paymentPending =
+        data.paymentPending === true ||
+        data.superfreteStatus === "pending" ||
+        data.status === "pending";
+      if (paymentPending) {
+        setError(
+          data.message ??
+            "Etiqueta ainda aguarda pagamento na SuperFrete. Pague lá e sincronize de novo."
+        );
+      }
+      if (opts?.openPdf !== false && data.shipmentId && !paymentPending) {
         window.open(`/api/admin/orders/${order.id}/label/pdf`, "_blank");
       }
       if (key === "cancel") {
@@ -1246,7 +1260,7 @@ function useShipmentActions(order: ShipmentOrder, onRefresh: () => void) {
         setAwaitingTracking(false);
       }
       onRefresh();
-      if (key === "label" && !data.tracking) {
+      if (key === "label" && !data.tracking && !paymentPending) {
         setAwaitingTracking(true);
         void pollTrackingUntilReady();
       }
@@ -1422,6 +1436,10 @@ function ShipmentRowActionsMenu({
     }
 
     if (caps.canGenerateLabel) {
+      const pendingPayment =
+        Boolean(order.superfreteShipmentId) &&
+        !order.labelUrl &&
+        order.superfreteStatus === "pending";
       items.push({
         id: "label",
         label:
@@ -1429,7 +1447,9 @@ function ShipmentRowActionsMenu({
             ? "Gerando…"
             : order.shippingStatus === "cancelled"
               ? "Gerar nova etiqueta"
-              : "Gerar etiqueta",
+              : pendingPayment
+                ? "Tentar pagar etiqueta"
+                : "Gerar etiqueta",
         separatorBefore: items.length > 0,
         disabled: busy === "label",
         icon: (
@@ -1553,6 +1573,7 @@ function ShipmentRowActionsMenu({
     order.labelUrl,
     order.shippingStatus,
     order.superfreteShipmentId,
+    order.superfreteStatus,
     runAction,
   ]);
 
@@ -1728,6 +1749,10 @@ function ShipmentRow({
             </a>
             <CopyTrackingLinkButton code={trackingCode} />
           </div>
+        ) : order.superfreteStatus === "pending" && order.superfreteShipmentId ? (
+          <span className="text-xs font-medium text-amber-700">
+            Aguardando pagamento (SF)
+          </span>
         ) : order.labelUrl || order.superfreteShipmentId || awaitingTracking ? (
           <span className="text-xs text-stone-400">Aguardando…</span>
         ) : (
