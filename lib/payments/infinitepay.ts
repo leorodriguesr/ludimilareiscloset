@@ -11,7 +11,7 @@ function apiBase(): string {
 }
 
 export function getInfinitePayHandle(): string {
-  const h = process.env.INFINITEPAY_HANDLE?.trim();
+  const h = process.env.INFINITEPAY_HANDLE?.trim().replace(/^\$+/, "");
   if (!h) {
     throw new Error("INFINITEPAY_HANDLE não configurado.");
   }
@@ -80,6 +80,35 @@ function gatewayReferenceFromCheckoutUrl(url: string): string | null {
   return null;
 }
 
+function checkoutUrlUsesLegacySlugOnly(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      Boolean(parsed.searchParams.get("slug")?.trim()) &&
+      !parsed.searchParams.get("lenc")?.trim()
+    );
+  } catch {
+    return true;
+  }
+}
+
+function validateInfinitePayItems(items: InfinitePayLinkItem[]): void {
+  if (items.length === 0) {
+    throw new Error("O pagamento precisa ter ao menos um item.");
+  }
+  for (const item of items) {
+    if (
+      !Number.isInteger(item.quantity) ||
+      item.quantity < 1 ||
+      !Number.isInteger(item.price) ||
+      item.price < 1 ||
+      !item.description.trim()
+    ) {
+      throw new Error("Há itens inválidos para o checkout da InfinitePay.");
+    }
+  }
+}
+
 /**
  * Referência persistida da tentativa InfinitePay.
  * Preferimos a URL completa do checkout — remontar com `?slug=` gera
@@ -130,15 +159,11 @@ export async function createInfinitePayCheckoutLink(
   input: CreateInfinitePayLinkInput
 ): Promise<CreateInfinitePayLinkResult> {
   const handle = getInfinitePayHandle();
-  /** Documentação alterna `items` e `itens`; variável de ambiente força a chave. */
-  const itemsPayloadKey =
-    process.env.INFINITEPAY_ITEMS_KEY?.trim().toLowerCase() === "itens"
-      ? "itens"
-      : "items";
+  validateInfinitePayItems(input.items);
 
   const body: Record<string, unknown> = {
     handle,
-    [itemsPayloadKey]: input.items,
+    items: input.items,
     order_nsu: input.orderNsu,
     redirect_url: input.redirectUrl,
     webhook_url: input.webhookUrl,
@@ -181,6 +206,12 @@ export async function createInfinitePayCheckoutLink(
     console.error("[InfinitePay] resposta sem URL", data);
     throw new Error("Resposta inválida da InfinitePay.");
   }
+  if (checkoutUrlUsesLegacySlugOnly(checkoutUrl)) {
+    console.error("[InfinitePay] checkout retornado apenas com slug", checkoutUrl);
+    throw new Error(
+      "A InfinitePay retornou um link de pagamento inválido. Tente novamente."
+    );
+  }
 
   return {
     checkoutUrl,
@@ -216,7 +247,9 @@ export function isReusableInfinitePayCheckoutReference(
 ): boolean {
   const trimmed = reference?.trim();
   if (!trimmed) return false;
-  if (/^https?:\/\//i.test(trimmed)) return true;
+  if (/^https?:\/\//i.test(trimmed)) {
+    return !checkoutUrlUsesLegacySlugOnly(trimmed);
+  }
   // Token lenc (checkout). Slug curto de fatura NÃO abre o checkout.
   return isInfinitePayLencToken(trimmed);
 }

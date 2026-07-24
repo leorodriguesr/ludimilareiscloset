@@ -121,6 +121,29 @@ async function loadFreeShippingSettings() {
   };
 }
 
+async function rollbackAdminSaleAfterPaymentFailure(
+  orderId: string
+): Promise<boolean> {
+  try {
+    const deleted = await prisma.order.deleteMany({
+      where: {
+        id: orderId,
+        orderSource: OrderSource.ADMIN_SALE,
+        status: ORDER_STATUS.PENDING_PAYMENT,
+        paidAt: null,
+      },
+    });
+    return deleted.count > 0;
+  } catch (error) {
+    console.error(
+      "[createAdminSale] falha ao remover venda sem cobrança",
+      orderId,
+      error
+    );
+    return false;
+  }
+}
+
 async function resolveShipping(input: CreateAdminSaleInput) {
   const strategy = getFulfillmentStrategy(input.fulfillmentType);
 
@@ -503,6 +526,16 @@ export async function createAdminSale(
       paymentMethod: input.paymentMethod,
     });
     if (!pay.ok) {
+      if (pay.canRollbackOrder) {
+        const rolledBack = await rollbackAdminSaleAfterPaymentFailure(created.id);
+        if (!rolledBack) {
+          return {
+            ok: false,
+            error:
+              "O pagamento não foi criado, mas não foi possível desfazer a venda automaticamente. Atualize a listagem antes de tentar novamente.",
+          };
+        }
+      }
       return { ok: false, error: pay.error };
     }
     if (pay.type === "pix") {

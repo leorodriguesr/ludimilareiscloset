@@ -1,5 +1,4 @@
 import {
-  PAYMENT_GATEWAY,
   PAYMENT_METHOD,
   type PaymentMethod,
 } from "@/lib/orders/constants";
@@ -38,7 +37,12 @@ export type InitiatePaymentSuccess =
 
 export type InitiatePaymentResult =
   | InitiatePaymentSuccess
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      error: string;
+      /** Seguro remover o pedido recém-criado: nenhuma cobrança utilizável existe. */
+      canRollbackOrder: boolean;
+    };
 
 function guestDisplayName(email: string | null | undefined): string {
   const local = email?.split("@")[0]?.trim();
@@ -64,13 +68,42 @@ async function loadOrderForPayment(orderId: string) {
   });
 }
 
+async function recordFailedPaymentAttempt(
+  attemptId: string,
+  failureReason: string
+): Promise<void> {
+  try {
+    await failPaymentAttempt({ attemptId, failureReason });
+  } catch (error) {
+    console.error(
+      "[initiateOrderPayment] falha ao registrar tentativa",
+      attemptId,
+      error
+    );
+  }
+}
+
 export async function initiateOrderPayment(input: {
   orderId: string;
   paymentMethod: PaymentMethod;
 }): Promise<InitiatePaymentResult> {
-  const order = await loadOrderForPayment(input.orderId);
+  let order: Awaited<ReturnType<typeof loadOrderForPayment>>;
+  try {
+    order = await loadOrderForPayment(input.orderId);
+  } catch (error) {
+    console.error("[initiateOrderPayment] carregar pedido", error);
+    return {
+      ok: false,
+      error: "Não foi possível iniciar o pagamento. Tente novamente.",
+      canRollbackOrder: true,
+    };
+  }
   if (!order) {
-    return { ok: false, error: "Pedido não encontrado." };
+    return {
+      ok: false,
+      error: "Pedido não encontrado.",
+      canRollbackOrder: true,
+    };
   }
 
   let attemptId: string;
@@ -85,12 +118,25 @@ export async function initiateOrderPayment(input: {
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";
     if (msg === "ORDER_EXPIRED") {
-      return { ok: false, error: "Este pedido expirou." };
+      return {
+        ok: false,
+        error: "Este pedido expirou.",
+        canRollbackOrder: true,
+      };
     }
     if (msg === "ORDER_NOT_PENDING") {
-      return { ok: false, error: "Este pedido não pode mais ser pago." };
+      return {
+        ok: false,
+        error: "Este pedido não pode mais ser pago.",
+        canRollbackOrder: true,
+      };
     }
-    throw e;
+    console.error("[initiateOrderPayment] criar tentativa", e);
+    return {
+      ok: false,
+      error: "Não foi possível iniciar o pagamento. Tente novamente.",
+      canRollbackOrder: true,
+    };
   }
 
   if (input.paymentMethod === PAYMENT_METHOD.PIX) {
@@ -103,6 +149,7 @@ async function processPix(
   order: NonNullable<Awaited<ReturnType<typeof loadOrderForPayment>>>,
   attemptId: string
 ): Promise<InitiatePaymentResult> {
+  let externalPaymentCreated = false;
   try {
     const pix = await createPixPayment({
       orderId: order.id,
@@ -113,6 +160,7 @@ async function processPix(
       payerName: order.recipientName ?? guestDisplayName(order.email),
       payerCpf: order.cpf ?? undefined,
     });
+    externalPaymentCreated = true;
 
     const activated = await activatePaymentAttempt({
       attemptId,
@@ -124,6 +172,7 @@ async function processPix(
       return {
         ok: false,
         error: "Não foi possível iniciar o pagamento. Tente novamente.",
+        canRollbackOrder: false,
       };
     }
 
@@ -140,8 +189,12 @@ async function processPix(
     console.error("[initiateOrderPayment] Mercado Pago PIX", e);
     const msg =
       e instanceof Error ? e.message : "Não foi possível gerar o PIX.";
-    await failPaymentAttempt({ attemptId, failureReason: msg });
-    return { ok: false, error: msg };
+    await recordFailedPaymentAttempt(attemptId, msg);
+    return {
+      ok: false,
+      error: msg,
+      canRollbackOrder: !externalPaymentCreated,
+    };
   }
 }
 
@@ -154,13 +207,14 @@ async function processCard(
     items = orderToInfinitePayItems(order);
   } catch (e) {
     console.error("[initiateOrderPayment] itens InfinitePay", e);
-    await failPaymentAttempt({
+    await recordFailedPaymentAttempt(
       attemptId,
-      failureReason: "Erro ao montar itens do pagamento.",
-    });
+      "Erro ao montar itens do pagamento."
+    );
     return {
       ok: false,
       error: "Erro ao montar o pagamento. Entre em contato com o suporte.",
+      canRollbackOrder: true,
     };
   }
 
@@ -168,6 +222,7 @@ async function processCard(
 
   const destDigits = (order.destinationCep ?? "").replace(/\D/g, "");
 
+  let externalPaymentCreated = false;
   try {
     const { checkoutUrl, slug: invoiceSlug } =
       await createInfinitePayCheckoutLink({
@@ -196,13 +251,18 @@ async function processCard(
             }
           : {}),
       });
+    externalPaymentCreated = true;
 
     if (!invoiceSlug) {
-      await failPaymentAttempt({
+      await recordFailedPaymentAttempt(
         attemptId,
-        failureReason: "InfinitePay não retornou slug da fatura.",
-      });
-      return { ok: false, error: "Resposta inválida da InfinitePay." };
+        "InfinitePay não retornou slug da fatura."
+      );
+      return {
+        ok: false,
+        error: "Resposta inválida da InfinitePay.",
+        canRollbackOrder: false,
+      };
     }
 
     const activated = await activatePaymentAttempt({
@@ -214,6 +274,7 @@ async function processCard(
       return {
         ok: false,
         error: "Não foi possível iniciar o pagamento. Tente novamente.",
+        canRollbackOrder: false,
       };
     }
 
@@ -227,7 +288,11 @@ async function processCard(
     console.error("[initiateOrderPayment] InfinitePay", e);
     const msg =
       e instanceof Error ? e.message : "Não foi possível iniciar o pagamento.";
-    await failPaymentAttempt({ attemptId, failureReason: msg });
-    return { ok: false, error: msg };
+    await recordFailedPaymentAttempt(attemptId, msg);
+    return {
+      ok: false,
+      error: msg,
+      canRollbackOrder: !externalPaymentCreated,
+    };
   }
 }
