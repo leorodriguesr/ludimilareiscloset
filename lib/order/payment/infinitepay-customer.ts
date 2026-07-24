@@ -7,11 +7,17 @@ function guestDisplayName(email: string | null | undefined): string {
   return "Cliente";
 }
 
-function normalizePhone(phone: string): string | undefined {
+export function normalizeInfinitePayPhone(
+  phone: string
+): string | undefined {
   const d = phone.replace(/\D/g, "");
-  if (d.length < 10) return undefined;
-  if (d.startsWith("55")) return `+${d}`;
-  return `+55${d}`;
+  // Telefone nacional: DDD + número (10 ou 11 dígitos), mesmo se o DDD for 55.
+  if (d.length === 10 || d.length === 11) return `+55${d}`;
+  // Telefone já internacionalizado: 55 + DDD + número.
+  if ((d.length === 12 || d.length === 13) && d.startsWith("55")) {
+    return `+${d}`;
+  }
+  return undefined;
 }
 
 function paymentGatewayEmail(email: string | null | undefined): string {
@@ -33,7 +39,9 @@ export function buildInfinitePayCustomer(order: {
     return undefined;
   }
 
-  const phone = order.phone ? normalizePhone(order.phone) : undefined;
+  const phone = order.phone
+    ? normalizeInfinitePayPhone(order.phone)
+    : undefined;
   return {
     name: (order.recipientName ?? guestDisplayName(order.email)).slice(0, 120),
     email: paymentGatewayEmail(order.email),

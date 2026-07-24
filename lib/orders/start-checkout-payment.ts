@@ -22,6 +22,7 @@ import {
   infinitePayOrderRedirectUrl,
   infinitePayWebhookUrl,
 } from "@/lib/payments/infinitepay";
+import { normalizeInfinitePayPhone } from "@/lib/order/payment/infinitepay-customer";
 import { orderToInfinitePayItems } from "@/lib/payments/order-to-infinitepay-items";
 import { createPixPayment } from "@/lib/payments/create-pix-payment";
 import { isLocalPaymentCallbackBaseUrl } from "@/lib/site-url";
@@ -64,13 +65,6 @@ function guestDisplayName(email: string): string {
   const local = email.split("@")[0]?.trim();
   if (local && local.length > 0) return local.slice(0, 80);
   return "Cliente";
-}
-
-function normalizePhone(phone: string): string | undefined {
-  const d = phone.replace(/\D/g, "");
-  if (d.length < 10) return undefined;
-  if (d.startsWith("55")) return `+${d}`;
-  return `+55${d}`;
 }
 
 export async function startCheckoutPayment(
@@ -231,7 +225,7 @@ async function processCardPayment(
   }
 
   const checkoutPhone = input.contact?.phone
-    ? normalizePhone(input.contact.phone)
+    ? normalizeInfinitePayPhone(input.contact.phone)
     : undefined;
 
   let customer: { name: string; email: string; phone_number?: string };
@@ -241,7 +235,8 @@ async function processCardPayment(
       where: { id: session.user.userId },
       select: { name: true, phone: true },
     });
-    const phone = checkoutPhone ?? (u ? normalizePhone(u.phone) : undefined);
+    const phone =
+      checkoutPhone ?? (u ? normalizeInfinitePayPhone(u.phone) : undefined);
     const name = (
       input.contact?.name?.trim() || u?.name || guestDisplayName(input.email)
     ).slice(0, 120);
