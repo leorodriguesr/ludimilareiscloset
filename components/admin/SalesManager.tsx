@@ -3,10 +3,18 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
+import { PieceSelector } from "@/components/product/PieceSelector";
+import { CUSTOM_SET_SIZES } from "@/components/admin/CustomSaleSetsForm";
 import { formatPrice } from "@/lib/format";
 import type { CartPieceSelection } from "@/lib/cart/types";
 import type { Product } from "@/lib/types";
 import { StandaloneSaleWizard } from "@/components/admin/StandaloneSaleWizard";
+import {
+  buildCartPieceSelections,
+  pieceSelectionMapFromCart,
+  pieceSelectionsAreComplete,
+  type PieceSelectionMap,
+} from "@/lib/product-piece-selection";
 import {
   isPendingAdminSaleCustomer,
   orderCustomerDisplayEmail,
@@ -1591,7 +1599,124 @@ function OrderRowActionsMenu({
 
 /* ─── Detalhes do pedido (drawer) ─────────────────────────────────── */
 
-function OrderProductsCards({ order }: { order: AdminOrder }) {
+function canEditOrderItemPieces(order: AdminOrder): boolean {
+  if (order.status === "cancelled" || order.status === "expired") return false;
+  if (order.labelUrl || order.superfreteShipmentId) return false;
+  if (order.shippingStatus === "shipped" || order.shippingStatus === "delivered") {
+    return false;
+  }
+  return order.status === "pending_payment" || order.status === "paid";
+}
+
+function OrderProductsCards({
+  order,
+  products,
+  ensureProducts,
+  onRefresh,
+}: {
+  order: AdminOrder;
+  products: Product[];
+  ensureProducts: () => Promise<Product[]>;
+  onRefresh: () => void;
+}) {
+  const editable = canEditOrderItemPieces(order);
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [selections, setSelections] = useState<PieceSelectionMap>({});
+  const [editProduct, setEditProduct] = useState<Product | null>(null);
+  const [customDraft, setCustomDraft] = useState<CartPieceSelection[]>([]);
+  const [savingPieces, setSavingPieces] = useState(false);
+  const [piecesError, setPiecesError] = useState<string | null>(null);
+  const [loadingProduct, setLoadingProduct] = useState(false);
+
+  async function startEditCatalogItem(item: OrderItem) {
+    if (!item.productId || !editable) return;
+    setPiecesError(null);
+    setLoadingProduct(true);
+    try {
+      const list = products.length > 0 ? products : await ensureProducts();
+      const product = list.find((p) => p.id === item.productId) ?? null;
+      if (!product || product.pieces.length === 0) {
+        setPiecesError("Produto sem opções de cor/tamanho no catálogo.");
+        return;
+      }
+      const current = parsePieces(item.pieceSelectionsJson);
+      setEditProduct(product);
+      setCustomDraft([]);
+      setSelections(pieceSelectionMapFromCart(product.pieces, current));
+      setEditingItemId(item.id);
+    } finally {
+      setLoadingProduct(false);
+    }
+  }
+
+  function startEditCustomItem(item: OrderItem) {
+    if (item.productId || !editable) return;
+    const current = parsePieces(item.pieceSelectionsJson);
+    if (current.length === 0) {
+      setPiecesError("Este item não tem cor/tamanho para editar.");
+      return;
+    }
+    setPiecesError(null);
+    setEditProduct(null);
+    setSelections({});
+    setCustomDraft(current.map((p) => ({ ...p })));
+    setEditingItemId(item.id);
+  }
+
+  function cancelEditItem() {
+    setEditingItemId(null);
+    setEditProduct(null);
+    setCustomDraft([]);
+    setSelections({});
+    setPiecesError(null);
+  }
+
+  async function persistPieceSelections(
+    item: OrderItem,
+    pieceSelections: CartPieceSelection[]
+  ) {
+    setSavingPieces(true);
+    setPiecesError(null);
+    try {
+      const res = await fetch(
+        `/api/admin/orders/${order.id}/items/${item.id}/piece-selections`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pieceSelections }),
+        }
+      );
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        setPiecesError(data.error ?? "Erro ao salvar cor/tamanho.");
+        return;
+      }
+      cancelEditItem();
+      onRefresh();
+    } catch {
+      setPiecesError("Erro de conexão.");
+    } finally {
+      setSavingPieces(false);
+    }
+  }
+
+  async function saveCatalogItemPieces(item: OrderItem) {
+    if (!editProduct) return;
+    if (!pieceSelectionsAreComplete(editProduct.pieces, selections)) {
+      setPiecesError("Selecione cor e tamanho de cada peça.");
+      return;
+    }
+    await persistPieceSelections(
+      item,
+      buildCartPieceSelections(editProduct.pieces, selections)
+    );
+  }
+
+  async function saveCustomItemPieces(item: OrderItem) {
+    if (customDraft.length === 0) return;
+    await persistPieceSelections(item, customDraft);
+  }
+
   return (
     <div className="space-y-4">
       {order.items.map((item) => {
@@ -1599,45 +1724,218 @@ function OrderProductsCards({ order }: { order: AdminOrder }) {
         const img = orderItemDisplayImageUrl(item);
         const name = orderItemDisplayName(item);
         const description = orderItemDisplayDescription(item);
+        const product = item.productId
+          ? products.find((p) => p.id === item.productId)
+          : null;
+        const isCustomItem = !item.productId;
+        const canEditThis =
+          editable &&
+          (isCustomItem
+            ? pieces.length > 0
+            : product
+              ? product.pieces.length > 0
+              : true);
+        const isEditingCatalog =
+          editingItemId === item.id && editProduct != null;
+        const isEditingCustom =
+          editingItemId === item.id && customDraft.length > 0 && !editProduct;
+        const isEditing = isEditingCatalog || isEditingCustom;
+
         return (
-          <div key={item.id} className="flex gap-3">
-            <div className="relative h-16 w-12 shrink-0 overflow-hidden rounded-lg bg-stone-100">
-              {img ? (
-                <Image src={img} alt="" fill className="object-cover" sizes="48px" />
-              ) : (
-                <div className="flex h-full items-center justify-center text-[9px] text-stone-300">—</div>
-              )}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="font-medium leading-snug text-stone-900">{name}</p>
-              {description ? (
-                <p className="mt-0.5 whitespace-pre-wrap text-xs text-stone-500">
-                  {description}
-                </p>
-              ) : null}
-              {pieces.length > 0 ? (
-                <ul className="mt-1.5 space-y-0.5 text-xs text-stone-400">
-                  {pieces.map((p, i) => {
-                    const details = [p.pieceName, p.color, p.size]
-                      .filter(Boolean)
-                      .join(" · ");
-                    if (!details) return null;
-                    return <li key={`${item.id}-piece-${i}`}>{details}</li>;
-                  })}
-                </ul>
-              ) : null}
-              <div className="mt-1.5 flex items-center justify-between gap-2 text-sm">
-                <span className="text-stone-500">
-                  {item.quantity}× {formatPrice(item.price)}
-                </span>
-                <span className="font-semibold tabular-nums text-stone-900">
-                  {formatPrice(item.price * item.quantity)}
-                </span>
+          <div key={item.id} className="space-y-3">
+            <div className="flex gap-3">
+              <div className="relative h-16 w-12 shrink-0 overflow-hidden rounded-lg bg-stone-100">
+                {img ? (
+                  <Image src={img} alt="" fill className="object-cover" sizes="48px" />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-[9px] text-stone-300">—</div>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-medium leading-snug text-stone-900">{name}</p>
+                  {canEditThis && !isEditing ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        isCustomItem
+                          ? startEditCustomItem(item)
+                          : void startEditCatalogItem(item)
+                      }
+                      disabled={loadingProduct}
+                      aria-label="Editar cor e tamanho"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:opacity-50"
+                    >
+                      <PencilIcon />
+                    </button>
+                  ) : null}
+                </div>
+                {description ? (
+                  <p className="mt-0.5 whitespace-pre-wrap text-xs text-stone-500">
+                    {description}
+                  </p>
+                ) : null}
+                {!isEditing && pieces.length > 0 ? (
+                  <ul className="mt-1.5 space-y-0.5 text-xs text-stone-400">
+                    {pieces.map((p, i) => {
+                      const details = [p.pieceName, p.color, p.size]
+                        .filter(Boolean)
+                        .join(" · ");
+                      if (!details) return null;
+                      return <li key={`${item.id}-piece-${i}`}>{details}</li>;
+                    })}
+                  </ul>
+                ) : null}
+                <div className="mt-1.5 flex items-center justify-between gap-2 text-sm">
+                  <span className="text-stone-500">
+                    {item.quantity}× {formatPrice(item.price)}
+                  </span>
+                  <span className="font-semibold tabular-nums text-stone-900">
+                    {formatPrice(item.price * item.quantity)}
+                  </span>
+                </div>
               </div>
             </div>
+
+            {isEditingCatalog && editProduct ? (
+              <div className="rounded-lg border border-stone-200 bg-stone-50/80 p-3">
+                <p className="mb-2 text-xs font-medium text-stone-500">
+                  Editar cor e tamanho
+                </p>
+                <PieceSelector
+                  pieces={editProduct.pieces}
+                  selections={selections}
+                  onSelectionsChange={setSelections}
+                />
+                {piecesError ? (
+                  <p className="mt-2 text-xs text-red-600">{piecesError}</p>
+                ) : null}
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={cancelEditItem}
+                    disabled={savingPieces}
+                    className="rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void saveCatalogItemPieces(item)}
+                    disabled={
+                      savingPieces ||
+                      !pieceSelectionsAreComplete(editProduct.pieces, selections)
+                    }
+                    className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-stone-800 disabled:opacity-50"
+                  >
+                    {savingPieces ? "Salvando…" : "Salvar"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {isEditingCustom ? (
+              <div className="space-y-3 rounded-lg border border-stone-200 bg-stone-50/80 p-3">
+                <p className="text-xs font-medium text-stone-500">
+                  Editar cor e tamanho
+                </p>
+                {customDraft.map((piece, index) => {
+                  const sizeOptions =
+                    piece.size &&
+                    !(CUSTOM_SET_SIZES as readonly string[]).includes(piece.size)
+                      ? [...CUSTOM_SET_SIZES, piece.size]
+                      : [...CUSTOM_SET_SIZES];
+                  return (
+                    <div
+                      key={`${item.id}-edit-${index}-${piece.pieceName}`}
+                      className="rounded-lg border border-stone-200 bg-white p-3"
+                    >
+                      <p className="mb-2 text-xs font-semibold text-stone-700">
+                        {piece.pieceName}
+                      </p>
+                      <div>
+                        <label className="mb-0.5 block text-[10px] font-medium text-stone-500">
+                          Cor
+                        </label>
+                        <input
+                          value={piece.color ?? ""}
+                          onChange={(e) =>
+                            setCustomDraft((prev) =>
+                              prev.map((row, i) =>
+                                i === index
+                                  ? { ...row, color: e.target.value || null }
+                                  : row
+                              )
+                            )
+                          }
+                          placeholder="Preto"
+                          className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+                        />
+                      </div>
+                      <div className="mt-3">
+                        <label className="mb-1.5 block text-[11px] font-medium text-stone-500">
+                          Tamanho
+                        </label>
+                        <div className="flex flex-wrap gap-1">
+                          {sizeOptions.map((size) => {
+                            const active = piece.size === size;
+                            return (
+                              <button
+                                key={size}
+                                type="button"
+                                onClick={() =>
+                                  setCustomDraft((prev) =>
+                                    prev.map((row, i) =>
+                                      i === index
+                                        ? { ...row, size: active ? null : size }
+                                        : row
+                                    )
+                                  )
+                                }
+                                className={`min-w-[2.5rem] rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all ${
+                                  active
+                                    ? "bg-stone-900 text-white shadow-sm"
+                                    : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+                                }`}
+                              >
+                                {size}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {piecesError ? (
+                  <p className="text-xs text-red-600">{piecesError}</p>
+                ) : null}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={cancelEditItem}
+                    disabled={savingPieces}
+                    className="rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void saveCustomItemPieces(item)}
+                    disabled={savingPieces}
+                    className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-stone-800 disabled:opacity-50"
+                  >
+                    {savingPieces ? "Salvando…" : "Salvar"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         );
       })}
+      {piecesError && !editingItemId ? (
+        <p className="text-xs text-red-600">{piecesError}</p>
+      ) : null}
     </div>
   );
 }
@@ -1645,11 +1943,15 @@ function OrderProductsCards({ order }: { order: AdminOrder }) {
 function OrderDetailsBody({
   order,
   onRefresh,
+  products,
+  ensureProducts,
   openCancelForm = false,
   onCancelIntentHandled,
 }: {
   order: AdminOrder;
   onRefresh: () => void;
+  products: Product[];
+  ensureProducts: () => Promise<Product[]>;
   openCancelForm?: boolean;
   onCancelIntentHandled?: () => void;
 }) {
@@ -1920,7 +2222,12 @@ function OrderDetailsBody({
   return (
     <div className="space-y-4">
       <ExpandedSection title="Produtos">
-        <OrderProductsCards order={order} />
+        <OrderProductsCards
+          order={order}
+          products={products}
+          ensureProducts={ensureProducts}
+          onRefresh={onRefresh}
+        />
       </ExpandedSection>
 
       <ExpandedSection
@@ -2341,6 +2648,8 @@ function SaleOrderDrawer({
   open,
   onClose,
   onRefresh,
+  products,
+  ensureProducts,
   openCancelForm = false,
   onCancelIntentHandled,
 }: {
@@ -2348,6 +2657,8 @@ function SaleOrderDrawer({
   open: boolean;
   onClose: () => void;
   onRefresh: () => void;
+  products: Product[];
+  ensureProducts: () => Promise<Product[]>;
   openCancelForm?: boolean;
   onCancelIntentHandled?: () => void;
 }) {
@@ -2447,6 +2758,8 @@ function SaleOrderDrawer({
           <OrderDetailsBody
             order={displayOrder}
             onRefresh={onRefresh}
+            products={products}
+            ensureProducts={ensureProducts}
             openCancelForm={openCancelForm}
             onCancelIntentHandled={onCancelIntentHandled}
           />
@@ -2485,11 +2798,18 @@ export function SalesManager() {
   const [showWizard, setShowWizard] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
 
-  const fetchProducts = useCallback(async () => {
+  const fetchProducts = useCallback(async (): Promise<Product[]> => {
     const res = await fetch("/api/products");
     const data = await res.json();
-    if (Array.isArray(data)) setProducts(data as Product[]);
+    const list = Array.isArray(data) ? (data as Product[]) : [];
+    setProducts(list);
+    return list;
   }, []);
+
+  const ensureProducts = useCallback(async (): Promise<Product[]> => {
+    if (products.length > 0) return products;
+    return fetchProducts();
+  }, [products, fetchProducts]);
 
   useEffect(() => {
     if (showWizard && products.length === 0) void fetchProducts();
@@ -2974,6 +3294,8 @@ export function SalesManager() {
         open={detailsOrderId !== null}
         onClose={closeDetails}
         onRefresh={() => void fetchOrders()}
+        products={products}
+        ensureProducts={ensureProducts}
         openCancelForm={cancelFormOrderId === detailsOrderId}
         onCancelIntentHandled={() =>
           setCancelFormOrderId((current) =>

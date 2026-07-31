@@ -313,33 +313,32 @@ export async function createAdminSale(
     };
   }
 
-  if (fillNow) {
-    if (isArranged) {
-      const validationError = customerNamePhoneValidationError({
-        name: input.contact?.name ?? "",
-        phone: input.contact?.phone ?? "",
-      });
-      if (validationError) {
-        return { ok: false, error: validationError };
-      }
-    } else {
-      const contactFields = {
-        name: input.contact?.name ?? "",
-        email: input.contact?.email ?? "",
-        phone: input.contact?.phone ?? "",
-        cpf: input.contact?.cpf ?? "",
-        destinationCep: input.address?.destinationCep ?? "",
-        street: input.address?.street ?? "",
-        number: input.address?.number ?? "",
-        complement: input.address?.complement ?? "",
-        neighborhood: input.address?.neighborhood ?? "",
-        city: input.address?.city ?? "",
-        state: input.address?.state ?? "",
-      };
-      const validationError = customerContactAddressValidationError(contactFields);
-      if (validationError) {
-        return { ok: false, error: validationError };
-      }
+  // Nome + telefone sempre obrigatórios (também em "adicionar depois").
+  const namePhoneError = customerNamePhoneValidationError({
+    name: input.contact?.name ?? "",
+    phone: input.contact?.phone ?? "",
+  });
+  if (namePhoneError) {
+    return { ok: false, error: namePhoneError };
+  }
+
+  if (fillNow && !isArranged) {
+    const contactFields = {
+      name: input.contact?.name ?? "",
+      email: input.contact?.email ?? "",
+      phone: input.contact?.phone ?? "",
+      cpf: input.contact?.cpf ?? "",
+      destinationCep: input.address?.destinationCep ?? "",
+      street: input.address?.street ?? "",
+      number: input.address?.number ?? "",
+      complement: input.address?.complement ?? "",
+      neighborhood: input.address?.neighborhood ?? "",
+      city: input.address?.city ?? "",
+      state: input.address?.state ?? "",
+    };
+    const validationError = customerContactAddressValidationError(contactFields);
+    if (validationError) {
+      return { ok: false, error: validationError };
     }
   }
 
@@ -400,10 +399,10 @@ export async function createAdminSale(
         packageWidthCm: shipping.packageWidthCm,
         packageLengthCm: shipping.packageLengthCm,
         packageWeightKg: shipping.packageWeightKg,
-        recipientName: fillNow
-          ? input.contact!.name.trim().slice(0, CUSTOMER_NAME_MAX_LENGTH)
-          : null,
-        phone: fillNow ? input.contact!.phone.trim() : null,
+        recipientName: input.contact!.name
+          .trim()
+          .slice(0, CUSTOMER_NAME_MAX_LENGTH),
+        phone: input.contact!.phone.trim(),
         cpf: fillNow && !isArranged ? input.contact!.cpf?.trim() || null : null,
         addressStreet:
           fillNow && !isArranged ? input.address?.street.trim() || null : null,

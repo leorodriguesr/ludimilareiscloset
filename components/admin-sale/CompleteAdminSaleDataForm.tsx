@@ -95,6 +95,17 @@ export function CompleteAdminSaleDataForm({ token }: Props) {
           setFulfillmentType(
             data.fulfillmentType === "ARRANGED" ? "ARRANGED" : "CARRIER"
           );
+          setForm((current) => ({
+            ...current,
+            name:
+              typeof data.recipientName === "string"
+                ? data.recipientName.slice(0, CUSTOMER_NAME_MAX_LENGTH)
+                : current.name,
+            phone:
+              typeof data.phone === "string"
+                ? onlyDigits(data.phone, 11)
+                : current.phone,
+          }));
         }
       } catch (err) {
         if (!cancelled) {

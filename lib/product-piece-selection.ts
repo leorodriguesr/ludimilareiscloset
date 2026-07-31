@@ -55,6 +55,23 @@ export function buildCartPieceSelections(
   }));
 }
 
+/** Hidrata o mapa de seleções a partir do snapshot salvo no pedido. */
+export function pieceSelectionMapFromCart(
+  pieces: ProductPiece[],
+  cartSelections: CartPieceSelection[]
+): PieceSelectionMap {
+  const base = emptyPieceSelections(pieces);
+  for (const piece of pieces) {
+    const match = cartSelections.find((s) => s.pieceName === piece.name);
+    if (!match) continue;
+    base[piece.id] = {
+      color: match.color,
+      size: match.size,
+    };
+  }
+  return base;
+}
+
 /** Exige tamanho/cor quando o produto oferece opções; bloqueia combinação sem estoque. */
 export function pieceSelectionsAreComplete(
   pieces: ProductPiece[],

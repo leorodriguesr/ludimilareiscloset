@@ -1077,11 +1077,9 @@ export function StandaloneSaleWizard({
           internalNotes: internalNotes || undefined,
           customerData: fulfillmentType === "ARRANGED" ? "now" : customerData,
           contact:
-            fulfillmentType === "ARRANGED"
+            fulfillmentType === "ARRANGED" || customerData === "later"
               ? { name: contact.name, phone: contact.phone }
-              : customerData === "now"
-                ? contact
-                : undefined,
+              : contact,
           address:
             customerData === "now" && fulfillmentType === "CARRIER"
               ? {
@@ -1174,13 +1172,12 @@ export function StandaloneSaleWizard({
 
   const customerStepComplete = useMemo(() => {
     if (!selectedCustomer && customerEntryMode !== "new") return false;
-    if (fulfillmentType === "ARRANGED") {
+    if (fulfillmentType === "ARRANGED" || customerData === "later") {
       return isCustomerNamePhoneComplete({
         name: contact.name,
         phone: contact.phone,
       });
     }
-    if (customerData === "later") return true;
     return isCustomerContactAddressComplete({
       name: contact.name,
       email: contact.email,
@@ -1869,16 +1866,19 @@ export function StandaloneSaleWizard({
                       checked={customerData === "later"}
                       onChange={() => setCustomerData("later")}
                       label="Adicionar depois"
-                      description="Gerar link para o cliente preencher"
+                      description="Informe nome e telefone agora; o cliente completa o endereço pelo link"
                     />
                   </div>
                 )}
 
                 {(selectedCustomer || customerEntryMode === "new") &&
-                  fulfillmentType === "ARRANGED" && (
+                  (fulfillmentType === "ARRANGED" ||
+                    (fulfillmentType === "CARRIER" && customerData === "later")) && (
                   <div className="rounded-xl border border-stone-200 p-5">
                     <p className="mb-3 text-xs text-stone-500">
-                      Entrega a combinar — informe nome e telefone. Localização e detalhes ficam nas observações da entrega ou no WhatsApp.
+                      {fulfillmentType === "ARRANGED"
+                        ? "Entrega a combinar — informe nome e telefone. Localização e detalhes ficam nas observações da entrega ou no WhatsApp."
+                        : "Informe pelo menos o nome e o telefone para identificar o cliente. O endereço pode ser preenchido depois pelo link."}
                     </p>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>

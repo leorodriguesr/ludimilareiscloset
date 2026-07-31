@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { formatPrice } from "@/lib/format";
 
-const CUSTOM_SET_SIZES = ["PP", "P", "M", "G", "GG"] as const;
+export const CUSTOM_SET_SIZES = ["PP", "P", "M", "G", "GG"] as const;
 
 export type CustomSaleSetPiece = {
   name: string;
