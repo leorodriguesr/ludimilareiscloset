@@ -1254,13 +1254,13 @@ function OrderRowActionsMenu({
   order,
   isDetailsOpen,
   onToggleDetails,
-  onRefresh,
+  onPatchOrder,
   onRequestCancel,
 }: {
   order: AdminOrder;
   isDetailsOpen: boolean;
   onToggleDetails: () => void;
-  onRefresh: () => void;
+  onPatchOrder: (id: string, patch: Partial<AdminOrder>) => void;
   onRequestCancel: () => void;
 }) {
   const { hasPermission } = useAuth();
@@ -1341,7 +1341,11 @@ function OrderRowActionsMenu({
         window.alert(data?.error ?? "Não foi possível marcar a venda como paga.");
         return;
       }
-      onRefresh();
+      onPatchOrder(order.id, {
+        paidAt: new Date().toISOString(),
+        status: "paid",
+        paymentChannel: "MANUAL",
+      });
     } finally {
       setBusy(null);
     }
@@ -1693,7 +1697,7 @@ function OrderProductsCards({
         return;
       }
       cancelEditItem();
-      onRefresh();
+      onRefresh(); // soft: cor/tamanho no item exige lista atualizada
     } catch {
       setPiecesError("Erro de conexão.");
     } finally {
@@ -1944,6 +1948,7 @@ function OrderProductsCards({
 function OrderDetailsBody({
   order,
   onRefresh,
+  onPatchOrder,
   products,
   ensureProducts,
   openCancelForm = false,
@@ -1951,6 +1956,7 @@ function OrderDetailsBody({
 }: {
   order: AdminOrder;
   onRefresh: () => void;
+  onPatchOrder: (id: string, patch: Partial<AdminOrder>) => void;
   products: Product[];
   ensureProducts: () => Promise<Product[]>;
   openCancelForm?: boolean;
@@ -2040,7 +2046,12 @@ function OrderDetailsBody({
       setShowCancelForm(false);
       setCancelReason("");
       onCancelIntentHandled?.();
-      onRefresh();
+      onPatchOrder(order.id, {
+        status: "cancelled",
+        cancellationReason: reason,
+        cancelledAt: new Date().toISOString(),
+        shippingStatus: "cancelled",
+      });
     } catch {
       setCancelError("Erro de conexão.");
     } finally {
@@ -2066,7 +2077,11 @@ function OrderDetailsBody({
         setMarkPaidError(data?.error ?? "Não foi possível marcar a venda como paga.");
         return;
       }
-      onRefresh();
+      onPatchOrder(order.id, {
+        paidAt: new Date().toISOString(),
+        status: "paid",
+        paymentChannel: "MANUAL",
+      });
     } catch {
       setMarkPaidError("Erro de conexão.");
     } finally {
@@ -2164,7 +2179,20 @@ function OrderDetailsBody({
         return;
       }
       setEditingCustomer(false);
-      onRefresh();
+      onPatchOrder(order.id, {
+        recipientName: customerForm.recipientName.trim(),
+        email: email || order.email,
+        phone: customerForm.phone.trim(),
+        cpf: customerForm.cpf.trim() || null,
+        destinationCep: customerForm.destinationCep.replace(/\D/g, "") || null,
+        addressStreet: customerForm.addressStreet.trim() || null,
+        addressNumber: customerForm.addressNumber.trim() || null,
+        addressComplement: customerForm.addressComplement.trim() || null,
+        addressNeighborhood: customerForm.addressNeighborhood.trim() || null,
+        addressCity: customerForm.addressCity.trim() || null,
+        addressState: customerForm.addressState.trim().toUpperCase() || null,
+        customerDataStatus: "COMPLETE",
+      });
     } catch {
       setCustomerError("Erro de conexão.");
     } finally {
@@ -2655,6 +2683,7 @@ function SaleOrderDrawer({
   open,
   onClose,
   onRefresh,
+  onPatchOrder,
   products,
   ensureProducts,
   openCancelForm = false,
@@ -2664,6 +2693,7 @@ function SaleOrderDrawer({
   open: boolean;
   onClose: () => void;
   onRefresh: () => void;
+  onPatchOrder: (id: string, patch: Partial<AdminOrder>) => void;
   products: Product[];
   ensureProducts: () => Promise<Product[]>;
   openCancelForm?: boolean;
@@ -2765,6 +2795,7 @@ function SaleOrderDrawer({
           <OrderDetailsBody
             order={displayOrder}
             onRefresh={onRefresh}
+            onPatchOrder={onPatchOrder}
             products={products}
             ensureProducts={ensureProducts}
             openCancelForm={openCancelForm}
@@ -2823,18 +2854,36 @@ export function SalesManager() {
   }, [showWizard, products.length, fetchProducts]);
   const allRef = useRef<HTMLInputElement>(null);
 
-  const fetchOrders = useCallback(async () => {
-    setLoading(true);
-    setSelectedIds(new Set());
+  const fetchOrders = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
+    if (!silent) {
+      setLoading(true);
+      setSelectedIds(new Set());
+    }
     try {
       const res = await fetch("/api/admin/orders");
       const data = (await res.json()) as ApiResponse;
       setOrders(data.orders ?? []);
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      if (!silent) setLoading(false);
+    }
   }, []);
 
-  useEffect(() => { void fetchOrders(); }, [fetchOrders]);
+  const patchOrder = useCallback((id: string, patch: Partial<AdminOrder>) => {
+    setOrders((prev) =>
+      prev.map((order) => (order.id === id ? { ...order, ...patch } : order))
+    );
+  }, []);
+
+  const softRefresh = useCallback(() => {
+    void fetchOrders({ silent: true });
+  }, [fetchOrders]);
+
+  useEffect(() => {
+    void fetchOrders();
+  }, [fetchOrders]);
 
   const filterCounts = useMemo(
     () => ({
@@ -2967,7 +3016,7 @@ export function SalesManager() {
           </button>
           <button
             type="button"
-            onClick={fetchOrders}
+            onClick={() => void fetchOrders()}
             disabled={loading}
             className={`inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50 ${SALES_TOOLBAR_SIZE}`}
           >
@@ -3283,7 +3332,7 @@ export function SalesManager() {
                           order={order}
                           isDetailsOpen={isDetailsOpen}
                           onToggleDetails={() => toggleDetails(order.id)}
-                          onRefresh={() => void fetchOrders()}
+                          onPatchOrder={patchOrder}
                           onRequestCancel={() => requestCancel(order.id)}
                         />
                       </tr>
@@ -3300,7 +3349,8 @@ export function SalesManager() {
         order={detailsOrder}
         open={detailsOrderId !== null}
         onClose={closeDetails}
-        onRefresh={() => void fetchOrders()}
+        onRefresh={softRefresh}
+        onPatchOrder={patchOrder}
         products={products}
         ensureProducts={ensureProducts}
         openCancelForm={cancelFormOrderId === detailsOrderId}

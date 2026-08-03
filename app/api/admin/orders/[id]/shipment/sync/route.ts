@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 import { syncOrderShipmentFromSuperfrete } from "@/lib/shipping/generate-order-label";
 import { ShippingQuoteError } from "@/lib/shipping/types";
 import { requireAdminApi } from "@/lib/require-admin-api";
@@ -25,7 +26,24 @@ export async function POST(
       pollTracking: !quick,
       maxWaitMs: quick ? 0 : 12_000,
     });
-    return NextResponse.json(info);
+    const order = await prisma.order.findUnique({
+      where: { id },
+      select: {
+        shippingStatus: true,
+        trackingCode: true,
+        labelUrl: true,
+        superfreteStatus: true,
+        superfreteShipmentId: true,
+      },
+    });
+    return NextResponse.json({
+      ...info,
+      shippingStatus: order?.shippingStatus,
+      trackingCode: order?.trackingCode ?? info.tracking,
+      labelUrl: order?.labelUrl ?? info.labelUrl,
+      superfreteStatus: order?.superfreteStatus ?? info.status,
+      superfreteShipmentId: order?.superfreteShipmentId,
+    });
   } catch (e) {
     if (e instanceof ShippingQuoteError) {
       return NextResponse.json({ error: e.message }, { status: e.status });

@@ -1002,7 +1002,7 @@ function ChangeShippingModal({
 }: {
   order: ShipmentOrder;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (patch: Partial<ShipmentOrder>) => void;
 }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1056,12 +1056,31 @@ function ChangeShippingModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ optionId: selectedId }),
       });
-      const data = (await res.json()) as { error?: string };
+      const data = (await res.json()) as {
+        error?: string;
+        shippingServiceName?: string | null;
+        shippingServiceId?: number | null;
+        shippingQuotedPrice?: number | null;
+        shippingDeliveryDaysMin?: number | null;
+        shippingDeliveryDaysMax?: number | null;
+        shippingStatus?: string;
+        shippingProvider?: string | null;
+      };
       if (!res.ok) {
         setError(data.error ?? "Erro ao alterar frete.");
         return;
       }
-      onSaved();
+      onSaved({
+        shippingServiceName: data.shippingServiceName ?? null,
+        shippingServiceId: data.shippingServiceId ?? null,
+        shippingQuotedPrice: data.shippingQuotedPrice ?? null,
+        shippingDeliveryDaysMin: data.shippingDeliveryDaysMin ?? null,
+        shippingDeliveryDaysMax: data.shippingDeliveryDaysMax ?? null,
+        ...(data.shippingStatus ? { shippingStatus: data.shippingStatus } : {}),
+        ...(data.shippingProvider !== undefined
+          ? { shippingProvider: data.shippingProvider }
+          : {}),
+      });
       onClose();
     } catch {
       setError("Erro de conexão.");
@@ -1165,7 +1184,10 @@ function ChangeShippingModal({
 
 /* ─── Ações de envio ──────────────────────────────────────────────── */
 
-function useShipmentActions(order: ShipmentOrder, onRefresh: () => void) {
+function useShipmentActions(
+  order: ShipmentOrder,
+  onPatchOrder: (id: string, patch: Partial<ShipmentOrder>) => void
+) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [localTracking, setLocalTracking] = useState<string | null>(null);
@@ -1207,11 +1229,33 @@ function useShipmentActions(order: ShipmentOrder, onRefresh: () => void) {
         body: JSON.stringify({ quick: false }),
       });
       if (syncRes.ok) {
-        const syncData = (await syncRes.json()) as { tracking?: string | null };
-        if (syncData.tracking) {
-          setLocalTracking(syncData.tracking);
+        const syncData = (await syncRes.json()) as {
+          tracking?: string | null;
+          trackingCode?: string | null;
+          labelUrl?: string | null;
+          shippingStatus?: string;
+          superfreteStatus?: string | null;
+          superfreteShipmentId?: string | null;
+        };
+        const tracking = syncData.trackingCode ?? syncData.tracking ?? null;
+        if (tracking) {
+          setLocalTracking(tracking);
           setAwaitingTracking(false);
-          onRefresh();
+          onPatchOrder(order.id, {
+            trackingCode: tracking,
+            ...(syncData.labelUrl !== undefined
+              ? { labelUrl: syncData.labelUrl }
+              : {}),
+            ...(syncData.shippingStatus
+              ? { shippingStatus: syncData.shippingStatus }
+              : {}),
+            ...(syncData.superfreteStatus !== undefined
+              ? { superfreteStatus: syncData.superfreteStatus }
+              : {}),
+            ...(syncData.superfreteShipmentId !== undefined
+              ? { superfreteShipmentId: syncData.superfreteShipmentId }
+              : {}),
+          });
           return;
         }
       }
@@ -1242,9 +1286,12 @@ function useShipmentActions(order: ShipmentOrder, onRefresh: () => void) {
         labelUrl?: string;
         shipmentId?: string;
         tracking?: string | null;
+        trackingCode?: string | null;
         paymentPending?: boolean;
         superfreteStatus?: string;
         status?: string;
+        shippingStatus?: string;
+        superfreteShipmentId?: string | null;
       };
       if (!res.ok) {
         setError(data.error ?? "Erro na operação.");
@@ -1260,21 +1307,62 @@ function useShipmentActions(order: ShipmentOrder, onRefresh: () => void) {
             "Etiqueta ainda aguarda pagamento na SuperFrete. Pague lá e sincronize de novo."
         );
       }
+      const tracking = data.trackingCode ?? data.tracking ?? null;
       if (key === "cancel") {
         setLocalTracking(null);
         setAwaitingTracking(false);
-      } else if (data.tracking) {
-        setLocalTracking(data.tracking);
+      } else if (tracking) {
+        setLocalTracking(tracking);
         setAwaitingTracking(false);
       }
-      if (key === "label" && !data.tracking && !paymentPending) {
+      if (key === "label" && !tracking && !paymentPending) {
         setAwaitingTracking(true);
       }
-      onRefresh();
+
+      const patch: Partial<ShipmentOrder> = {};
+      if (key === "pack") patch.shippingStatus = "packed";
+      if (key === "shipped" || key === "shipped-manual") {
+        patch.shippingStatus = "shipped";
+      }
+      if (key === "cancel") {
+        patch.shippingStatus = "cancelled";
+        patch.superfreteShipmentId = null;
+        patch.labelUrl = null;
+        patch.trackingCode = null;
+        patch.superfreteStatus = "cancelled";
+        patch.labelGeneratedAt = null;
+      }
+      if (key === "label") {
+        if (data.shipmentId) patch.superfreteShipmentId = data.shipmentId;
+        if (data.labelUrl !== undefined) patch.labelUrl = data.labelUrl || null;
+        if (tracking) patch.trackingCode = tracking;
+        if (data.superfreteStatus || data.status) {
+          patch.superfreteStatus = data.superfreteStatus ?? data.status ?? null;
+        }
+        patch.labelAutoGenerateError = null;
+        if (!paymentPending && data.shipmentId) {
+          patch.shippingStatus = "packed";
+        }
+      }
+      if (key === "sync") {
+        if (tracking) patch.trackingCode = tracking;
+        if (data.labelUrl !== undefined) patch.labelUrl = data.labelUrl || null;
+        if (data.shippingStatus) patch.shippingStatus = data.shippingStatus;
+        if (data.superfreteStatus || data.status) {
+          patch.superfreteStatus = data.superfreteStatus ?? data.status ?? null;
+        }
+        if (data.superfreteShipmentId !== undefined) {
+          patch.superfreteShipmentId = data.superfreteShipmentId;
+        }
+      }
+      if (Object.keys(patch).length > 0) {
+        onPatchOrder(order.id, patch);
+      }
+
       if (opts?.openPdf !== false && data.shipmentId && !paymentPending) {
         window.open(`/api/admin/orders/${order.id}/label/pdf`, "_blank");
       }
-      if (key === "label" && !data.tracking && !paymentPending) {
+      if (key === "label" && !tracking && !paymentPending) {
         void pollTrackingUntilReady();
       }
       return true;
@@ -1670,21 +1758,21 @@ function ShipmentRowActionsMenu({
 
 function ShipmentRow({
   order,
-  onRefresh,
+  onPatchOrder,
   selected,
   onToggleSelect,
   onChangeShipping,
   onViewPacking,
 }: {
   order: ShipmentOrder;
-  onRefresh: () => void;
+  onPatchOrder: (id: string, patch: Partial<ShipmentOrder>) => void;
   selected: boolean;
   onToggleSelect: () => void;
   onChangeShipping: () => void;
   onViewPacking: () => void;
 }) {
   const { busy, error, trackingCode, awaitingTracking, runAction } =
-    useShipmentActions(order, onRefresh);
+    useShipmentActions(order, onPatchOrder);
   const caps = shipmentCapabilities(order);
   const freightPrice = chosenShippingPrice(order);
   const freightTypeLabel = shipmentFreightTypeLabel(order);
@@ -1921,10 +2009,13 @@ export function ShippingManager() {
     }
   }, [fetchMelhorEnvioStatus]);
 
-  const fetchShipments = useCallback(async () => {
-    setLoading(true);
-    setSelectedIds(new Set());
-    setBulkMsg(null);
+  const fetchShipments = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
+    if (!silent) {
+      setLoading(true);
+      setSelectedIds(new Set());
+      setBulkMsg(null);
+    }
     try {
       const res = await fetch("/api/admin/shipments");
       const data = (await res.json()) as {
@@ -1933,13 +2024,19 @@ export function ShippingManager() {
       };
       if (!res.ok) {
         console.error(data.error);
-        setOrders([]);
+        if (!silent) setOrders([]);
         return;
       }
       setOrders(data.orders ?? []);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
+  }, []);
+
+  const patchOrder = useCallback((id: string, patch: Partial<ShipmentOrder>) => {
+    setOrders((prev) =>
+      prev.map((order) => (order.id === id ? { ...order, ...patch } : order))
+    );
   }, []);
 
   useEffect(() => {
@@ -2013,8 +2110,8 @@ export function ShippingManager() {
     allRef.current.checked = n === selectable.length && selectable.length > 0;
   }, [selectedIds, visibleOrders]);
 
-  const refreshAll = () => {
-    void fetchShipments();
+  const refreshAll = (opts?: { silent?: boolean }) => {
+    void fetchShipments(opts);
     if (isAdmin) void fetchWallet();
   };
 
@@ -2059,7 +2156,7 @@ export function ShippingManager() {
         `${data.okCount ?? 0} etiqueta(s) gerada(s)` +
           (data.failCount ? ` · ${data.failCount} falha(s)` : "")
       );
-      refreshAll();
+      refreshAll({ silent: true });
     } catch {
       setBulkMsg("Erro de conexão.");
     } finally {
@@ -2092,7 +2189,7 @@ export function ShippingManager() {
           </button>
           <button
             type="button"
-            onClick={refreshAll}
+            onClick={() => refreshAll()}
             disabled={loading}
             className={`inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50 ${SHIPPING_TOOLBAR_SIZE}`}
           >
@@ -2379,7 +2476,7 @@ export function ShippingManager() {
                   <ShipmentRow
                     key={order.id}
                     order={order}
-                    onRefresh={refreshAll}
+                    onPatchOrder={patchOrder}
                     selected={selectedIds.has(order.id)}
                     onToggleSelect={() => toggleSelect(order.id)}
                     onChangeShipping={() => setShippingModalOrder(order)}
@@ -2396,7 +2493,9 @@ export function ShippingManager() {
         <ChangeShippingModal
           order={shippingModalOrder}
           onClose={() => setShippingModalOrder(null)}
-          onSaved={refreshAll}
+          onSaved={(patch) => {
+            patchOrder(shippingModalOrder.id, patch);
+          }}
         />
       ) : null}
 
@@ -2429,8 +2528,8 @@ export function ShippingManager() {
                   alert(data.error ?? "Erro ao marcar como embalada.");
                   return;
                 }
+                patchOrder(orderId, { shippingStatus: "packed" });
                 setPackingModalOrder(null);
-                refreshAll();
               } catch {
                 alert("Erro de conexão.");
               } finally {
