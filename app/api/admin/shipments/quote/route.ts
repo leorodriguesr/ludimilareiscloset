@@ -20,7 +20,7 @@ const QUICK_QUOTE_PACKAGE = {
   lengthCm: 30,
   widthCm: 20,
   heightCm: 10,
-  weightKg: 1,
+  weightKg: 0.5,
 } as const;
 
 /** Valor de seguro padrão da cotação rápida. */
@@ -28,7 +28,7 @@ const QUICK_QUOTE_INSURANCE_VALUE = 200;
 
 /**
  * Cotação rápida por CEP com embalagem padrão:
- * 30 × 20 × 10 cm · 1 kg.
+ * 30 × 20 × 10 cm · 500 g.
  */
 export async function POST(request: NextRequest) {
   const gate = await requirePermission(PERMISSION.SHIPPING_MANAGE);

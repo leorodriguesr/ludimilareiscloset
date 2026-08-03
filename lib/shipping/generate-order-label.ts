@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { buildCartShippingPackage } from "@/lib/shipping/cart-package";
+import { DEFAULT_SHIPPING_PACKAGE } from "@/lib/shipping/cart-package";
 import { packageToSuperFreteKgCm } from "@/lib/shipping/superfrete";
 import {
   cancelSuperfreteOrder,
@@ -42,8 +42,6 @@ import {
 } from "@/app/generated/prisma/client";
 import { canGenerateLabelForFulfillment } from "@/lib/fulfillment/fulfillment-types";
 import { orderItemDisplayName } from "@/lib/orders/order-item-display";
-
-const DEFAULT_PKG = { weightGrams: 300, lengthCm: 16, widthCm: 11, heightCm: 2 };
 
 function positiveDimCm(v: number | null | undefined): number | null {
   if (v == null) return null;
@@ -123,9 +121,9 @@ function buildVolumeFromOrder(order: OrderForLabel): LabelInput["volume"] {
   }
 
   let weightGrams = 0;
-  let lengthCm = DEFAULT_PKG.lengthCm;
-  let widthCm = DEFAULT_PKG.widthCm;
-  let heightCm = DEFAULT_PKG.heightCm;
+  let lengthCm = DEFAULT_SHIPPING_PACKAGE.lengthCm;
+  let widthCm = DEFAULT_SHIPPING_PACKAGE.widthCm;
+  let heightCm = DEFAULT_SHIPPING_PACKAGE.heightCm;
 
   for (const item of order.items) {
     const p = item.product;
@@ -133,7 +131,7 @@ function buildVolumeFromOrder(order: OrderForLabel): LabelInput["volume"] {
     const unitGrams =
       p?.weightGrams != null && p.weightGrams > 0
         ? p.weightGrams
-        : DEFAULT_PKG.weightGrams;
+        : DEFAULT_SHIPPING_PACKAGE.weightGrams;
     weightGrams += unitGrams * qty;
     const len = positiveDimCm(p?.lengthCm);
     const wid = positiveDimCm(p?.widthCm);

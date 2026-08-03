@@ -847,7 +847,7 @@ function PackingSlipModal({
 
 /* ─── Modal cotação rápida de frete ───────────────────────────────── */
 
-const QUICK_QUOTE_PACKAGE_LABEL = "30 × 20 × 10 cm · 1 kg · seguro R$ 200";
+const QUICK_QUOTE_PACKAGE_LABEL = "30 × 20 × 10 cm · 500 g · seguro R$ 200";
 
 function QuickFreightQuoteModal({ onClose }: { onClose: () => void }) {
   const [cep, setCep] = useState("");

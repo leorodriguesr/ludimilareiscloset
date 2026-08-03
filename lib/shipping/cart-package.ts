@@ -3,11 +3,12 @@ import type { SuperFreteProductInput } from "@/lib/shipping/superfrete";
 import { normalizeSuperfreteInsurance } from "@/lib/shipping/insurance";
 import { packageToSuperFreteKgCm } from "@/lib/shipping/superfrete";
 
-const DEFAULT_PKG = {
-  weightGrams: 300,
-  lengthCm: 16,
-  widthCm: 11,
-  heightCm: 2,
+/** Embalagem padrão quando o produto não tem medidas/peso cadastrados. */
+export const DEFAULT_SHIPPING_PACKAGE = {
+  weightGrams: 500,
+  lengthCm: 30,
+  widthCm: 20,
+  heightCm: 10,
 };
 
 function positiveDimCm(value: number | null | undefined): number | null {
@@ -59,9 +60,9 @@ export async function buildCartShippingPackage(
   if (products.length !== merged.size) throw new Error("PRODUCT_NOT_FOUND");
 
   let weightGrams = 0;
-  let lengthCm = DEFAULT_PKG.lengthCm;
-  let widthCm = DEFAULT_PKG.widthCm;
-  let heightCm = DEFAULT_PKG.heightCm;
+  let lengthCm = DEFAULT_SHIPPING_PACKAGE.lengthCm;
+  let widthCm = DEFAULT_SHIPPING_PACKAGE.widthCm;
+  let heightCm = DEFAULT_SHIPPING_PACKAGE.heightCm;
   let insuranceDeclaredRaw = 0;
   const sfProducts: SuperFreteProductInput[] = [];
 
@@ -70,13 +71,13 @@ export async function buildCartShippingPackage(
     const unitGrams =
       p.weightGrams != null && p.weightGrams > 0
         ? p.weightGrams
-        : DEFAULT_PKG.weightGrams;
+        : DEFAULT_SHIPPING_PACKAGE.weightGrams;
 
     const dims = packageToSuperFreteKgCm({
       weightGrams: unitGrams,
-      lengthCm: positiveDimCm(p.lengthCm) ?? DEFAULT_PKG.lengthCm,
-      widthCm: positiveDimCm(p.widthCm) ?? DEFAULT_PKG.widthCm,
-      heightCm: positiveDimCm(p.heightCm) ?? DEFAULT_PKG.heightCm,
+      lengthCm: positiveDimCm(p.lengthCm) ?? DEFAULT_SHIPPING_PACKAGE.lengthCm,
+      widthCm: positiveDimCm(p.widthCm) ?? DEFAULT_SHIPPING_PACKAGE.widthCm,
+      heightCm: positiveDimCm(p.heightCm) ?? DEFAULT_SHIPPING_PACKAGE.heightCm,
     });
 
     weightGrams += Math.round(unitGrams * qty);
@@ -119,17 +120,17 @@ export function buildDefaultShippingPackage(input: {
 }): BuiltCartPackage {
   const qty = Math.max(1, Math.floor(Number(input.quantity)) || 1);
   const dims = packageToSuperFreteKgCm({
-    weightGrams: DEFAULT_PKG.weightGrams,
-    lengthCm: DEFAULT_PKG.lengthCm,
-    widthCm: DEFAULT_PKG.widthCm,
-    heightCm: DEFAULT_PKG.heightCm,
+    weightGrams: DEFAULT_SHIPPING_PACKAGE.weightGrams,
+    lengthCm: DEFAULT_SHIPPING_PACKAGE.lengthCm,
+    widthCm: DEFAULT_SHIPPING_PACKAGE.widthCm,
+    heightCm: DEFAULT_SHIPPING_PACKAGE.heightCm,
   });
   const { insuranceValue, useInsurance } = normalizeSuperfreteInsurance(
     Math.max(0, Number(input.insuranceValue) || 0)
   );
 
   return {
-    weightGrams: Math.round(DEFAULT_PKG.weightGrams * qty),
+    weightGrams: Math.round(DEFAULT_SHIPPING_PACKAGE.weightGrams * qty),
     lengthCm: dims.lengthCm,
     widthCm: dims.widthCm,
     heightCm: dims.heightCm,
