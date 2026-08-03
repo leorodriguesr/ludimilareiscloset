@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { isMelhorEnvioProtocolCode } from "@/lib/shipping/melhor-envio/label";
 import { mapSuperfreteStatusToShippingStatus } from "@/lib/shipping/service-id";
 import { SHIPPING_PROVIDERS } from "@/lib/shipping/providers";
 
@@ -122,7 +123,11 @@ export async function POST(request: NextRequest) {
 
   const meStatus = data.status ?? event.replace(/^order\./, "");
   const mappedStatus = mapSuperfreteStatusToShippingStatus(meStatus);
-  const tracking = data.tracking?.trim() || undefined;
+  const trackingRaw = data.tracking?.trim() || undefined;
+  const tracking =
+    trackingRaw && !isMelhorEnvioProtocolCode(trackingRaw)
+      ? trackingRaw
+      : undefined;
   const tagUrl = data.tags?.find((t) => t.url?.trim())?.url?.trim();
 
   const orderId = await resolveOrderId(data);

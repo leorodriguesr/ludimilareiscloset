@@ -16,6 +16,7 @@ import {
   createMelhorEnvioLabelForOrder,
   fetchMelhorEnvioOrderInfo,
   fetchMelhorEnvioOrderInfoWithTrackingPoll,
+  isMelhorEnvioProtocolCode,
   printMelhorEnvioLabel,
 } from "@/lib/shipping/melhor-envio/label";
 import type { MelhorEnvioQuotePackage } from "@/lib/shipping/melhor-envio/quote";
@@ -519,6 +520,7 @@ export async function syncOrderShipmentFromSuperfrete(
       labelUrl: true,
       shippingStatus: true,
       shippingProvider: true,
+      trackingCode: true,
     },
   });
   if (!order?.superfreteShipmentId) {
@@ -598,11 +600,20 @@ export async function syncOrderShipmentFromSuperfrete(
       ? "packed"
       : null);
 
+  const trackingUpdate = (() => {
+    if (info.tracking) return { trackingCode: info.tracking };
+    // Limpa ORD-... gravado por engano até o rastreio real existir.
+    if (isMelhorEnvioProtocolCode(order.trackingCode)) {
+      return { trackingCode: null as string | null };
+    }
+    return {};
+  })();
+
   await prisma.order.update({
     where: { id: orderId },
     data: {
       superfreteStatus: info.status,
-      ...(info.tracking ? { trackingCode: info.tracking } : {}),
+      ...trackingUpdate,
       ...(labelUrl ? { labelUrl } : {}),
       ...(nextShippingStatus ? { shippingStatus: nextShippingStatus } : {}),
     },

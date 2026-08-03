@@ -249,25 +249,37 @@ export async function fetchMelhorEnvioOrderInfo(
   };
 }
 
+/** Protocolo interno ME (ORD-...) — não é código de rastreio. */
+export function isMelhorEnvioProtocolCode(value: string | null | undefined): boolean {
+  return Boolean(value && /^ORD-/i.test(value.trim()));
+}
+
+function asTrackingCandidate(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || isMelhorEnvioProtocolCode(trimmed)) return null;
+  return trimmed;
+}
+
 function extractMelhorEnvioTracking(
   info: Record<string, unknown>
 ): string | null {
+  // Nunca usar `protocol` (ORD-...) — isso preenchia a coluna Rastreio cedo demais.
   const keys = [
-    "tracking",
     "melhorenvio_tracking",
     "self_tracking",
+    "tracking",
     "tracking_code",
-    "protocol",
   ] as const;
   for (const key of keys) {
-    const value = info[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
+    const candidate = asTrackingCandidate(info[key]);
+    if (candidate) return candidate;
   }
   const nested = meAsRecord(info.tracking);
   if (nested) {
     for (const key of ["code", "number", "tracking"] as const) {
-      const value = nested[key];
-      if (typeof value === "string" && value.trim()) return value.trim();
+      const candidate = asTrackingCandidate(nested[key]);
+      if (candidate) return candidate;
     }
   }
   return null;
