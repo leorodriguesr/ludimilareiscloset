@@ -264,12 +264,14 @@ function asTrackingCandidate(value: unknown): string | null {
 function extractMelhorEnvioTracking(
   info: Record<string, unknown>
 ): string | null {
-  // Nunca usar `protocol` (ORD-...) — isso preenchia a coluna Rastreio cedo demais.
+  // Prioridade: rastreio da transportadora (`tracking` = AD…/BR…)
+  // antes do código interno ME (`melhorenvio_tracking` = ME…).
+  // Nunca usar `protocol` (ORD-...).
   const keys = [
-    "melhorenvio_tracking",
-    "self_tracking",
     "tracking",
+    "self_tracking",
     "tracking_code",
+    "melhorenvio_tracking",
   ] as const;
   for (const key of keys) {
     const candidate = asTrackingCandidate(info[key]);

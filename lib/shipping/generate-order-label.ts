@@ -599,6 +599,7 @@ export async function syncOrderShipmentFromSuperfrete(
       : null);
 
   const trackingUpdate = (() => {
+    // Sempre grava o rastreio da transportadora quando disponível (ex.: ME… → AD…BR).
     if (info.tracking) return { trackingCode: info.tracking };
     // Limpa ORD-... gravado por engano até o rastreio real existir.
     if (isMelhorEnvioProtocolCode(order.trackingCode)) {

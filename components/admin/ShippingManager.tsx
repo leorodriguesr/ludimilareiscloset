@@ -220,11 +220,16 @@ function chosenShippingPrice(order: ShipmentOrder): number | null {
 }
 
 function trackingUrl(code: string) {
-  // Melhor Envio e códigos ME* usam o portal Melhor Rastreio.
-  if (/^me/i.test(code) || code.includes("-")) {
-    return `https://www.melhorrastreio.com.br/rastreio/${encodeURIComponent(code)}`;
+  const trimmed = code.trim();
+  // ME*, Correios (AD…BR) e protocolos com hífen → Melhor Rastreio.
+  if (
+    /^me/i.test(trimmed) ||
+    /^[A-Z]{2}\d+[A-Z]{2}$/i.test(trimmed) ||
+    trimmed.includes("-")
+  ) {
+    return `https://www.melhorrastreio.com.br/rastreio/${encodeURIComponent(trimmed)}`;
   }
-  return `https://rastreamento.superfrete.com/#${encodeURIComponent(code)}`;
+  return `https://rastreamento.superfrete.com/#${encodeURIComponent(trimmed)}`;
 }
 
 function CopyTrackingLinkButton({ code }: { code: string }) {
