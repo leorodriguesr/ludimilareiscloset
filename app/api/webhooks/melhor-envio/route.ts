@@ -72,6 +72,32 @@ async function resolveExchangeShippingId(
   return row?.id ?? null;
 }
 
+/**
+ * Se o redirect OAuth foi cadastrado por engano nesta URL de webhook,
+ * encaminha code/state para o callback correto (evita HTTP 405).
+ */
+export async function GET(request: NextRequest) {
+  const code = request.nextUrl.searchParams.get("code");
+  const state = request.nextUrl.searchParams.get("state");
+  if (code && state) {
+    const target = new URL(
+      "/api/integrations/melhor-envio/callback",
+      request.nextUrl.origin
+    );
+    request.nextUrl.searchParams.forEach((value, key) => {
+      target.searchParams.set(key, value);
+    });
+    return NextResponse.redirect(target);
+  }
+  return NextResponse.json(
+    {
+      error:
+        "Webhook Melhor Envio aceita apenas POST. URL de OAuth: /api/integrations/melhor-envio/callback",
+    },
+    { status: 405 }
+  );
+}
+
 export async function POST(request: NextRequest) {
   const rawBody = await request.text();
   const signature = request.headers.get("x-me-signature");
