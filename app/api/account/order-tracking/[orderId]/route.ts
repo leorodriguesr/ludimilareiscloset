@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAppSession } from "@/lib/auth-session";
 import { prisma } from "@/lib/prisma";
 import { fetchSuperfreteOrderInfo } from "@/lib/shipping/superfrete-label";
+import { fetchMelhorEnvioOrderInfo } from "@/lib/shipping/melhor-envio/label";
 import { ShippingQuoteError } from "@/lib/shipping/types";
+import {
+  isShippingProvider,
+  SHIPPING_PROVIDERS,
+} from "@/lib/shipping/providers";
 
 export async function GET(
   _req: NextRequest,
@@ -26,6 +31,7 @@ export async function GET(
       shippingStatus: true,
       superfreteStatus: true,
       shippingServiceId: true,
+      shippingProvider: true,
       shippingDeliveryDaysMin: true,
       shippingDeliveryDaysMax: true,
     },
@@ -62,13 +68,20 @@ export async function GET(
   }
 
   try {
-    const liveInfo = await fetchSuperfreteOrderInfo(order.superfreteShipmentId);
+    const provider = isShippingProvider(order.shippingProvider)
+      ? order.shippingProvider
+      : SHIPPING_PROVIDERS.SUPERFRETE;
+    const liveInfo =
+      provider === SHIPPING_PROVIDERS.MELHOR_ENVIO
+        ? await fetchMelhorEnvioOrderInfo(order.superfreteShipmentId)
+        : await fetchSuperfreteOrderInfo(order.superfreteShipmentId);
     return NextResponse.json({
       trackingCode: liveInfo.tracking ?? order.trackingCode,
       shippingStatus: order.shippingStatus,
       superfreteStatus: liveInfo.status ?? order.superfreteStatus,
       shippingServiceId: order.shippingServiceId,
-      // Prazo do pedido (já inclui dias de embalagem da cotação); não usar o da SuperFrete.
+      shippingProvider: provider,
+      // Prazo do pedido (já inclui dias de embalagem da cotação).
       deliveryMin: order.shippingDeliveryDaysMin,
       deliveryMax: order.shippingDeliveryDaysMax,
       liveInfo,

@@ -229,12 +229,16 @@ model Order {
   total     Float
   /** Valor do frete/entrega (R$), validado no servidor na criação. */
   shippingAmount      Float   @default(0)
-  /** Cotação SuperFrete escolhida no checkout (R$). */
+  /** Cotação escolhida no checkout (R$). */
   shippingQuotedPrice       Float?
   shippingDeliveryDaysMin   Int?
   shippingDeliveryDaysMax   Int?
-  /** Valor debitado na SuperFrete ao gerar etiqueta (R$). */
+  /** Valor debitado no provedor ao gerar etiqueta (R$). Coluna legada; também usada pelo Melhor Envio. */
   superfreteShippingPrice   Float?
+  /** Provedor da cotação/etiqueta: SUPERFRETE | MELHOR_ENVIO */
+  shippingProvider          String?
+  /** Snapshot JSON dos packages da cotação escolhida (Melhor Envio). */
+  shippingQuotePackagesJson String?
   shippingServiceName String?
   destinationCep      String?
   /** Dados de contato e entrega coletados no checkout da loja. */
@@ -257,20 +261,20 @@ model Order {
   mercadoPagoPaymentId      String?
   /** Status de envio: to_pack (por embalar) | packed (por enviar) | shipped | delivered | cancelled */
   shippingStatus            String    @default("to_pack")
-  /** Código do serviço SuperFrete escolhido (1=PAC, 2=SEDEX, 3=Jadlog, 17=Mini, 31=Loggi). */
+  /** Código do serviço do provedor (ex.: 1=PAC, 2=SEDEX, 3=Jadlog, 17=Mini, 31=Loggi). */
   shippingServiceId         Int?
-  /** Status bruto retornado pela SuperFrete (pending, released, posted, delivered, cancelled). */
+  /** Status bruto do provedor (pending, released, generated, posted, delivered, cancelled). */
   superfreteStatus          String?
   /** Código de rastreio (disponível após released/posted). */
   trackingCode              String?
-  /** Caixa ideal retornada pela cotação SuperFrete (para etiqueta). */
+  /** Caixa ideal retornada pela cotação (para etiqueta). */
   packageHeightCm           Float?
   packageWidthCm            Float?
   packageLengthCm           Float?
   packageWeightKg           Float?
-  /** ID do pedido criado na SuperFrete para esta etiqueta. */
+  /** ID externo da etiqueta no provedor (SuperFrete ou Melhor Envio). */
   superfreteShipmentId      String?
-  /** URL da etiqueta de envio (gerada pela SuperFrete). */
+  /** URL da etiqueta de envio. */
   labelUrl                  String?
   labelGeneratedAt          DateTime?
   /** Mensagem quando a geração automática de etiqueta falhou após o pagamento. */
@@ -688,4 +692,25 @@ model StoreSettings {
   packagingDays        Int     @default(0)
   /** Valor (R$) cobrado na venda avulsa quando a entrega é pelo entregador da loja. */
   storeDeliveryFee     Float   @default(0)
+}
+
+/** Tokens OAuth do Melhor Envio (conta da loja). */
+model MelhorEnvioAuth {
+  id                     String   @id @default("default")
+  accessTokenEncrypted   String
+  refreshTokenEncrypted  String
+  expiresAt              DateTime
+  scope                  String?
+  connectedAt            DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+}
+
+/** State CSRF temporário do fluxo OAuth Melhor Envio. */
+model MelhorEnvioOAuthState {
+  id        String   @id @default(cuid())
+  state     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
 }

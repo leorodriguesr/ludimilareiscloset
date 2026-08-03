@@ -17,8 +17,13 @@ import {
 import { prisma } from "@/lib/prisma";
 import { quoteShippingForCartLines } from "@/lib/shipping/quote-cart";
 import {
+  optionIdForProvider,
+  resolveShippingProviderFromQuote,
+  SHIPPING_PROVIDERS,
+  type ShippingProvider,
+} from "@/lib/shipping/providers";
+import {
   parseSuperfreteServiceId,
-  superfreteOptionId,
 } from "@/lib/shipping/service-id";
 import type { NormalizedShippingOption } from "@/lib/shipping/types";
 import { normalizePostalCode } from "@/lib/shipping/superfrete";
@@ -67,6 +72,8 @@ export type PreparedOrderRecalculation = {
   shippingDeliveryDaysMax: number | null;
   shippingLabel: string;
   shippingServiceId: number | null;
+  shippingProvider: ShippingProvider;
+  shippingQuotePackagesJson: string | null;
   packageHeightCm: number | null;
   packageWidthCm: number | null;
   packageLengthCm: number | null;
@@ -88,6 +95,8 @@ export type StoredOrderShippingSnapshot = {
   shippingQuotedPrice: number | null;
   shippingDeliveryDaysMin: number | null;
   shippingDeliveryDaysMax: number | null;
+  shippingProvider: string | null;
+  shippingQuotePackagesJson: string | null;
   packageHeightCm: number | null;
   packageWidthCm: number | null;
   packageLengthCm: number | null;
@@ -107,6 +116,8 @@ export function toStoredShippingSnapshot(order: StoredOrderShippingSnapshot): St
     shippingQuotedPrice: order.shippingQuotedPrice,
     shippingDeliveryDaysMin: order.shippingDeliveryDaysMin,
     shippingDeliveryDaysMax: order.shippingDeliveryDaysMax,
+    shippingProvider: order.shippingProvider,
+    shippingQuotePackagesJson: order.shippingQuotePackagesJson,
     packageHeightCm: order.packageHeightCm,
     packageWidthCm: order.packageWidthCm,
     packageLengthCm: order.packageLengthCm,
@@ -214,9 +225,13 @@ function buildPreparedFromStoredShipping(input: {
   const { carrierName, serviceName } = splitShippingLabel(
     input.stored.shippingServiceName
   );
+  const shippingProvider =
+    input.stored.shippingProvider === SHIPPING_PROVIDERS.MELHOR_ENVIO
+      ? SHIPPING_PROVIDERS.MELHOR_ENVIO
+      : SHIPPING_PROVIDERS.SUPERFRETE;
 
   const chosenOption: NormalizedShippingOption = {
-    id: superfreteOptionId(serviceId),
+    id: optionIdForProvider(shippingProvider, serviceId),
     serviceId,
     carrierName,
     serviceName,
@@ -236,6 +251,8 @@ function buildPreparedFromStoredShipping(input: {
       input.stored.shippingServiceName?.trim() ||
       `${carrierName} — ${serviceName}`,
     shippingServiceId: serviceId,
+    shippingProvider,
+    shippingQuotePackagesJson: input.stored.shippingQuotePackagesJson,
     packageHeightCm: input.stored.packageHeightCm,
     packageWidthCm: input.stored.packageWidthCm,
     packageLengthCm: input.stored.packageLengthCm,
@@ -297,6 +314,13 @@ export async function prepareOrderRecalculation(
   }
 
   const ideal = quoteResult.idealPackage;
+  const shippingProvider = resolveShippingProviderFromQuote({
+    optionId: input.shipping.optionId,
+    quoteProvider: quoteResult.provider,
+  });
+  const shippingQuotePackagesJson = Array.isArray(chosen.packages)
+    ? JSON.stringify(chosen.packages)
+    : null;
 
   return {
     mergedLines,
@@ -310,6 +334,8 @@ export async function prepareOrderRecalculation(
     shippingLabel: `${chosen.carrierName} — ${chosen.serviceName}`,
     shippingServiceId:
       chosen.serviceId ?? parseSuperfreteServiceId(input.shipping.optionId),
+    shippingProvider,
+    shippingQuotePackagesJson,
     packageHeightCm: ideal?.heightCm ?? null,
     packageWidthCm: ideal?.widthCm ?? null,
     packageLengthCm: ideal?.lengthCm ?? null,
@@ -506,6 +532,8 @@ export async function persistRecalculatedOrder(
       "packageWidthCm" = ?,
       "packageLengthCm" = ?,
       "packageWeightKg" = ?,
+      "shippingProvider" = ?,
+      "shippingQuotePackagesJson" = ?,
       "updatedAt" = datetime('now')
     WHERE "id" = ?`,
     prepared.shippingAmount,
@@ -528,6 +556,8 @@ export async function persistRecalculatedOrder(
     prepared.packageWidthCm,
     prepared.packageLengthCm,
     prepared.packageWeightKg,
+    prepared.shippingProvider,
+    prepared.shippingQuotePackagesJson,
     orderId
   );
 }
@@ -565,6 +595,8 @@ export async function recalculateOrder(
       shippingQuotedPrice: true,
       shippingDeliveryDaysMin: true,
       shippingDeliveryDaysMax: true,
+      shippingProvider: true,
+      shippingQuotePackagesJson: true,
       packageHeightCm: true,
       packageWidthCm: true,
       packageLengthCm: true,

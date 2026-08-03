@@ -13,6 +13,22 @@ import {
 } from "@/lib/shipping/dev-mock-shipping";
 import { applyPackagingDays, getPackagingDays } from "@/lib/shipping/packaging-days";
 import type { ShippingQuoteResult } from "@/lib/shipping/types";
+import { resolveActiveShippingProvider } from "@/lib/shipping/resolve-active-provider";
+import { SHIPPING_PROVIDERS } from "@/lib/shipping/providers";
+import { calculateShippingMelhorEnvio } from "@/lib/shipping/melhor-envio/quote";
+import { ShippingQuoteError } from "@/lib/shipping/types";
+
+function readOriginPostalCode(): string {
+  const origin = (process.env.SHIPPING_ORIGIN_POSTAL_CODE ?? "").replace(/\D/g, "");
+  if (origin.length !== 8) {
+    throw new ShippingQuoteError(
+      "CONFIG",
+      "SHIPPING_ORIGIN_POSTAL_CODE inválido.",
+      503
+    );
+  }
+  return origin;
+}
 
 async function quoteMock(): Promise<ShippingQuoteResult | null> {
   if (!isShippingMockEnabled()) return null;
@@ -32,6 +48,30 @@ async function finalizeLiveQuote(
   insuranceValue: number,
   useInsurance: boolean
 ): Promise<ShippingQuoteResult> {
+  const provider = await resolveActiveShippingProvider();
+
+  if (provider === SHIPPING_PROVIDERS.MELHOR_ENVIO) {
+    const result = await calculateShippingMelhorEnvio({
+      originPostalCode: readOriginPostalCode(),
+      destinationPostalCode: dest,
+      products: (products ?? []).map((p, idx) => ({
+        id: p.id || `p-${idx + 1}`,
+        quantity: p.quantity,
+        weight: p.weight,
+        height: p.height,
+        width: p.width,
+        length: p.length,
+        insurance_value: p.insurance_value ?? 0,
+      })),
+      insuranceValue: useInsurance ? insuranceValue : undefined,
+    });
+    const packagingDays = await getPackagingDays();
+    return {
+      ...result,
+      options: applyPackagingDays(result.options, packagingDays),
+    };
+  }
+
   const result = await calculateShippingSuperFreteWithStoreOrigin({
     destinationPostalCode: dest,
     products,

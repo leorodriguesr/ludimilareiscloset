@@ -52,11 +52,7 @@ export function ClientLoginForm({
         setError(typeof data.error === "string" ? data.error : "Falha no login.");
         return;
       }
-      const dest =
-        intent === "admin"
-          ? "/admin"
-          : safeNext ?? defaultRedirect;
-      router.push(dest);
+      router.push(safeNext ?? defaultRedirect);
       router.refresh();
     } finally {
       setLoading(false);

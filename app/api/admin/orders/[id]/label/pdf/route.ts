@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { downloadLabelPdfForShipment } from "@/lib/shipping/fetch-label-pdf";
+import {
+  downloadLabelPdfForShipment,
+  isLabelPrintRedirectError,
+} from "@/lib/shipping/fetch-label-pdf";
 import { ShippingQuoteError } from "@/lib/shipping/types";
 import { requireAdminApi } from "@/lib/require-admin-api";
 
@@ -19,6 +22,7 @@ export async function GET(
       orderNumber: true,
       superfreteShipmentId: true,
       labelUrl: true,
+      shippingProvider: true,
     },
   });
 
@@ -32,7 +36,8 @@ export async function GET(
   try {
     const { pdf, labelUrl, refreshed } = await downloadLabelPdfForShipment(
       order.superfreteShipmentId,
-      order.labelUrl
+      order.labelUrl,
+      order.shippingProvider
     );
 
     if (refreshed) {
@@ -56,6 +61,14 @@ export async function GET(
       },
     });
   } catch (e) {
+    if (isLabelPrintRedirectError(e)) {
+      const labelUrl = e.details.labelUrl;
+      await prisma.order.update({
+        where: { id },
+        data: { labelUrl },
+      });
+      return NextResponse.redirect(labelUrl);
+    }
     if (e instanceof ShippingQuoteError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }

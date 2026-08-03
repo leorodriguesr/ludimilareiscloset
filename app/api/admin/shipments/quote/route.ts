@@ -6,6 +6,9 @@ import {
   mockShippingQuote,
 } from "@/lib/shipping/dev-mock-shipping";
 import { applyPackagingDays, getPackagingDays } from "@/lib/shipping/packaging-days";
+import { calculateShippingMelhorEnvio } from "@/lib/shipping/melhor-envio/quote";
+import { resolveActiveShippingProvider } from "@/lib/shipping/resolve-active-provider";
+import { SHIPPING_PROVIDERS } from "@/lib/shipping/providers";
 import {
   calculateShippingSuperFreteWithStoreOrigin,
   normalizePostalCode,
@@ -59,17 +62,42 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const result = await calculateShippingSuperFreteWithStoreOrigin({
-      destinationPostalCode: dest,
-      lengthCm: QUICK_QUOTE_PACKAGE.lengthCm,
-      widthCm: QUICK_QUOTE_PACKAGE.widthCm,
-      heightCm: QUICK_QUOTE_PACKAGE.heightCm,
-      weightKg: QUICK_QUOTE_PACKAGE.weightKg,
-      insuranceValue: QUICK_QUOTE_INSURANCE_VALUE,
-      useInsurance: true,
-    });
+    const provider = await resolveActiveShippingProvider();
+    const origin = (process.env.SHIPPING_ORIGIN_POSTAL_CODE ?? "").replace(
+      /\D/g,
+      ""
+    );
+
+    const result =
+      provider === SHIPPING_PROVIDERS.MELHOR_ENVIO
+        ? await calculateShippingMelhorEnvio({
+            originPostalCode: origin,
+            destinationPostalCode: dest,
+            products: [
+              {
+                id: "quick-quote",
+                quantity: 1,
+                weight: QUICK_QUOTE_PACKAGE.weightKg,
+                height: QUICK_QUOTE_PACKAGE.heightCm,
+                width: QUICK_QUOTE_PACKAGE.widthCm,
+                length: QUICK_QUOTE_PACKAGE.lengthCm,
+                insurance_value: QUICK_QUOTE_INSURANCE_VALUE,
+              },
+            ],
+            insuranceValue: QUICK_QUOTE_INSURANCE_VALUE,
+          })
+        : await calculateShippingSuperFreteWithStoreOrigin({
+            destinationPostalCode: dest,
+            lengthCm: QUICK_QUOTE_PACKAGE.lengthCm,
+            widthCm: QUICK_QUOTE_PACKAGE.widthCm,
+            heightCm: QUICK_QUOTE_PACKAGE.heightCm,
+            weightKg: QUICK_QUOTE_PACKAGE.weightKg,
+            insuranceValue: QUICK_QUOTE_INSURANCE_VALUE,
+            useInsurance: true,
+          });
 
     return NextResponse.json({
+      provider,
       options: applyPackagingDays(result.options, packagingDays),
       idealPackage: result.idealPackage,
       package: QUICK_QUOTE_PACKAGE,

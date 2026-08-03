@@ -27,11 +27,14 @@ const SERVICE_ID_LABELS: Record<number, { carrier: string; service: string }> = 
 };
 
 export type SuperFreteProductInput = {
+  /** ID estável do produto (necessário no Melhor Envio / DCe). */
+  id?: string;
   quantity: number;
   weight: number;
   height: number;
   width: number;
   length: number;
+  insurance_value?: number;
 };
 
 export type SuperFreteQuoteInput = {

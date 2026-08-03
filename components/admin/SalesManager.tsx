@@ -108,6 +108,7 @@ type AdminOrder = {
   paymentMethod?: string | null;
   paymentCaptureMethod: string | null;
   shippingStatus: string;
+  shippingProvider?: string | null;
   superfreteStatus: string | null;
   trackingCode: string | null;
   superfreteShipmentId: string | null;
@@ -2590,7 +2591,13 @@ function OrderDetailsBody({
                   className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-200"
                 />
                 {hasActiveLabel ? (
-                  <p className="text-xs text-stone-500">A etiqueta será cancelada na SuperFrete.</p>
+                  <p className="text-xs text-stone-500">
+                    A etiqueta será cancelada no{" "}
+                    {order.shippingProvider === "MELHOR_ENVIO"
+                      ? "Melhor Envio"
+                      : "SuperFrete"}
+                    .
+                  </p>
                 ) : null}
                 <div className="flex gap-2">
                   <button

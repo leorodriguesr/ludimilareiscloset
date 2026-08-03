@@ -49,7 +49,15 @@ export async function middleware(request: NextRequest) {
     if (!user) {
       const url = request.nextUrl.clone();
       url.pathname = "/admin/login";
+      // Mantém retorno do OAuth Melhor Envio visível após re-login.
+      const meOauth = request.nextUrl.searchParams.get("me_oauth");
+      const meOauthMsg = request.nextUrl.searchParams.get("me_oauth_msg");
       url.search = "";
+      if (meOauth) {
+        url.searchParams.set("next", "/admin?section=shipping");
+        url.searchParams.set("me_oauth", meOauth);
+        if (meOauthMsg) url.searchParams.set("me_oauth_msg", meOauthMsg);
+      }
       return NextResponse.redirect(url);
     }
     if (!isStaffRole(user.role)) {

@@ -1,10 +1,8 @@
-/** Converte optionId da loja (ex.: "sf:3") em serviceId numérico SuperFrete. */
+import { parseShippingOptionId } from "@/lib/shipping/providers";
+
+/** Converte optionId da loja (ex.: "sf:3" | "me:3") em serviceId numérico. */
 export function parseSuperfreteServiceId(optionId: string): number | null {
-  const trimmed = optionId.trim();
-  const prefixed = trimmed.match(/^sf:(\d+)$/i);
-  if (prefixed) return Number(prefixed[1]);
-  const n = Number(trimmed);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+  return parseShippingOptionId(optionId).serviceId;
 }
 
 /** Infere serviceId a partir do rótulo salvo no pedido (ex.: "jadlog — JADLOG Econômico"). */
@@ -46,17 +44,20 @@ export function requiresContentDeclaration(serviceId: number): boolean {
 }
 
 export const SUPERFRETE_STATUS_LABELS: Record<string, string> = {
-  pending: "Aguardando pagamento (SF)",
+  pending: "Aguardando pagamento",
   released: "Etiqueta paga — aguardando postagem",
+  generated: "Etiqueta gerada — aguardando postagem",
   posted: "Postado",
   delivered: "Entregue",
   cancelled: "Cancelado",
+  undelivered: "Não entregue",
+  paused: "Pausado",
+  suspended: "Suspenso",
 };
 
 /**
- * Mapeia status bruto da SuperFrete para `shippingStatus` do pedido.
- * `to_pack` e `packed` (por enviar) são controlados manualmente no admin;
- * a SuperFrete só avança para enviado/entregue após postagem.
+ * Mapeia status bruto do provedor (SuperFrete/Melhor Envio) para `shippingStatus`.
+ * `to_pack` e `packed` (por enviar) são controlados manualmente no admin.
  */
 export function mapSuperfreteStatusToShippingStatus(
   sfStatus: string | null | undefined

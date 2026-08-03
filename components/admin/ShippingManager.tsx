@@ -65,6 +65,7 @@ type ShipmentOrder = {
   deliveryNotes?: string | null;
   internalNotes?: string | null;
   shippingServiceId: number | null;
+  shippingProvider?: string | null;
   shippingStatus: string;
   superfreteStatus: string | null;
   trackingCode: string | null;
@@ -219,6 +220,10 @@ function chosenShippingPrice(order: ShipmentOrder): number | null {
 }
 
 function trackingUrl(code: string) {
+  // Melhor Envio e códigos ME* usam o portal Melhor Rastreio.
+  if (/^me/i.test(code) || code.includes("-")) {
+    return `https://www.melhorrastreio.com.br/rastreio/${encodeURIComponent(code)}`;
+  }
   return `https://rastreamento.superfrete.com/#${encodeURIComponent(code)}`;
 }
 
@@ -1184,16 +1189,17 @@ function useShipmentActions(order: ShipmentOrder, onRefresh: () => void) {
     awaitingTracking,
   ]);
 
-  async function pollTrackingUntilReady(attemptsLeft = 8) {
+  async function pollTrackingUntilReady(attemptsLeft = 6) {
     if (attemptsLeft <= 0) {
       setAwaitingTracking(false);
       return;
     }
     try {
+      // Sem quick: o sync faz print (se preciso) e espera o rastreio no provedor.
       const syncRes = await fetch(`/api/admin/orders/${order.id}/shipment/sync`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quick: true }),
+        body: JSON.stringify({ quick: false }),
       });
       if (syncRes.ok) {
         const syncData = (await syncRes.json()) as { tracking?: string | null };
@@ -1207,7 +1213,7 @@ function useShipmentActions(order: ShipmentOrder, onRefresh: () => void) {
     } catch {
       /* retry */
     }
-    window.setTimeout(() => void pollTrackingUntilReady(attemptsLeft - 1), 2000);
+    window.setTimeout(() => void pollTrackingUntilReady(attemptsLeft - 1), 2500);
   }
 
   async function runAction(
@@ -1249,9 +1255,6 @@ function useShipmentActions(order: ShipmentOrder, onRefresh: () => void) {
             "Etiqueta ainda aguarda pagamento na SuperFrete. Pague lá e sincronize de novo."
         );
       }
-      if (opts?.openPdf !== false && data.shipmentId && !paymentPending) {
-        window.open(`/api/admin/orders/${order.id}/label/pdf`, "_blank");
-      }
       if (key === "cancel") {
         setLocalTracking(null);
         setAwaitingTracking(false);
@@ -1259,9 +1262,14 @@ function useShipmentActions(order: ShipmentOrder, onRefresh: () => void) {
         setLocalTracking(data.tracking);
         setAwaitingTracking(false);
       }
-      onRefresh();
       if (key === "label" && !data.tracking && !paymentPending) {
         setAwaitingTracking(true);
+      }
+      onRefresh();
+      if (opts?.openPdf !== false && data.shipmentId && !paymentPending) {
+        window.open(`/api/admin/orders/${order.id}/label/pdf`, "_blank");
+      }
+      if (key === "label" && !data.tracking && !paymentPending) {
         void pollTrackingUntilReady();
       }
       return true;
@@ -1550,7 +1558,11 @@ function ShipmentRowActionsMenu({
             </svg>
           ),
           onClick: () => {
-            if (!confirm("Cancelar etiqueta na SuperFrete?")) return;
+            const providerLabel =
+              order.shippingProvider === "MELHOR_ENVIO"
+                ? "Melhor Envio"
+                : "SuperFrete";
+            if (!confirm(`Cancelar a etiqueta no ${providerLabel}?`)) return;
             void runAction("cancel", `/api/admin/orders/${order.id}/shipment/cancel`, "POST", {
               reason: "Cancelado pelo administrador",
             });
@@ -1571,6 +1583,7 @@ function ShipmentRowActionsMenu({
     onViewPacking,
     order.id,
     order.labelUrl,
+    order.shippingProvider,
     order.shippingStatus,
     order.superfreteShipmentId,
     order.superfreteStatus,
@@ -1798,6 +1811,17 @@ function ShipmentRow({
 
 /* ─── Componente principal ────────────────────────────────────────── */
 
+type MelhorEnvioStatus = {
+  enabled: boolean;
+  activeProvider: string;
+  configured: boolean;
+  connected: boolean;
+  environmentLabel: string | null;
+  walletUrl: string | null;
+  expiresAt: string | null;
+  error?: string;
+};
+
 export function ShippingManager() {
   const { isAdmin } = useAuth();
   const [orders, setOrders] = useState<ShipmentOrder[]>([]);
@@ -1806,6 +1830,9 @@ export function ShippingManager() {
   const [wallet, setWallet] = useState<WalletInfo | null>(null);
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletError, setWalletError] = useState<string | null>(null);
+  const [meStatus, setMeStatus] = useState<MelhorEnvioStatus | null>(null);
+  const [meLoading, setMeLoading] = useState(false);
+  const [meMsg, setMeMsg] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
@@ -1835,6 +1862,59 @@ export function ShippingManager() {
       setWalletLoading(false);
     }
   }, []);
+
+  const fetchMelhorEnvioStatus = useCallback(async () => {
+    setMeLoading(true);
+    try {
+      const res = await fetch("/api/admin/melhor-envio/status");
+      const data = (await res.json()) as MelhorEnvioStatus;
+      if (!res.ok) {
+        setMeStatus(null);
+        setMeMsg(data.error ?? "Não foi possível consultar Melhor Envio.");
+        return;
+      }
+      setMeStatus(data);
+    } catch {
+      setMeStatus(null);
+      setMeMsg("Erro de conexão ao consultar Melhor Envio.");
+    } finally {
+      setMeLoading(false);
+    }
+  }, []);
+
+  const connectMelhorEnvio = useCallback(async () => {
+    setMeMsg(null);
+    try {
+      const res = await fetch("/api/admin/melhor-envio/authorize");
+      const data = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok || !data.url) {
+        setMeMsg(data.error ?? "Não foi possível iniciar a autorização.");
+        return;
+      }
+      window.location.href = data.url;
+    } catch {
+      setMeMsg("Erro ao iniciar autorização Melhor Envio.");
+    }
+  }, []);
+
+  const disconnectMelhorEnvio = useCallback(async () => {
+    if (!confirm("Desconectar a conta Melhor Envio desta loja?")) return;
+    setMeMsg(null);
+    try {
+      const res = await fetch("/api/admin/melhor-envio/disconnect", {
+        method: "POST",
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        setMeMsg(data.error ?? "Falha ao desconectar.");
+        return;
+      }
+      setMeMsg("Conta Melhor Envio desconectada.");
+      await fetchMelhorEnvioStatus();
+    } catch {
+      setMeMsg("Erro ao desconectar Melhor Envio.");
+    }
+  }, [fetchMelhorEnvioStatus]);
 
   const fetchShipments = useCallback(async () => {
     setLoading(true);
@@ -1866,10 +1946,31 @@ export function ShippingManager() {
       setWallet(null);
       setWalletError(null);
       setWalletLoading(false);
+      setMeStatus(null);
       return;
     }
     void fetchWallet();
-  }, [fetchWallet, isAdmin]);
+    void fetchMelhorEnvioStatus();
+  }, [fetchWallet, fetchMelhorEnvioStatus, isAdmin]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const oauth = params.get("me_oauth");
+    if (!oauth) return;
+    if (oauth === "ok") {
+      setMeMsg("Melhor Envio conectado com sucesso.");
+      void fetchMelhorEnvioStatus();
+    } else {
+      setMeMsg(
+        params.get("me_oauth_msg") || "Falha na autorização do Melhor Envio."
+      );
+    }
+    params.delete("me_oauth");
+    params.delete("me_oauth_msg");
+    const next = `${window.location.pathname}${params.toString() ? `?${params}` : ""}`;
+    window.history.replaceState({}, "", next);
+  }, [fetchMelhorEnvioStatus]);
 
   const filterCounts = useMemo(
     () => ({
@@ -2009,10 +2110,86 @@ export function ShippingManager() {
       </div>
 
       {isAdmin ? (
+      <div className="space-y-4">
+      <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm sm:p-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-stone-400">
+              Melhor Envio
+            </p>
+            {meLoading ? (
+              <p className="mt-1 text-sm text-stone-400">Consultando…</p>
+            ) : meStatus ? (
+              <>
+                <p className="mt-1 text-sm text-stone-800">
+                  {meStatus.enabled
+                    ? meStatus.connected
+                      ? `Conectado · provedor ativo: ${meStatus.activeProvider}`
+                      : "Habilitado, mas ainda não autorizado"
+                    : "Desabilitado (MELHOR_ENVIO_ENABLED)"}
+                  {meStatus.environmentLabel
+                    ? ` · ${meStatus.environmentLabel}`
+                    : ""}
+                </p>
+                {meStatus.expiresAt ? (
+                  <p className="mt-1 text-xs text-stone-500">
+                    Token válido até{" "}
+                    {new Date(meStatus.expiresAt).toLocaleString("pt-BR")}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <p className="mt-1 text-sm text-stone-500">
+                Configure as variáveis do Melhor Envio para conectar.
+              </p>
+            )}
+            {meMsg ? (
+              <p className="mt-2 text-sm text-stone-700">{meMsg}</p>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap justify-end gap-2">
+            {meStatus?.walletUrl ? (
+              <a
+                href={meStatus.walletUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`inline-flex items-center justify-center rounded-lg bg-emerald-100 px-3 text-xs font-semibold text-emerald-900 shadow-sm ring-1 ring-emerald-200/80 transition-colors hover:bg-emerald-200 ${SHIPPING_TOOLBAR_SIZE}`}
+              >
+                Carteira ME
+              </a>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void connectMelhorEnvio()}
+              className={`inline-flex items-center justify-center rounded-lg bg-stone-900 px-3 text-xs font-semibold text-white transition-colors hover:bg-stone-800 ${SHIPPING_TOOLBAR_SIZE}`}
+            >
+              {meStatus?.connected ? "Reconectar" : "Conectar"}
+            </button>
+            {meStatus?.connected ? (
+              <button
+                type="button"
+                onClick={() => void disconnectMelhorEnvio()}
+                className={`inline-flex items-center justify-center rounded-lg border border-stone-200 bg-white px-3 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 ${SHIPPING_TOOLBAR_SIZE}`}
+              >
+                Desconectar
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void fetchMelhorEnvioStatus()}
+              disabled={meLoading}
+              className={`inline-flex items-center justify-center rounded-lg border border-stone-200 bg-white px-3 text-xs font-medium text-stone-600 transition-colors hover:bg-stone-50 disabled:opacity-50 ${SHIPPING_TOOLBAR_SIZE}`}
+            >
+              Atualizar
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm sm:p-5">
         {wallet?.environment === "sandbox" ? (
           <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            <span className="font-semibold">Modo Sandbox</span> — cotações e etiquetas são de teste.
+            <span className="font-semibold">Modo Sandbox SuperFrete</span> — legado, usado quando Melhor Envio não está ativo.
             Recarregue saldo em{" "}
             <a
               href="https://sandbox.superfrete.com/#/account/credits"
@@ -2091,6 +2268,7 @@ export function ShippingManager() {
             </button>
           </div>
         </div>
+      </div>
       </div>
       ) : null}
 

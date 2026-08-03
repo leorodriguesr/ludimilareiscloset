@@ -6,6 +6,7 @@ import { quoteShippingForCartLines } from "@/lib/shipping/quote-cart";
 import { parseSuperfreteServiceId } from "@/lib/shipping/service-id";
 import { normalizePostalCode } from "@/lib/shipping/superfrete";
 import { CHECKOUT_SHIPPING_AMOUNT_BRL } from "@/lib/config/checkout-shipping-charge";
+import { resolveShippingProviderFromQuote } from "@/lib/shipping/providers";
 
 export type CheckoutLineInput = {
   productId: string;
@@ -130,6 +131,13 @@ export async function createOrderFromCheckout(input: {
   const shippingServiceId =
     chosen.serviceId ?? parseSuperfreteServiceId(input.shipping.optionId);
   const ideal = quoteResult.idealPackage;
+  const shippingProvider = resolveShippingProviderFromQuote({
+    optionId: input.shipping.optionId,
+    quoteProvider: quoteResult.provider,
+  });
+  const packagesJson = Array.isArray(chosen.packages)
+    ? JSON.stringify(chosen.packages)
+    : null;
 
   return prisma.$transaction(async (tx) => {
     const resolved: {
@@ -257,6 +265,8 @@ export async function createOrderFromCheckout(input: {
         "packageWidthCm" = ?,
         "packageLengthCm" = ?,
         "packageWeightKg" = ?,
+        "shippingProvider" = ?,
+        "shippingQuotePackagesJson" = ?,
         "updatedAt" = datetime('now')
       WHERE "id" = ?`,
       shippingAmount,
@@ -279,6 +289,8 @@ export async function createOrderFromCheckout(input: {
       ideal?.widthCm ?? null,
       ideal?.lengthCm ?? null,
       ideal?.weightKg ?? null,
+      shippingProvider,
+      packagesJson,
       created.id
     );
 

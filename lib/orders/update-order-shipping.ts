@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { quoteShippingForOrder } from "@/lib/shipping/quote-order";
 import { parseSuperfreteServiceId } from "@/lib/shipping/service-id";
 import { ShippingQuoteError } from "@/lib/shipping/types";
+import { resolveShippingProviderFromQuote } from "@/lib/shipping/providers";
 
 export async function updateOrderShippingOption(orderId: string, optionId: string) {
   const trimmedOptionId = optionId.trim();
@@ -50,6 +51,13 @@ export async function updateOrderShippingOption(orderId: string, optionId: strin
   const shippingServiceId =
     chosen.serviceId ?? parseSuperfreteServiceId(trimmedOptionId);
   const ideal = quote.idealPackage;
+  const shippingProvider = resolveShippingProviderFromQuote({
+    optionId: trimmedOptionId,
+    quoteProvider: quote.provider,
+  });
+  const packagesJson = Array.isArray(chosen.packages)
+    ? JSON.stringify(chosen.packages)
+    : null;
   // Após cancelar etiqueta, limpa rastros cancelados e volta a "por embalar".
   const nextShippingStatus =
     order.shippingStatus === "cancelled" ? "to_pack" : order.shippingStatus;
@@ -61,6 +69,8 @@ export async function updateOrderShippingOption(orderId: string, optionId: strin
       "shippingDeliveryDaysMax" = ?,
       "shippingServiceName" = ?,
       "shippingServiceId" = ?,
+      "shippingProvider" = ?,
+      "shippingQuotePackagesJson" = ?,
       "packageHeightCm" = ?,
       "packageWidthCm" = ?,
       "packageLengthCm" = ?,
@@ -78,6 +88,8 @@ export async function updateOrderShippingOption(orderId: string, optionId: strin
     shippingDeliveryDaysMax,
     shippingServiceName,
     shippingServiceId,
+    shippingProvider,
+    packagesJson,
     ideal?.heightCm ?? null,
     ideal?.widthCm ?? null,
     ideal?.lengthCm ?? null,
@@ -93,5 +105,6 @@ export async function updateOrderShippingOption(orderId: string, optionId: strin
     shippingDeliveryDaysMin,
     shippingDeliveryDaysMax,
     shippingStatus: nextShippingStatus,
+    shippingProvider,
   };
 }

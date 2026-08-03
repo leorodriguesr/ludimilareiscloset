@@ -1,8 +1,8 @@
-/** Opção de frete normalizada — independente do provedor (SuperFrete, etc.). */
+/** Opção de frete normalizada — independente do provedor. */
 export type NormalizedShippingOption = {
-  /** Identificador estável para reutilizar na finalização do pedido (ex.: sf:3). */
+  /** Identificador estável para reutilizar na finalização do pedido (ex.: sf:3 | me:3). */
   id: string;
-  /** Código numérico do serviço SuperFrete, quando disponível. */
+  /** Código numérico do serviço, quando disponível. */
   serviceId: number | null;
   carrierName: string;
   serviceName: string;
@@ -10,9 +10,11 @@ export type NormalizedShippingOption = {
   /** Prazo em dias úteis (intervalo quando disponível). */
   deliveryDaysMin: number;
   deliveryDaysMax: number;
+  /** Pacotes retornados na cotação (Melhor Envio). */
+  packages?: unknown[];
 };
 
-/** Caixa ideal calculada pela SuperFrete ao usar products[]. */
+/** Caixa ideal calculada na cotação ao usar products[]. */
 export type IdealPackage = {
   weightKg: number;
   heightCm: number;
@@ -23,6 +25,8 @@ export type IdealPackage = {
 export type ShippingQuoteResult = {
   options: NormalizedShippingOption[];
   idealPackage: IdealPackage | null;
+  /** Provedor usado nesta cotação, quando aplicável. */
+  provider?: "SUPERFRETE" | "MELHOR_ENVIO";
 };
 
 export type ShippingQuoteErrorCode =

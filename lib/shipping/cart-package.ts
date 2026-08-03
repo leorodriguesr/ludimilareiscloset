@@ -86,12 +86,15 @@ export async function buildCartShippingPackage(
 
     insuranceDeclaredRaw += Math.max(0, Math.round(p.price * qty * 100) / 100);
 
+    const lineInsurance = Math.max(0, Math.round(p.price * qty * 100) / 100);
     sfProducts.push({
+      id: p.id,
       quantity: qty,
       weight: dims.weightKg,
       height: dims.heightCm,
       width: dims.widthCm,
       length: dims.lengthCm,
+      insurance_value: Math.round((lineInsurance / qty) * 100) / 100,
     });
   }
 
@@ -134,11 +137,14 @@ export function buildDefaultShippingPackage(input: {
     useInsurance,
     products: [
       {
+        id: "default",
         quantity: qty,
         weight: dims.weightKg,
         height: dims.heightCm,
         width: dims.widthCm,
         length: dims.lengthCm,
+        insurance_value:
+          Math.round(((insuranceValue ?? 0) / qty) * 100) / 100,
       },
     ],
   };

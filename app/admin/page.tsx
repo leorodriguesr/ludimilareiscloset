@@ -194,7 +194,24 @@ export default function AdminPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [bannerUrl, setBannerUrl] = useState("");
   const [bannerMobileUrl, setBannerMobileUrl] = useState("");
-  const [activeSection, setActiveSection] = useState<AdminSection>("products");
+  const [activeSection, setActiveSection] = useState<AdminSection>(() => {
+    if (typeof window === "undefined") return "products";
+    const section = new URLSearchParams(window.location.search).get("section");
+    const allowed: AdminSection[] = [
+      "products",
+      "sections",
+      "categories",
+      "banner",
+      "sales",
+      "shipping",
+      "exchanges",
+      "settings",
+      "users",
+    ];
+    return allowed.includes(section as AdminSection)
+      ? (section as AdminSection)
+      : "products";
+  });
   const [showProductModal, setShowProductModal] = useState(false);
   const [productSearchQuery, setProductSearchQuery] = useState("");
 

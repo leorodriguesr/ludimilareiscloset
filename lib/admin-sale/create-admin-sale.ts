@@ -37,6 +37,9 @@ import {
   quoteShippingForDefaultPackage,
 } from "@/lib/shipping/quote-cart";
 import {
+  resolveShippingProviderFromQuote,
+} from "@/lib/shipping/providers";
+import {
   parseSuperfreteServiceId,
 } from "@/lib/shipping/service-id";
 import { normalizePostalCode } from "@/lib/shipping/superfrete";
@@ -188,6 +191,13 @@ async function resolveShipping(input: CreateAdminSaleInput) {
     const quotedPrice = Math.round(chosen.price * 100) / 100;
     const cheapest = [...quote.options].sort((a, b) => a.price - b.price)[0];
     const isCheapestOption = cheapest?.id === chosen.id;
+    const shippingProvider = resolveShippingProviderFromQuote({
+      optionId: input.carrierShipping.optionId,
+      quoteProvider: quote.provider,
+    });
+    const shippingQuotePackagesJson = Array.isArray(chosen.packages)
+      ? JSON.stringify(chosen.packages)
+      : null;
 
     return {
       shippingAmount: quotedPrice,
@@ -202,6 +212,8 @@ async function resolveShipping(input: CreateAdminSaleInput) {
       shippingServiceId:
         chosen.serviceId ??
         parseSuperfreteServiceId(input.carrierShipping.optionId),
+      shippingProvider,
+      shippingQuotePackagesJson,
       packageHeightCm: quote.idealPackage?.heightCm ?? null,
       packageWidthCm: quote.idealPackage?.widthCm ?? null,
       packageLengthCm: quote.idealPackage?.lengthCm ?? null,
@@ -231,6 +243,8 @@ async function resolveShipping(input: CreateAdminSaleInput) {
     shippingDeliveryDaysMax: null,
     shippingServiceName: arrangedServiceName,
     shippingServiceId: null,
+    shippingProvider: null,
+    shippingQuotePackagesJson: null,
     packageHeightCm: null,
     packageWidthCm: null,
     packageLengthCm: null,
@@ -390,6 +404,8 @@ export async function createAdminSale(
         shippingDeliveryDaysMax: shipping.shippingDeliveryDaysMax,
         shippingServiceName: shipping.shippingServiceName,
         shippingServiceId: shipping.shippingServiceId,
+        shippingProvider: shipping.shippingProvider,
+        shippingQuotePackagesJson: shipping.shippingQuotePackagesJson,
         destinationCep:
           shipping.destinationCep ??
           (fillNow && !isArranged && input.address

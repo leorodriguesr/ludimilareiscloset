@@ -82,6 +82,9 @@ function cepMask(v: string) {
 }
 
 function getTrackingUrl(code: string) {
+  if (/^me/i.test(code)) {
+    return `https://www.melhorrastreio.com.br/rastreio/${encodeURIComponent(code)}`;
+  }
   return `https://rastreamento.superfrete.com/#${encodeURIComponent(code)}`;
 }
 
