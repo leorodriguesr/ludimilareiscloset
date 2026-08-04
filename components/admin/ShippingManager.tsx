@@ -1108,6 +1108,10 @@ function ChangeShippingModal({
         <div className="max-h-[min(60vh,420px)] overflow-y-auto px-5 py-4">
           {loading ? (
             <p className="py-8 text-center text-sm text-stone-400">Consultando opções…</p>
+          ) : error && options.length === 0 ? (
+            <p className="py-8 text-center text-sm text-stone-500">
+              Não foi possível cotar o frete deste pedido.
+            </p>
           ) : options.length === 0 ? (
             <p className="py-8 text-center text-sm text-stone-500">Nenhuma opção de frete disponível.</p>
           ) : (

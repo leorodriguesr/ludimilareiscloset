@@ -118,19 +118,44 @@ export function buildDefaultShippingPackage(input: {
   quantity: number;
   insuranceValue: number;
 }): BuiltCartPackage {
-  const qty = Math.max(1, Math.floor(Number(input.quantity)) || 1);
-  const dims = packageToSuperFreteKgCm({
+  return buildShippingPackageFromDims({
+    quantity: input.quantity,
+    insuranceValue: input.insuranceValue,
     weightGrams: DEFAULT_SHIPPING_PACKAGE.weightGrams,
     lengthCm: DEFAULT_SHIPPING_PACKAGE.lengthCm,
     widthCm: DEFAULT_SHIPPING_PACKAGE.widthCm,
     heightCm: DEFAULT_SHIPPING_PACKAGE.heightCm,
+  });
+}
+
+/** Embalagem a partir de medidas já gravadas no pedido (ou padrão). */
+export function buildShippingPackageFromDims(input: {
+  quantity: number;
+  insuranceValue: number;
+  weightGrams: number;
+  lengthCm: number;
+  widthCm: number;
+  heightCm: number;
+}): BuiltCartPackage {
+  const qty = Math.max(1, Math.floor(Number(input.quantity)) || 1);
+  const unitGrams = Math.max(
+    1,
+    Math.round(Number(input.weightGrams) || DEFAULT_SHIPPING_PACKAGE.weightGrams)
+  );
+  const dims = packageToSuperFreteKgCm({
+    weightGrams: unitGrams,
+    lengthCm:
+      positiveDimCm(input.lengthCm) ?? DEFAULT_SHIPPING_PACKAGE.lengthCm,
+    widthCm: positiveDimCm(input.widthCm) ?? DEFAULT_SHIPPING_PACKAGE.widthCm,
+    heightCm:
+      positiveDimCm(input.heightCm) ?? DEFAULT_SHIPPING_PACKAGE.heightCm,
   });
   const { insuranceValue, useInsurance } = normalizeSuperfreteInsurance(
     Math.max(0, Number(input.insuranceValue) || 0)
   );
 
   return {
-    weightGrams: Math.round(DEFAULT_SHIPPING_PACKAGE.weightGrams * qty),
+    weightGrams: Math.round(unitGrams * qty),
     lengthCm: dims.lengthCm,
     widthCm: dims.widthCm,
     heightCm: dims.heightCm,

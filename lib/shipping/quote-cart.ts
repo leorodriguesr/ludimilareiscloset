@@ -5,6 +5,8 @@ import {
 import {
   buildCartShippingPackage,
   buildDefaultShippingPackage,
+  buildShippingPackageFromDims,
+  type BuiltCartPackage,
   type CartShippingLine,
 } from "@/lib/shipping/cart-package";
 import {
@@ -105,10 +107,9 @@ export async function quoteShippingForCartLines(
   );
 }
 
-/** Cotação com embalagem padrão (itens sem produto no catálogo). */
-export async function quoteShippingForDefaultPackage(
+async function quoteBuiltPackage(
   destinationCep: string,
-  input: { quantity: number; insuranceValue: number }
+  pkg: BuiltCartPackage
 ): Promise<ShippingQuoteResult> {
   const dest = normalizePostalCode(destinationCep);
   if (!dest) throw new Error("INVALID_CEP");
@@ -116,11 +117,33 @@ export async function quoteShippingForDefaultPackage(
   const mocked = await quoteMock();
   if (mocked) return mocked;
 
-  const pkg = buildDefaultShippingPackage(input);
   return finalizeLiveQuote(
     dest,
     pkg.products,
     pkg.insuranceDeclared,
     pkg.useInsurance
   );
+}
+
+/** Cotação com embalagem padrão (itens sem produto no catálogo). */
+export async function quoteShippingForDefaultPackage(
+  destinationCep: string,
+  input: { quantity: number; insuranceValue: number }
+): Promise<ShippingQuoteResult> {
+  return quoteBuiltPackage(destinationCep, buildDefaultShippingPackage(input));
+}
+
+/** Cotação com medidas de embalagem já conhecidas (ex.: gravadas no pedido). */
+export async function quoteShippingForPackageDims(
+  destinationCep: string,
+  input: {
+    quantity: number;
+    insuranceValue: number;
+    weightGrams: number;
+    lengthCm: number;
+    widthCm: number;
+    heightCm: number;
+  }
+): Promise<ShippingQuoteResult> {
+  return quoteBuiltPackage(destinationCep, buildShippingPackageFromDims(input));
 }
