@@ -188,6 +188,7 @@ export default async function MinhaContaPage() {
                 shippingServiceName: o.shippingServiceName,
                 shippingServiceId: o.shippingServiceId,
                 shippingStatus: o.shippingStatus,
+                shippingProvider: o.shippingProvider,
                 shippingDeliveryDaysMin: o.shippingDeliveryDaysMin,
                 shippingDeliveryDaysMax: o.shippingDeliveryDaysMax,
                 superfreteShipmentId: o.superfreteShipmentId,

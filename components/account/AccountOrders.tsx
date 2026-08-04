@@ -17,6 +17,7 @@ import {
   orderItemDisplayName,
 } from "@/lib/orders/order-item-display";
 import { formatMaxBusinessDays } from "@/lib/shipping/delivery-days-label";
+import { shippingTrackingUrl } from "@/lib/shipping/tracking-url";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,7 @@ export type AccountOrderListItem = {
   shippingServiceName: string | null;
   shippingServiceId: number | null;
   shippingStatus: string;
+  shippingProvider?: string | null;
   shippingDeliveryDaysMin: number | null;
   shippingDeliveryDaysMax: number | null;
   superfreteShipmentId: string | null;
@@ -62,6 +64,7 @@ export type AccountOrderListItem = {
 type TrackingResponse = {
   trackingCode: string | null;
   shippingServiceId: number | null;
+  shippingProvider?: string | null;
   deliveryMin: number | null;
   deliveryMax: number | null;
 };
@@ -79,13 +82,6 @@ function formatWhen(d: Date) {
 function cepMask(v: string) {
   const d = v.replace(/\D/g, "");
   return d.length > 5 ? `${d.slice(0, 5)}-${d.slice(5)}` : d;
-}
-
-function getTrackingUrl(code: string) {
-  if (/^me/i.test(code)) {
-    return `https://www.melhorrastreio.com.br/rastreio/${encodeURIComponent(code)}`;
-  }
-  return `https://rastreamento.superfrete.com/#${encodeURIComponent(code)}`;
 }
 
 function shippingStep(shippingStatus: string, paymentStatus: string): number {
@@ -409,6 +405,7 @@ function TrackingBlock({ order }: { order: AccountOrderListItem }) {
   const [loading, setLoading] = useState(false);
 
   const trackingCode = data?.trackingCode ?? order.trackingCode;
+  const shippingProvider = data?.shippingProvider ?? order.shippingProvider;
   const deliveryMin = data?.deliveryMin ?? order.shippingDeliveryDaysMin;
   const deliveryMax = data?.deliveryMax ?? order.shippingDeliveryDaysMax;
   const prazoEstimado = formatMaxBusinessDays(deliveryMin, deliveryMax);
@@ -446,7 +443,7 @@ function TrackingBlock({ order }: { order: AccountOrderListItem }) {
             <p className="mt-0.5 font-mono text-sm font-medium text-stone-900">{trackingCode}</p>
           </div>
           <a
-            href={getTrackingUrl(trackingCode)}
+            href={shippingTrackingUrl(trackingCode, shippingProvider)}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 rounded-lg bg-stone-900 px-4 py-2 text-xs font-semibold text-white transition hover:bg-stone-700"

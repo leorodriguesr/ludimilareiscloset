@@ -13,6 +13,7 @@ import { createPortal } from "react-dom";
 import Image from "next/image";
 import { formatPrice } from "@/lib/format";
 import { formatDeliveryDaysLabel } from "@/lib/shipping/delivery-days-label";
+import { shippingTrackingUrl } from "@/lib/shipping/tracking-url";
 import type { NormalizedShippingOption } from "@/lib/shipping/types";
 import { orderCustomerDisplayName } from "@/lib/admin-sale/customer-display";
 import {
@@ -219,27 +220,20 @@ function chosenShippingPrice(order: ShipmentOrder): number | null {
   return null;
 }
 
-function trackingUrl(code: string) {
-  const trimmed = code.trim();
-  // ME*, Correios (AD…BR) e protocolos com hífen → Melhor Rastreio.
-  if (
-    /^me/i.test(trimmed) ||
-    /^[A-Z]{2}\d+[A-Z]{2}$/i.test(trimmed) ||
-    trimmed.includes("-")
-  ) {
-    return `https://www.melhorrastreio.com.br/rastreio/${encodeURIComponent(trimmed)}`;
-  }
-  return `https://rastreamento.superfrete.com/#${encodeURIComponent(trimmed)}`;
-}
-
-function CopyTrackingLinkButton({ code }: { code: string }) {
+function CopyTrackingLinkButton({
+  code,
+  provider,
+}: {
+  code: string;
+  provider?: string | null;
+}) {
   const [copied, setCopied] = useState(false);
 
   async function handleCopy(e: MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
     try {
-      await navigator.clipboard.writeText(trackingUrl(code));
+      await navigator.clipboard.writeText(shippingTrackingUrl(code, provider));
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -288,6 +282,10 @@ function CopyTrackingLinkButton({ code }: { code: string }) {
       )}
     </button>
   );
+}
+
+function shippingProviderLabel(provider?: string | null): string {
+  return provider === "MELHOR_ENVIO" ? "Melhor Envio" : "SuperFrete";
 }
 
 function shortCarrierLabel(serviceName: string | null): string | null {
@@ -1306,10 +1304,12 @@ function useShipmentActions(
         data.superfreteStatus === "pending" ||
         data.status === "pending";
       if (paymentPending) {
+        const providerName = shippingProviderLabel(order.shippingProvider);
         setError(
           data.message ??
-            "Etiqueta ainda aguarda pagamento na SuperFrete. Pague lá e sincronize de novo."
+            `Etiqueta ainda aguarda pagamento no ${providerName}. Pague lá e sincronize de novo.`
         );
+        setAwaitingTracking(false);
       }
       const tracking = data.trackingCode ?? data.tracking ?? null;
       if (key === "cancel") {
@@ -1317,6 +1317,9 @@ function useShipmentActions(
         setAwaitingTracking(false);
       } else if (tracking) {
         setLocalTracking(tracking);
+        setAwaitingTracking(false);
+      } else if (key === "sync") {
+        // Sync manual sem rastreio: para o "buscando…" e deixa o estado pendente.
         setAwaitingTracking(false);
       }
       if (key === "label" && !tracking && !paymentPending) {
@@ -1655,11 +1658,12 @@ function ShipmentRowActionsMenu({
             </svg>
           ),
           onClick: () => {
-            const providerLabel =
-              order.shippingProvider === "MELHOR_ENVIO"
-                ? "Melhor Envio"
-                : "SuperFrete";
-            if (!confirm(`Cancelar a etiqueta no ${providerLabel}?`)) return;
+            if (
+              !confirm(
+                `Cancelar a etiqueta no ${shippingProviderLabel(order.shippingProvider)}?`
+              )
+            )
+              return;
             void runAction("cancel", `/api/admin/orders/${order.id}/shipment/cancel`, "POST", {
               reason: "Cancelado pelo administrador",
             });
@@ -1850,21 +1854,34 @@ function ShipmentRow({
         {trackingCode ? (
           <div className="flex items-center gap-1.5">
             <a
-              href={trackingUrl(trackingCode)}
+              href={shippingTrackingUrl(trackingCode, order.shippingProvider)}
               target="_blank"
               rel="noopener noreferrer"
               className="font-mono text-sm text-stone-800 underline decoration-stone-300 underline-offset-2 hover:text-stone-950"
             >
               {trackingCode}
             </a>
-            <CopyTrackingLinkButton code={trackingCode} />
+            <CopyTrackingLinkButton
+              code={trackingCode}
+              provider={order.shippingProvider}
+            />
           </div>
         ) : order.superfreteStatus === "pending" && order.superfreteShipmentId ? (
-          <span className="text-xs font-medium text-amber-700">
-            Aguardando pagamento (SF)
+          <span
+            className="text-xs font-medium text-amber-700"
+            title={`Pague a etiqueta no ${shippingProviderLabel(order.shippingProvider)} e sincronize.`}
+          >
+            Aguardando pagamento ({shippingProviderLabel(order.shippingProvider)})
           </span>
-        ) : order.labelUrl || order.superfreteShipmentId || awaitingTracking ? (
-          <span className="text-xs text-stone-400">Aguardando…</span>
+        ) : awaitingTracking ? (
+          <span className="text-xs text-stone-400">Buscando rastreio…</span>
+        ) : order.labelUrl || order.superfreteShipmentId ? (
+          <span
+            className="text-xs text-stone-400"
+            title="Etiqueta gerada. O código de rastreio pode demorar a aparecer no provedor — use Sincronizar status."
+          >
+            Rastreio pendente
+          </span>
         ) : (
           <span className="text-xs text-stone-300">—</span>
         )}

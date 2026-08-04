@@ -255,6 +255,9 @@ export function isMelhorEnvioProtocolCode(value: string | null | undefined): boo
 }
 
 function asTrackingCandidate(value: unknown): string | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    value = String(value);
+  }
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (!trimmed || isMelhorEnvioProtocolCode(trimmed)) return null;
