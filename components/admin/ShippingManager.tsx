@@ -18,9 +18,11 @@ import type { NormalizedShippingOption } from "@/lib/shipping/types";
 import { orderCustomerDisplayName } from "@/lib/admin-sale/customer-display";
 import {
   arrangedDeliveryLabelFromServiceName,
+  orderDeliveryUserNotes,
   resolveArrangedDeliveryDisplay,
   splitArrangedDeliveryNotes,
 } from "@/lib/admin-sale/arranged-delivery";
+import { OrderNotesHint } from "@/components/admin/OrderNotesHint";
 import {
   hasLabelAutoGenerateError,
   labelAutoGenerateErrorTooltip,
@@ -331,6 +333,15 @@ function shipmentFreightTypeLabel(order: ShipmentOrder): string {
   }
 
   return shortCarrierLabel(order.shippingServiceName) ?? "—";
+}
+
+function shipmentDeliveryUserNotes(order: ShipmentOrder): string | null {
+  return orderDeliveryUserNotes({
+    fulfillmentType: order.fulfillmentType,
+    shippingServiceName: order.shippingServiceName,
+    deliveryNotes: order.deliveryNotes,
+    shippingAmount: order.shippingQuotedPrice,
+  });
 }
 
 function shipmentMatchesFilter(order: ShipmentOrder, filter: FilterKey | null): boolean {
@@ -693,7 +704,10 @@ function PackingListPrint({
         <ul className="space-y-0">
           {orders.map((order) => {
             const name = orderCustomerDisplayName(order);
-            const freight = shipmentFreightTypeLabel(order);
+            const deliveryOption = shipmentFreightTypeLabel(order);
+            const saleNotes = order.internalNotes?.trim() || null;
+            const deliveryNotes = shipmentDeliveryUserNotes(order);
+            const hasNotes = Boolean(saleNotes || deliveryNotes);
             const items = order.items ?? [];
             return (
               <li
@@ -705,12 +719,25 @@ function PackingListPrint({
                 </p>
                 <div className="min-w-0 flex-1">
                   <p className="font-semibold leading-snug">{name}</p>
-                  <p className="mt-0.5 text-sm">Frete: {freight}</p>
-                  {order.internalNotes?.trim() ? (
-                    <p className="mt-1 text-sm">
-                      <span className="font-semibold">Obs.:</span>{" "}
-                      {order.internalNotes.trim()}
-                    </p>
+                  <p className="mt-1 inline-block rounded border border-black px-2 py-0.5 text-sm font-semibold">
+                    Entrega: {deliveryOption}
+                  </p>
+                  {hasNotes ? (
+                    <div className="mt-2 rounded border-2 border-black bg-stone-100 px-2.5 py-2">
+                      <p className="text-[10px] font-bold uppercase tracking-wide">
+                        Observações
+                      </p>
+                      {saleNotes ? (
+                        <p className="mt-1 text-sm leading-snug">
+                          <span className="font-bold">Venda:</span> {saleNotes}
+                        </p>
+                      ) : null}
+                      {deliveryNotes ? (
+                        <p className="mt-1 text-sm leading-snug">
+                          <span className="font-bold">Entrega:</span> {deliveryNotes}
+                        </p>
+                      ) : null}
+                    </div>
                   ) : null}
                   {items.length > 0 ? (
                     <div className="mt-2 flex flex-wrap gap-x-8 gap-y-3">
@@ -1796,6 +1823,8 @@ function ShipmentRow({
     order.fulfillmentType,
     order.deliveryNotes
   );
+  const saleNotes = order.internalNotes?.trim() ?? "";
+  const deliveryNotesHint = shipmentDeliveryUserNotes(order) ?? "";
 
   return (
     <tr className="border-b border-stone-100 align-top transition-colors hover:bg-stone-50/60">
@@ -1815,6 +1844,24 @@ function ShipmentRow({
             <span className={`font-mono ${TABLE_CELL_PRIMARY}`}>{orderNumberLabel(order)}</span>
             {order.orderSource === "ADMIN_SALE" ? (
               <span className="text-xs font-normal text-stone-600">Avulsa</span>
+            ) : null}
+            {saleNotes ? (
+              <OrderNotesHint
+                notes={saleNotes}
+                title="Observações da venda"
+                ariaLabel="Ver observações internas da venda"
+                tone="violet"
+                icon="doc"
+              />
+            ) : null}
+            {deliveryNotesHint ? (
+              <OrderNotesHint
+                notes={deliveryNotesHint}
+                title="Observações da entrega"
+                ariaLabel="Ver observações da entrega"
+                tone="sky"
+                icon="truck"
+              />
             ) : null}
             {caps.labelAutoGenerateFailed ? (
               <LabelAutoGenerateWarningIcon title={caps.labelAutoGenerateTitle} />

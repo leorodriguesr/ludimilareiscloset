@@ -66,6 +66,26 @@ export function composeDeliveryNotesFromUserEdit(
   return trimmed || null;
 }
 
+/** Texto de observação de entrega (sem rótulo de modalidade a combinar). */
+export function orderDeliveryUserNotes(input: {
+  fulfillmentType?: string | null;
+  shippingServiceName?: string | null;
+  deliveryNotes?: string | null;
+  shippingAmount?: number | null;
+}): string | null {
+  if (input.fulfillmentType === "ARRANGED") {
+    return (
+      resolveArrangedDeliveryDisplay({
+        shippingServiceName: input.shippingServiceName,
+        deliveryNotes: input.deliveryNotes,
+        shippingAmount: input.shippingAmount ?? 0,
+      }).userNotes ?? null
+    );
+  }
+  const trimmed = input.deliveryNotes?.trim();
+  return trimmed || null;
+}
+
 export function resolveArrangedDeliveryDisplay(input: {
   shippingServiceName?: string | null;
   deliveryNotes?: string | null;

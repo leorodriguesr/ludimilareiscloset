@@ -38,12 +38,14 @@ import {
 } from "@/lib/orders/order-item-display";
 import {
   composeDeliveryNotesFromUserEdit,
+  orderDeliveryUserNotes,
   resolveArrangedDeliveryDisplay,
   resolveShippingFeeDisplay,
   shippingFeeDisplayText,
   splitArrangedDeliveryNotes,
   arrangedDeliveryLabelFromServiceName,
 } from "@/lib/admin-sale/arranged-delivery";
+import { OrderNotesHint } from "@/components/admin/OrderNotesHint";
 import {
   ADDRESS_COMPLEMENT_MAX_LENGTH,
   ADDRESS_NUMBER_MAX_LENGTH,
@@ -941,60 +943,13 @@ function shortShippingMethod(
   return servicePart.length > 18 ? `${servicePart.slice(0, 16)}…` : servicePart;
 }
 
-function orderDeliveryUserNotes(order: AdminOrder): string | null {
-  if (order.fulfillmentType === "ARRANGED") {
-    return (
-      resolveArrangedDeliveryDisplay({
-        shippingServiceName: order.shippingServiceName,
-        deliveryNotes: order.deliveryNotes,
-        shippingAmount: order.shippingAmount,
-      }).userNotes ?? null
-    );
-  }
-  const trimmed = order.deliveryNotes?.trim();
-  return trimmed || null;
-}
-
-function OrderNotesHint({
-  notes,
-  title,
-  ariaLabel,
-  tone,
-  icon,
-}: {
-  notes: string;
-  title: string;
-  ariaLabel: string;
-  tone: "violet" | "sky";
-  icon: "doc" | "chat";
-}) {
-  const toneClass =
-    tone === "violet"
-      ? "text-violet-500 hover:bg-violet-50 hover:text-violet-700"
-      : "text-sky-500 hover:bg-sky-50 hover:text-sky-700";
-
-  return (
-    <span className="relative inline-flex group/notes">
-      <span
-        className={`inline-flex h-5 w-5 items-center justify-center rounded transition-colors ${toneClass}`}
-        aria-label={ariaLabel}
-      >
-        {icon === "doc" ? (
-          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
-          </svg>
-        ) : (
-          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 0 1-.825-.242m9.345-8.334a2.126 2.126 0 0 0-.476-.095 48.64 48.64 0 0 0-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a48.803 48.803 0 0 0 3.174-.353" />
-          </svg>
-        )}
-      </span>
-      <span className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 hidden w-64 rounded-lg border border-stone-200 bg-white p-3 text-xs leading-relaxed text-stone-600 shadow-lg group-hover/notes:block">
-        <span className="mb-1 block font-medium text-stone-800">{title}</span>
-        {notes}
-      </span>
-    </span>
-  );
+function saleDeliveryUserNotes(order: AdminOrder): string | null {
+  return orderDeliveryUserNotes({
+    fulfillmentType: order.fulfillmentType,
+    shippingServiceName: order.shippingServiceName,
+    deliveryNotes: order.deliveryNotes,
+    shippingAmount: order.shippingAmount,
+  });
 }
 
 function ExpandedSection({
@@ -1061,7 +1016,7 @@ function customerEditFormFromOrder(order: AdminOrder): CustomerEditForm {
     addressCity: order.addressCity ?? "",
     addressState: order.addressState ?? "",
     internalNotes: order.internalNotes ?? "",
-    deliveryNotes: orderDeliveryUserNotes(order) ?? "",
+    deliveryNotes: saleDeliveryUserNotes(order) ?? "",
   };
 }
 
@@ -2316,7 +2271,7 @@ function OrderDetailsBody({
         shippingAmount: order.shippingAmount,
       })
       : null;
-  const deliveryUserNotes = orderDeliveryUserNotes(order);
+  const deliveryUserNotes = saleDeliveryUserNotes(order);
   const addressBlock = formatOrderAddressBlock(order);
   const showCustomerLink = shouldOfferCustomerDataFillLink(order);
   const showPaymentLink =
@@ -3354,7 +3309,7 @@ export function SalesManager() {
                     order.deliveryNotes
                   );
                   const adminSaleNotes = order.internalNotes?.trim() ?? "";
-                  const deliveryNotesHint = orderDeliveryUserNotes(order) ?? "";
+                  const deliveryNotesHint = saleDeliveryUserNotes(order) ?? "";
                   const originLabel = orderOriginLabel(order);
 
                   return (
@@ -3410,7 +3365,7 @@ export function SalesManager() {
                                     title="Observações da entrega"
                                     ariaLabel="Ver observações da entrega"
                                     tone="sky"
-                                    icon="chat"
+                                    icon="truck"
                                   />
                                 </span>
                               ) : null}
