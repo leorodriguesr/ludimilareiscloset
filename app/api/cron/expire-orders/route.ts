@@ -9,7 +9,7 @@ async function runExpireOrders(): Promise<NextResponse> {
 
   if (expiredOrderIds.length > 0) {
     console.info(
-      "[cron/expire-orders] pedidos expirados:",
+      "[cron/expire-orders] pedidos cancelados por timeout (24h):",
       expiredOrderIds.length,
       expiredOrderIds
     );
@@ -18,6 +18,7 @@ async function runExpireOrders(): Promise<NextResponse> {
   return NextResponse.json({
     ok: true,
     expiredCount: expiredOrderIds.length,
+    cancelledCount: expiredOrderIds.length,
     expiredOrderIds,
   });
 }

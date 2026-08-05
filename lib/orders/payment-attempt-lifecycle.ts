@@ -1,5 +1,4 @@
 import { prisma } from "@/lib/prisma";
-import { OrderSource } from "@/app/generated/prisma/client";
 import {
   ORDER_STATUS,
   PAYMENT_ATTEMPT_STATUS,
@@ -36,10 +35,7 @@ export async function beginPaymentAttempt(input: {
     }
 
     const now = new Date();
-    if (
-      order.orderSource === OrderSource.CHECKOUT &&
-      (!order.expiresAt || order.expiresAt <= now)
-    ) {
+    if (order.expiresAt && order.expiresAt <= now) {
       throw new Error("ORDER_EXPIRED");
     }
 

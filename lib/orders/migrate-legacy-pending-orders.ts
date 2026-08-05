@@ -62,10 +62,14 @@ export async function migrateLegacyPendingOrders(input?: {
     const batch = await expireOrdersBatch(now);
     expiredByTtl = batch.expiredOrderIds.length;
   } else {
+    const createdBefore = new Date(now.getTime() - ORDER_PENDING_TTL_MS);
     expiredByTtl = await prisma.order.count({
       where: {
         status: ORDER_STATUS.PENDING_PAYMENT,
-        expiresAt: { lte: now },
+        OR: [
+          { expiresAt: { lte: now } },
+          { expiresAt: null, createdAt: { lte: createdBefore } },
+        ],
       },
     });
   }

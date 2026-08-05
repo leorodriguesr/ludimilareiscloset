@@ -123,7 +123,7 @@ type AdminOrder = {
 };
 
 type ApiResponse = { orders: AdminOrder[]; total: number; page: number; limit: number };
-type FilterKey = "paid" | "waiting" | "to_pack";
+type FilterKey = "paid" | "waiting" | "to_pack" | "cancelled";
 
 function normalizeSearchText(value: string): string {
   return value
@@ -153,7 +153,14 @@ function orderMatchesCustomerSearch(order: AdminOrder, query: string): boolean {
   return haystack.includes(normalizedQuery);
 }
 
+function isInactiveSale(order: AdminOrder): boolean {
+  return order.status === "cancelled" || order.status === "expired";
+}
+
 function orderMatchesStatusFilter(order: AdminOrder, filter: FilterKey | null): boolean {
+  const inactive = isInactiveSale(order);
+  if (filter === "cancelled") return inactive;
+  if (inactive) return false;
   if (!filter) return true;
   if (filter === "paid") return Boolean(order.paidAt);
   if (filter === "waiting") return !order.paidAt;
@@ -2887,11 +2894,19 @@ export function SalesManager() {
 
   const filterCounts = useMemo(
     () => ({
-      paid: orders.filter((order) => order.paidAt).length,
-      waiting: orders.filter((order) => !order.paidAt).length,
-      to_pack: orders.filter(
-        (order) => order.paidAt && order.shippingStatus === "to_pack"
+      paid: orders.filter(
+        (order) => !isInactiveSale(order) && order.paidAt
       ).length,
+      waiting: orders.filter(
+        (order) => !isInactiveSale(order) && !order.paidAt
+      ).length,
+      to_pack: orders.filter(
+        (order) =>
+          !isInactiveSale(order) &&
+          order.paidAt &&
+          order.shippingStatus === "to_pack"
+      ).length,
+      cancelled: orders.filter((order) => isInactiveSale(order)).length,
     }),
     [orders]
   );
@@ -2980,6 +2995,7 @@ export function SalesManager() {
     { key: "paid", label: "Pagas" },
     { key: "waiting", label: "Aguardando pagamento" },
     { key: "to_pack", label: "Por embalar" },
+    { key: "cancelled", label: "Canceladas" },
   ];
 
   const detailsOrder = detailsOrderId
@@ -3003,7 +3019,7 @@ export function SalesManager() {
           <p className="mt-0.5 text-sm text-stone-500">
             {hasListFilters
               ? `${visibleOrders.length} de ${orders.length} pedido${orders.length !== 1 ? "s" : ""}`
-              : `${orders.length} pedido${orders.length !== 1 ? "s" : ""}`}
+              : `${visibleOrders.length} pedido${visibleOrders.length !== 1 ? "s" : ""}`}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -3193,7 +3209,9 @@ export function SalesManager() {
                       ? "Nenhum pedido pago encontrado."
                       : filter === "to_pack"
                         ? "Nenhum pedido por embalar."
-                        : "Nenhuma venda encontrada."}
+                        : filter === "cancelled"
+                          ? "Nenhuma venda cancelada."
+                          : "Nenhuma venda encontrada."}
           </p>
         </div>
       ) : (

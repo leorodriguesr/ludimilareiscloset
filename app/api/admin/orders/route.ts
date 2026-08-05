@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { attachOrderPaymentShare } from "@/lib/admin-sale/order-payment-share";
 import { prisma } from "@/lib/prisma";
+import { expireOrdersBatch } from "@/lib/orders/expire-orders";
 import {
   fetchOrderContactAddressByIds,
   mergeOrderContactAddress,
@@ -34,6 +35,13 @@ export async function GET(request: NextRequest) {
         : {};
 
   try {
+    // Hobby: cron só 1x/dia — cancela pendentes >24h ao abrir Vendas no admin.
+    try {
+      await expireOrdersBatch();
+    } catch (expireError) {
+      console.error("[GET /api/admin/orders] expire batch", expireError);
+    }
+
     const [orders, total] = await Promise.all([
       prisma.order.findMany({
         where,

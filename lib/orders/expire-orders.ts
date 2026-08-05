@@ -1,14 +1,30 @@
 import { prisma } from "@/lib/prisma";
 import {
+  ORDER_PENDING_TTL_MS,
   ORDER_STATUS,
   PAYMENT_ATTEMPT_STATUS,
 } from "@/lib/orders/constants";
 import { releaseStockReservations } from "@/lib/orders/stock/reservation";
-import { OrderSource } from "@/app/generated/prisma/client";
+import type { Prisma } from "@/app/generated/prisma/client";
+
+export const AUTO_CANCEL_PAYMENT_TIMEOUT_REASON =
+  "Pagamento não confirmado em 24 horas.";
 
 export type ExpireOrdersResult = {
   expiredOrderIds: string[];
 };
+
+/** Pedidos pendentes vencidos: `expiresAt` passou, ou sem TTL e `createdAt` + 24h. */
+function pendingDueWhere(now: Date): Prisma.OrderWhereInput {
+  const createdBefore = new Date(now.getTime() - ORDER_PENDING_TTL_MS);
+  return {
+    status: ORDER_STATUS.PENDING_PAYMENT,
+    OR: [
+      { expiresAt: { lte: now } },
+      { expiresAt: null, createdAt: { lte: createdBefore } },
+    ],
+  };
+}
 
 export async function expireOrdersByIds(
   ids: string[],
@@ -41,25 +57,24 @@ async function expireOrderIds(ids: string[], now: Date): Promise<void> {
     await tx.order.updateMany({
       where: { id: { in: ids } },
       data: {
-        status: ORDER_STATUS.EXPIRED,
+        status: ORDER_STATUS.CANCELLED,
+        shippingStatus: "cancelled",
         expiredAt: now,
+        cancelledAt: now,
+        cancellationReason: AUTO_CANCEL_PAYMENT_TIMEOUT_REASON,
       },
     });
   });
 }
 
 /**
- * Expira Orders pendentes cujo `expiresAt` já passou.
+ * Cancela Orders pendentes cujo prazo de 24h já passou (cron + fluxos de checkout).
  */
 export async function expireOrdersBatch(
   now: Date = new Date()
 ): Promise<ExpireOrdersResult> {
   const due = await prisma.order.findMany({
-    where: {
-      status: ORDER_STATUS.PENDING_PAYMENT,
-      orderSource: OrderSource.CHECKOUT,
-      expiresAt: { lte: now },
-    },
+    where: pendingDueWhere(now),
     select: { id: true },
   });
 
@@ -72,7 +87,7 @@ export async function expireOrdersBatch(
   return { expiredOrderIds: ids };
 }
 
-/** Expira pendentes vencidas de um cliente antes de buscar/reutilizar Order. */
+/** Cancela pendentes vencidas de um cliente antes de buscar/reutilizar Order. */
 export async function expirePendingOrdersForCustomer(input: {
   userId: string | null;
   email: string | null;
@@ -84,9 +99,7 @@ export async function expirePendingOrdersForCustomer(input: {
 
   const due = await prisma.order.findMany({
     where: {
-      status: ORDER_STATUS.PENDING_PAYMENT,
-      orderSource: OrderSource.CHECKOUT,
-      expiresAt: { lte: now },
+      ...pendingDueWhere(now),
       ...(input.userId
         ? { userId: input.userId }
         : { userId: null, email: normalizedEmail }),

@@ -38,6 +38,7 @@ export type AccountOrderListItem = {
   createdAt: Date;
   status: string;
   expiresAt: Date | null;
+  expiredAt: Date | null;
   paymentMethod: string | null;
   total: number;
   shippingAmount: number;
@@ -103,8 +104,12 @@ function shippingStatusLabel(shippingStatus: string, paymentStatus: string): str
   return "Em preparação";
 }
 
+function isPaymentTimeout(order: AccountOrderListItem): boolean {
+  return order.status === "expired" || Boolean(order.expiredAt);
+}
+
 function paymentOrderStatusLabel(order: AccountOrderListItem): string {
-  if (order.status === "expired") return "Expirado";
+  if (isPaymentTimeout(order)) return "Expirado";
   if (order.status === "cancelled") return "Cancelado";
   if (order.status === "paid") {
     return shippingStatusLabel(order.shippingStatus, order.status);
@@ -113,7 +118,7 @@ function paymentOrderStatusLabel(order: AccountOrderListItem): string {
 }
 
 function orderStatusBadgeClass(order: AccountOrderListItem): string {
-  if (order.status === "expired") return "bg-stone-200 text-stone-600";
+  if (isPaymentTimeout(order)) return "bg-stone-200 text-stone-600";
   if (order.status === "cancelled") return "bg-red-100 text-red-800";
   if (order.status !== "paid") return "bg-amber-100 text-amber-800";
   if (order.shippingStatus === "delivered") return "bg-emerald-100 text-emerald-800";
@@ -481,7 +486,7 @@ function TrackingBlock({ order }: { order: AccountOrderListItem }) {
 
 function OrderCard({ order }: { order: AccountOrderListItem }) {
   const isPaid = order.status === "paid";
-  const isExpired = order.status === "expired";
+  const isExpired = isPaymentTimeout(order);
   const pending = isPendingPayment(order);
   const subtotal = order.items.reduce((a, i) => a + i.price * i.quantity, 0);
   const address = formatAddress(order);

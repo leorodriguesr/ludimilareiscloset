@@ -319,6 +319,7 @@ export async function continueOrderPayment(input: {
       id: true,
       status: true,
       expiresAt: true,
+      expiredAt: true,
       total: true,
       email: true,
       customerDataStatus: true,
@@ -344,7 +345,10 @@ export async function continueOrderPayment(input: {
     return { ok: false, error: "Pedido não encontrado.", code: "not_found" };
   }
 
-  if (fresh.status === ORDER_STATUS.EXPIRED) {
+  if (
+    fresh.status === ORDER_STATUS.EXPIRED ||
+    (fresh.status === ORDER_STATUS.CANCELLED && fresh.expiredAt)
+  ) {
     return {
       ok: false,
       error: "Este pedido expirou. Faça uma nova compra.",

@@ -28,7 +28,11 @@ import {
 } from "@/lib/admin-sale/customer-form-complete";
 import { getFulfillmentStrategy } from "@/lib/fulfillment/fulfillment-types";
 import { initiateOrderPayment } from "@/lib/order/payment/initiate-payment";
-import { ORDER_STATUS, type PaymentMethod } from "@/lib/orders/constants";
+import {
+  ORDER_PENDING_TTL_MS,
+  ORDER_STATUS,
+  type PaymentMethod,
+} from "@/lib/orders/constants";
 import { reserveStockForOrderLines } from "@/lib/orders/stock/reservation";
 import { prisma } from "@/lib/prisma";
 import { checkFreeShipping } from "@/lib/shipping/free-shipping";
@@ -446,7 +450,7 @@ export async function createAdminSale(
           fillNow && !isArranged
             ? input.address?.state.trim().toUpperCase().slice(0, 2) || null
             : null,
-        expiresAt: null,
+        expiresAt: new Date(Date.now() + ORDER_PENDING_TTL_MS),
         items: {
           create: pricing.lines.map((line) => ({
             productId: line.productId,

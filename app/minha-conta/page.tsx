@@ -182,6 +182,7 @@ export default async function MinhaContaPage() {
                 createdAt: o.createdAt,
                 status: o.status,
                 expiresAt: o.expiresAt,
+                expiredAt: o.expiredAt,
                 paymentMethod: o.paymentMethod,
                 total: o.total,
                 shippingAmount: o.shippingAmount,
