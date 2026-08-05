@@ -1,6 +1,16 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type InputHTMLAttributes,
+  type ReactNode,
+  type TextareaHTMLAttributes,
+} from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import { PieceSelector } from "@/components/product/PieceSelector";
@@ -27,6 +37,7 @@ import {
   orderItemDisplayName,
 } from "@/lib/orders/order-item-display";
 import {
+  composeDeliveryNotesFromUserEdit,
   resolveArrangedDeliveryDisplay,
   resolveShippingFeeDisplay,
   shippingFeeDisplayText,
@@ -930,19 +941,56 @@ function shortShippingMethod(
   return servicePart.length > 18 ? `${servicePart.slice(0, 16)}…` : servicePart;
 }
 
-function AdminSaleNotesHint({ notes }: { notes: string }) {
+function orderDeliveryUserNotes(order: AdminOrder): string | null {
+  if (order.fulfillmentType === "ARRANGED") {
+    return (
+      resolveArrangedDeliveryDisplay({
+        shippingServiceName: order.shippingServiceName,
+        deliveryNotes: order.deliveryNotes,
+        shippingAmount: order.shippingAmount,
+      }).userNotes ?? null
+    );
+  }
+  const trimmed = order.deliveryNotes?.trim();
+  return trimmed || null;
+}
+
+function OrderNotesHint({
+  notes,
+  title,
+  ariaLabel,
+  tone,
+  icon,
+}: {
+  notes: string;
+  title: string;
+  ariaLabel: string;
+  tone: "violet" | "sky";
+  icon: "doc" | "chat";
+}) {
+  const toneClass =
+    tone === "violet"
+      ? "text-violet-500 hover:bg-violet-50 hover:text-violet-700"
+      : "text-sky-500 hover:bg-sky-50 hover:text-sky-700";
+
   return (
     <span className="relative inline-flex group/notes">
       <span
-        className="inline-flex h-5 w-5 items-center justify-center rounded text-violet-500 transition-colors hover:bg-violet-50 hover:text-violet-700"
-        aria-label="Ver observações da venda avulsa"
+        className={`inline-flex h-5 w-5 items-center justify-center rounded transition-colors ${toneClass}`}
+        aria-label={ariaLabel}
       >
-        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
-        </svg>
+        {icon === "doc" ? (
+          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+          </svg>
+        ) : (
+          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 0 1-.825-.242m9.345-8.334a2.126 2.126 0 0 0-.476-.095 48.64 48.64 0 0 0-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a48.803 48.803 0 0 0 3.174-.353" />
+          </svg>
+        )}
       </span>
       <span className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 hidden w-64 rounded-lg border border-stone-200 bg-white p-3 text-xs leading-relaxed text-stone-600 shadow-lg group-hover/notes:block">
-        <span className="mb-1 block font-medium text-stone-800">Observações da venda</span>
+        <span className="mb-1 block font-medium text-stone-800">{title}</span>
         {notes}
       </span>
     </span>
@@ -995,6 +1043,8 @@ type CustomerEditForm = {
   addressNeighborhood: string;
   addressCity: string;
   addressState: string;
+  internalNotes: string;
+  deliveryNotes: string;
 };
 
 function customerEditFormFromOrder(order: AdminOrder): CustomerEditForm {
@@ -1010,6 +1060,8 @@ function customerEditFormFromOrder(order: AdminOrder): CustomerEditForm {
     addressNeighborhood: order.addressNeighborhood ?? "",
     addressCity: order.addressCity ?? "",
     addressState: order.addressState ?? "",
+    internalNotes: order.internalNotes ?? "",
+    deliveryNotes: orderDeliveryUserNotes(order) ?? "",
   };
 }
 
@@ -1038,6 +1090,15 @@ function EditInput(props: InputHTMLAttributes<HTMLInputElement>) {
     <input
       {...props}
       className={`w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200 ${props.className ?? ""}`}
+    />
+  );
+}
+
+function EditTextarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
+      {...props}
+      className={`w-full resize-y rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200 ${props.className ?? ""}`}
     />
   );
 }
@@ -2160,6 +2221,13 @@ function OrderDetailsBody({
       return;
     }
 
+    const nextInternalNotes = customerForm.internalNotes.trim() || null;
+    const nextDeliveryNotes = composeDeliveryNotesFromUserEdit(
+      order.deliveryNotes,
+      order.shippingServiceName,
+      customerForm.deliveryNotes
+    );
+
     setSavingCustomer(true);
     setCustomerError(null);
     try {
@@ -2178,6 +2246,8 @@ function OrderDetailsBody({
           addressNeighborhood: customerForm.addressNeighborhood,
           addressCity: customerForm.addressCity,
           addressState: customerForm.addressState,
+          internalNotes: nextInternalNotes,
+          deliveryNotes: nextDeliveryNotes,
         }),
       });
       const data = (await res.json()) as { error?: string };
@@ -2198,6 +2268,8 @@ function OrderDetailsBody({
         addressNeighborhood: customerForm.addressNeighborhood.trim() || null,
         addressCity: customerForm.addressCity.trim() || null,
         addressState: customerForm.addressState.trim().toUpperCase() || null,
+        internalNotes: nextInternalNotes,
+        deliveryNotes: nextDeliveryNotes,
         customerDataStatus: "COMPLETE",
       });
     } catch {
@@ -2244,7 +2316,7 @@ function OrderDetailsBody({
         shippingAmount: order.shippingAmount,
       })
       : null;
-  const deliveryUserNotes = arrangedDelivery?.userNotes ?? order.deliveryNotes?.trim() ?? null;
+  const deliveryUserNotes = orderDeliveryUserNotes(order);
   const addressBlock = formatOrderAddressBlock(order);
   const showCustomerLink = shouldOfferCustomerDataFillLink(order);
   const showPaymentLink =
@@ -2428,6 +2500,35 @@ function OrderDetailsBody({
                   />
                 </EditField>
               </div>
+            </div>
+
+            <div className="space-y-3 border-t border-stone-100 pt-4">
+              <EditField label="Obs. internas" optional>
+                <EditTextarea
+                  rows={3}
+                  value={customerForm.internalNotes}
+                  onChange={(e) =>
+                    setCustomerForm((f) => ({
+                      ...f,
+                      internalNotes: e.target.value,
+                    }))
+                  }
+                  placeholder="Visível só para a equipe…"
+                />
+              </EditField>
+              <EditField label="Obs. entrega" optional>
+                <EditTextarea
+                  rows={3}
+                  value={customerForm.deliveryNotes}
+                  onChange={(e) =>
+                    setCustomerForm((f) => ({
+                      ...f,
+                      deliveryNotes: e.target.value,
+                    }))
+                  }
+                  placeholder="Ex.: entregar após 18h, interfone…"
+                />
+              </EditField>
             </div>
 
             {customerError ? (
@@ -3253,6 +3354,7 @@ export function SalesManager() {
                     order.deliveryNotes
                   );
                   const adminSaleNotes = order.internalNotes?.trim() ?? "";
+                  const deliveryNotesHint = orderDeliveryUserNotes(order) ?? "";
                   const originLabel = orderOriginLabel(order);
 
                   return (
@@ -3290,9 +3392,26 @@ export function SalesManager() {
                               <span className={`font-mono ${TABLE_CELL_PRIMARY}`}>
                                 #{order.orderNumber ?? "—"}
                               </span>
-                              {order.orderSource === "ADMIN_SALE" && adminSaleNotes ? (
+                              {adminSaleNotes ? (
                                 <span onClick={(e) => e.stopPropagation()}>
-                                  <AdminSaleNotesHint notes={adminSaleNotes} />
+                                  <OrderNotesHint
+                                    notes={adminSaleNotes}
+                                    title="Observações da venda"
+                                    ariaLabel="Ver observações internas da venda"
+                                    tone="violet"
+                                    icon="doc"
+                                  />
+                                </span>
+                              ) : null}
+                              {deliveryNotesHint ? (
+                                <span onClick={(e) => e.stopPropagation()}>
+                                  <OrderNotesHint
+                                    notes={deliveryNotesHint}
+                                    title="Observações da entrega"
+                                    ariaLabel="Ver observações da entrega"
+                                    tone="sky"
+                                    icon="chat"
+                                  />
                                 </span>
                               ) : null}
                             </div>

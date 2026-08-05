@@ -48,6 +48,24 @@ export function splitArrangedDeliveryNotes(deliveryNotes: string | null | undefi
   return { systemLabel: null, userNotes: trimmed };
 }
 
+/**
+ * Recompõe `deliveryNotes` ao editar só a parte do usuário.
+ * Preserva prefixo legado ("Uber — …") quando o tipo não está em `shippingServiceName`.
+ */
+export function composeDeliveryNotesFromUserEdit(
+  previousDeliveryNotes: string | null | undefined,
+  shippingServiceName: string | null | undefined,
+  userNotes: string
+): string | null {
+  const trimmed = userNotes.trim();
+  const split = splitArrangedDeliveryNotes(previousDeliveryNotes);
+  const fromService = arrangedDeliveryLabelFromServiceName(shippingServiceName);
+  if (split.systemLabel && !fromService) {
+    return trimmed ? `${split.systemLabel} — ${trimmed}` : split.systemLabel;
+  }
+  return trimmed || null;
+}
+
 export function resolveArrangedDeliveryDisplay(input: {
   shippingServiceName?: string | null;
   deliveryNotes?: string | null;

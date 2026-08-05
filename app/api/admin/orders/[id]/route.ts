@@ -220,6 +220,16 @@ export async function PATCH(
     updates.addressState = addressState.toUpperCase();
   }
 
+  const internalNotes = asOptionalString(b.internalNotes);
+  if (internalNotes !== undefined) {
+    updates.internalNotes = internalNotes;
+  }
+
+  const deliveryNotes = asOptionalString(b.deliveryNotes);
+  if (deliveryNotes !== undefined) {
+    updates.deliveryNotes = deliveryNotes;
+  }
+
   // Edição manual no admin equivale ao preenchimento pelo cliente.
   if (isCustomerUpdate) {
     updates.customerDataStatus = CustomerDataStatus.COMPLETE;
