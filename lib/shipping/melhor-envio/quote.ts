@@ -61,6 +61,15 @@ function extractIdealFromPackages(
   return { weightKg, heightCm, widthCm, lengthCm };
 }
 
+/** Transportadoras ocultas na cotação (não oferecer ao cliente). */
+function isExcludedMelhorEnvioCarrier(
+  carrierName: string,
+  serviceName: string
+): boolean {
+  const haystack = `${carrierName} ${serviceName}`.toLowerCase();
+  return haystack.includes("latam");
+}
+
 function parsePackages(row: Record<string, unknown>): MelhorEnvioQuotePackage[] {
   if (!Array.isArray(row.packages)) return [];
   const out: MelhorEnvioQuotePackage[] = [];
@@ -122,6 +131,10 @@ function normalizeRows(raw: unknown): MelhorEnvioQuoteOption[] {
     const serviceName =
       (typeof row.name === "string" && row.name.trim()) ||
       `Serviço ${serviceId}`;
+
+    if (isExcludedMelhorEnvioCarrier(carrierName, serviceName)) {
+      return;
+    }
 
     const customRange = meAsRecord(row.custom_delivery_range);
     const range = meAsRecord(row.delivery_range);
