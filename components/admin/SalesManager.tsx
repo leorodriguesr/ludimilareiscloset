@@ -1176,10 +1176,15 @@ function buildCardShareMessage(order: AdminOrder, checkoutUrl: string): string {
 
 function AdminSaleLinks({
   order,
+  onPatchOrder,
 }: {
   order: AdminOrder;
+  onPatchOrder: (id: string, patch: Partial<AdminOrder>) => void;
 }) {
-  const [copied, setCopied] = useState<"data" | "pix" | "card" | null>(null);
+  const [copied, setCopied] = useState<"data" | "pix" | "card" | "regen" | null>(
+    null
+  );
+  const [regeneratingCard, setRegeneratingCard] = useState(false);
 
   const showCustomerLink = shouldOfferCustomerDataFillLink(order);
 
@@ -1187,22 +1192,73 @@ function AdminSaleLinks({
     order.orderSource === "ADMIN_SALE" &&
     !order.paidAt &&
     order.status !== "cancelled" &&
+    order.status !== "expired" &&
     order.paymentChannel !== "MANUAL";
   const isPixPayment =
     order.paymentMethod === "pix" || order.paymentShare?.type === "pix";
   const isCardPayment =
     order.paymentMethod === "card" || order.paymentShare?.type === "card";
+  const canRegenerateCardLink =
+    showPaymentLink &&
+    isCardPayment &&
+    order.status === "pending_payment";
   const paymentUrl = orderPaymentShareAbsoluteUrl(order);
 
   if (!showCustomerLink && !showPaymentLink) return null;
 
-  async function copyText(value: string, key: "data" | "pix" | "card") {
+  async function copyText(
+    value: string,
+    key: "data" | "pix" | "card" | "regen"
+  ) {
     try {
       await navigator.clipboard.writeText(value);
       setCopied(key);
       setTimeout(() => setCopied(null), 2000);
     } catch {
       window.alert("Não foi possível copiar. Tente novamente.");
+    }
+  }
+
+  async function regenerateCardLink() {
+    const label =
+      order.orderNumber != null ? `#${order.orderNumber}` : "esta venda";
+    const confirmed = window.confirm(
+      `Gerar um novo link de cartão para ${label}? Envie o novo link à cliente — o anterior pode deixar de funcionar.`
+    );
+    if (!confirmed) return;
+
+    setRegeneratingCard(true);
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}/payment-info`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ forceNew: true }),
+      });
+      const data = (await res.json()) as {
+        type?: "pix" | "card" | "paid";
+        checkoutUrl?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        window.alert(data.error ?? "Não foi possível gerar um novo link.");
+        return;
+      }
+      if (data.type === "paid") {
+        window.alert("Pagamento já confirmado.");
+        return;
+      }
+      if (data.type !== "card" || !data.checkoutUrl) {
+        window.alert("Não foi possível gerar um novo link de cartão.");
+        return;
+      }
+      onPatchOrder(order.id, {
+        paymentShare: { type: "card", checkoutUrl: data.checkoutUrl },
+      });
+      await copyText(buildCardShareMessage(order, data.checkoutUrl), "regen");
+    } catch {
+      window.alert("Erro de conexão ao gerar o link.");
+    } finally {
+      setRegeneratingCard(false);
     }
   }
 
@@ -1243,6 +1299,20 @@ function AdminSaleLinks({
               className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
             >
               {copied === "card" ? "Mensagem copiada!" : "Copiar link cartão"}
+            </button>
+          ) : null}
+          {canRegenerateCardLink ? (
+            <button
+              type="button"
+              disabled={regeneratingCard}
+              onClick={() => void regenerateCardLink()}
+              className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-medium text-sky-900 transition-colors hover:bg-sky-100 disabled:opacity-50"
+            >
+              {regeneratingCard
+                ? "Gerando novo link…"
+                : copied === "regen"
+                  ? "Novo link copiado!"
+                  : "Gerar novo link cartão"}
             </button>
           ) : null}
         </>
@@ -1438,12 +1508,58 @@ function OrderRowActionsMenu({
         return;
       }
       if (data.type === "card" && data.checkoutUrl) {
+        onPatchOrder(order.id, {
+          paymentShare: { type: "card", checkoutUrl: data.checkoutUrl },
+        });
         await copyText(buildCardShareMessage(order, data.checkoutUrl));
         return;
       }
       window.alert("Link de pagamento indisponível. Atualize a lista e tente de novo.");
     } catch {
       window.alert("Não foi possível copiar. Tente novamente.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleRegenerateCardLink() {
+    const label =
+      order.orderNumber != null ? `#${order.orderNumber}` : "esta venda";
+    const confirmed = window.confirm(
+      `Gerar um novo link de cartão para ${label}? Envie o novo link à cliente — o anterior pode deixar de funcionar.`
+    );
+    if (!confirmed) return;
+
+    setBusy("regen-card");
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}/payment-info`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ forceNew: true }),
+      });
+      const data = (await res.json()) as {
+        type?: "pix" | "card" | "paid";
+        checkoutUrl?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        window.alert(data.error ?? "Não foi possível gerar um novo link.");
+        return;
+      }
+      if (data.type === "paid") {
+        window.alert("Pagamento já confirmado.");
+        return;
+      }
+      if (data.type !== "card" || !data.checkoutUrl) {
+        window.alert("Não foi possível gerar um novo link de cartão.");
+        return;
+      }
+      onPatchOrder(order.id, {
+        paymentShare: { type: "card", checkoutUrl: data.checkoutUrl },
+      });
+      await copyText(buildCardShareMessage(order, data.checkoutUrl));
+    } catch {
+      window.alert("Erro de conexão ao gerar o link.");
     } finally {
       setBusy(null);
     }
@@ -1498,7 +1614,7 @@ function OrderRowActionsMenu({
               : isCardPayment
                 ? "Copiar link cartão"
                 : "Copiar link de pagamento",
-        disabled: busy === "payment",
+        disabled: busy === "payment" || busy === "regen-card",
         icon: (
           <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z" />
@@ -1506,6 +1622,21 @@ function OrderRowActionsMenu({
         ),
         onClick: () => void handleCopyPaymentLink(),
       });
+
+      if (isCardPayment && order.status === "pending_payment") {
+        items.push({
+          id: "regen-card",
+          label:
+            busy === "regen-card" ? "Gerando novo link…" : "Gerar novo link cartão",
+          disabled: busy === "regen-card" || busy === "payment",
+          icon: (
+            <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+            </svg>
+          ),
+          onClick: () => void handleRegenerateCardLink(),
+        });
+      }
     }
 
     if (showMarkPaid) {
@@ -1548,6 +1679,7 @@ function OrderRowActionsMenu({
     order.customerDataToken,
     order.paymentShare,
     order.paymentToken,
+    order.status,
     order.total,
     showCustomerLink,
     showMarkPaid,
@@ -2733,7 +2865,7 @@ function OrderDetailsBody({
 
       {hasAdminLinks ? (
         <ExpandedSection title="Links">
-          <AdminSaleLinks order={order} />
+          <AdminSaleLinks order={order} onPatchOrder={onPatchOrder} />
         </ExpandedSection>
       ) : null}
     </div>

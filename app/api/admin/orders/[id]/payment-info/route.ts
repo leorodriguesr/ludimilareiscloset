@@ -7,23 +7,17 @@ interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
-export async function GET(
-  _request: NextRequest,
-  context: RouteContext
-): Promise<NextResponse> {
-  const gate = await requireStaffApi();
-  if (gate instanceof NextResponse) return gate;
-
-  const { id } = await context.params;
-  if (!id?.trim()) {
-    return NextResponse.json({ error: "Pedido inválido." }, { status: 400 });
-  }
-
+async function respondPaymentInfo(input: {
+  orderId: string;
+  userId: string;
+  forceNewLink?: boolean;
+}): Promise<NextResponse> {
   const result = await continueOrderPayment({
-    orderId: id.trim(),
-    userId: gate.userId,
+    orderId: input.orderId,
+    userId: input.userId,
     userEmail: "",
     staffBypass: true,
+    forceNewLink: input.forceNewLink,
   });
 
   if (!result.ok) {
@@ -71,5 +65,51 @@ export async function GET(
   return NextResponse.json({
     type: "card",
     checkoutUrl: result.checkoutUrl,
+  });
+}
+
+export async function GET(
+  _request: NextRequest,
+  context: RouteContext
+): Promise<NextResponse> {
+  const gate = await requireStaffApi();
+  if (gate instanceof NextResponse) return gate;
+
+  const { id } = await context.params;
+  if (!id?.trim()) {
+    return NextResponse.json({ error: "Pedido inválido." }, { status: 400 });
+  }
+
+  return respondPaymentInfo({
+    orderId: id.trim(),
+    userId: gate.userId,
+  });
+}
+
+/** Regenera link de pagamento (cartão InfinitePay) sob demanda do admin. */
+export async function POST(
+  request: NextRequest,
+  context: RouteContext
+): Promise<NextResponse> {
+  const gate = await requireStaffApi();
+  if (gate instanceof NextResponse) return gate;
+
+  const { id } = await context.params;
+  if (!id?.trim()) {
+    return NextResponse.json({ error: "Pedido inválido." }, { status: 400 });
+  }
+
+  let forceNew = true;
+  try {
+    const body = (await request.json()) as { forceNew?: unknown };
+    if (body?.forceNew === false) forceNew = false;
+  } catch {
+    // body opcional — POST implica regenerar
+  }
+
+  return respondPaymentInfo({
+    orderId: id.trim(),
+    userId: gate.userId,
+    forceNewLink: forceNew,
   });
 }

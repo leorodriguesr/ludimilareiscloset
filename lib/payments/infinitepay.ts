@@ -342,6 +342,33 @@ export function infinitePayOrderRedirectUrl(orderId: string): string {
 }
 
 /**
+ * NSU enviado à InfinitePay. Inclui o número da tentativa para cada
+ * regeneração gerar um checkout novo (mesmo `order.id` reutiliza a fatura).
+ */
+export function buildInfinitePayOrderNsu(
+  orderId: string,
+  attemptNumber: number
+): string {
+  return `${orderId}-att-${attemptNumber}`;
+}
+
+/** Extrai orderId (e tentativa, se houver) do `order_nsu` da InfinitePay. */
+export function parseInfinitePayOrderNsu(orderNsu: string): {
+  orderId: string;
+  attemptNumber: number | null;
+} {
+  const trimmed = orderNsu.trim();
+  const att = trimmed.match(/^(.*)-att-(\d+)$/);
+  if (att?.[1] && att[2]) {
+    return { orderId: att[1], attemptNumber: Number(att[2]) };
+  }
+  if (trimmed.includes("-ex-")) {
+    return { orderId: trimmed.split("-ex-")[0]!, attemptNumber: null };
+  }
+  return { orderId: trimmed, attemptNumber: null };
+}
+
+/**
  * Resolve URL de checkout a partir do que foi salvo na tentativa.
  * Se já for URL completa, devolve como está (caso preferido).
  */

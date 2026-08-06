@@ -18,6 +18,7 @@ import {
 import { upsertPendingOrderFromCheckout } from "@/lib/orders/upsert-pending-order";
 import { prisma } from "@/lib/prisma";
 import {
+  buildInfinitePayOrderNsu,
   createInfinitePayCheckoutLink,
   infinitePayOrderRedirectUrl,
   infinitePayWebhookUrl,
@@ -88,6 +89,7 @@ export async function startCheckoutPayment(
   });
 
   let attemptId: string;
+  let attemptNumber: number;
   try {
     const begun = await beginPaymentAttempt({
       orderId: upsert.orderId,
@@ -96,6 +98,7 @@ export async function startCheckoutPayment(
       amount: upsert.total,
     });
     attemptId = begun.attemptId;
+    attemptNumber = begun.attemptNumber;
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";
     if (msg === "ORDER_EXPIRED") {
@@ -117,7 +120,7 @@ export async function startCheckoutPayment(
     return processPixPayment(input, upsert, attemptId);
   }
 
-  return processCardPayment(input, upsert, attemptId);
+  return processCardPayment(input, upsert, attemptId, attemptNumber);
 }
 
 async function processPixPayment(
@@ -190,7 +193,8 @@ async function processPixPayment(
 async function processCardPayment(
   input: StartCheckoutPaymentInput,
   upsert: { orderId: string; total: number; priceUpdated: boolean },
-  attemptId: string
+  attemptId: string,
+  attemptNumber: number
 ): Promise<StartCheckoutPaymentResult> {
   const session = await getAppSession();
 
@@ -264,7 +268,7 @@ async function processCardPayment(
     const { checkoutUrl, slug: gatewayReference } =
       await createInfinitePayCheckoutLink({
         items,
-        orderNsu: full.id,
+        orderNsu: buildInfinitePayOrderNsu(full.id, attemptNumber),
         redirectUrl: infinitePayOrderRedirectUrl(full.id),
         webhookUrl: infinitePayWebhookUrl(),
         customer,

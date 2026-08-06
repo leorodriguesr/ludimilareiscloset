@@ -18,7 +18,11 @@ import {
   ExchangeBalanceStatus,
   ExchangeStatus,
 } from "@/app/generated/prisma/client";
-import { isInfinitePayLencToken } from "@/lib/payments/infinitepay";
+import {
+  expandInfinitePayPaymentReferences,
+  isInfinitePayLencToken,
+  parseInfinitePayOrderNsu,
+} from "@/lib/payments/infinitepay";
 import { appendCashLedgerEntry } from "@/lib/cash/ledger";
 import { EXCHANGE_BALANCE_PURPOSE } from "@/lib/exchanges/initiate-balance-payment";
 import { appendExchangeEvent } from "@/lib/exchanges/events";
@@ -84,17 +88,46 @@ async function findAttemptByGatewayReference(
   gateway: PaymentGateway,
   gatewayReference: string
 ): Promise<AttemptWithOrder | null> {
-  return prisma.paymentAttempt.findFirst({
+  const refs = expandInfinitePayPaymentReferences([gatewayReference]);
+  const include = {
+    order: {
+      select: ORDER_SELECT_FOR_CONFIRMATION,
+    },
+  } as const;
+
+  const exact = await prisma.paymentAttempt.findFirst({
     where: {
       gateway,
-      gatewayReference,
+      gatewayReference: { in: refs },
     },
-    include: {
-      order: {
-        select: ORDER_SELECT_FOR_CONFIRMATION,
-      },
-    },
+    include,
   });
+  if (exact) return exact;
+
+  // Tentativa pode guardar a URL completa; webhook/retorno costuma mandar só lenc/slug.
+  if (gateway === PAYMENT_GATEWAY.INFINITEPAY) {
+    for (const ref of refs) {
+      if (ref.length < 12 || /^https?:\/\//i.test(ref)) continue;
+      const fuzzy = await prisma.paymentAttempt.findFirst({
+        where: {
+          gateway,
+          gatewayReference: { contains: ref },
+          status: {
+            in: [
+              PAYMENT_ATTEMPT_STATUS.ACTIVE,
+              PAYMENT_ATTEMPT_STATUS.CREATED,
+              PAYMENT_ATTEMPT_STATUS.SUPERSEDED,
+            ],
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        include,
+      });
+      if (fuzzy) return fuzzy;
+    }
+  }
+
+  return null;
 }
 
 function amountsMatch(a: number, b: number): boolean {
@@ -604,50 +637,71 @@ export async function confirmPaymentFromInfinitePay(input: {
   }
 
   if (!attempt && orderNsu) {
-    attempt = await prisma.paymentAttempt.findFirst({
-      where: {
-        orderId: orderNsu,
-        gateway: PAYMENT_GATEWAY.INFINITEPAY,
-        status: PAYMENT_ATTEMPT_STATUS.ACTIVE,
-      },
-      include: {
-        order: {
-          select: ORDER_SELECT_FOR_CONFIRMATION,
-        },
-      },
-    });
-  }
+    const { orderId, attemptNumber } = parseInfinitePayOrderNsu(orderNsu);
 
-  if (!attempt && orderNsu.includes("-ex-")) {
-    const baseOrderId = orderNsu.split("-ex-")[0];
-    attempt = await prisma.paymentAttempt.findFirst({
-      where: {
-        orderId: baseOrderId,
-        gateway: PAYMENT_GATEWAY.INFINITEPAY,
-        purpose: EXCHANGE_BALANCE_PURPOSE,
-        status: {
-          in: [
-            PAYMENT_ATTEMPT_STATUS.ACTIVE,
-            PAYMENT_ATTEMPT_STATUS.SUPERSEDED,
-          ],
+    if (attemptNumber != null) {
+      attempt = await prisma.paymentAttempt.findFirst({
+        where: {
+          orderId,
+          attemptNumber,
+          gateway: PAYMENT_GATEWAY.INFINITEPAY,
         },
-      },
-      orderBy: { createdAt: "desc" },
-      include: {
-        order: {
-          select: ORDER_SELECT_FOR_CONFIRMATION,
+        include: {
+          order: {
+            select: ORDER_SELECT_FOR_CONFIRMATION,
+          },
         },
-      },
-    });
+      });
+    }
+
+    if (!attempt) {
+      attempt = await prisma.paymentAttempt.findFirst({
+        where: {
+          orderId,
+          gateway: PAYMENT_GATEWAY.INFINITEPAY,
+          status: PAYMENT_ATTEMPT_STATUS.ACTIVE,
+        },
+        include: {
+          order: {
+            select: ORDER_SELECT_FOR_CONFIRMATION,
+          },
+        },
+      });
+    }
+
+    if (!attempt && orderNsu.includes("-ex-")) {
+      attempt = await prisma.paymentAttempt.findFirst({
+        where: {
+          orderId,
+          gateway: PAYMENT_GATEWAY.INFINITEPAY,
+          purpose: EXCHANGE_BALANCE_PURPOSE,
+          status: {
+            in: [
+              PAYMENT_ATTEMPT_STATUS.ACTIVE,
+              PAYMENT_ATTEMPT_STATUS.SUPERSEDED,
+            ],
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        include: {
+          order: {
+            select: ORDER_SELECT_FOR_CONFIRMATION,
+          },
+        },
+      });
+    }
   }
 
   if (!attempt) {
+    const { orderId } = orderNsu
+      ? parseInfinitePayOrderNsu(orderNsu)
+      : { orderId: null };
     return rejectConfirmation({
       gateway: PAYMENT_GATEWAY.INFINITEPAY,
       source: input.source,
       outcome: WEBHOOK_AUDIT_OUTCOME.REJECTED_NOT_FOUND,
       reason: "Nenhuma PaymentAttempt encontrada para o webhook InfinitePay.",
-      orderId: orderNsu || null,
+      orderId: orderId || orderNsu || null,
       gatewayReference: slug || null,
       payload: input.payload,
     });

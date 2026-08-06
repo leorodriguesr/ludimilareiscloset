@@ -11,6 +11,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { createPixPayment } from "@/lib/payments/create-pix-payment";
 import {
+  buildInfinitePayOrderNsu,
   createInfinitePayCheckoutLink,
   infinitePayOrderRedirectUrl,
   infinitePayWebhookUrl,
@@ -107,6 +108,7 @@ export async function initiateOrderPayment(input: {
   }
 
   let attemptId: string;
+  let attemptNumber: number;
   try {
     const begun = await beginPaymentAttempt({
       orderId: order.id,
@@ -115,6 +117,7 @@ export async function initiateOrderPayment(input: {
       amount: order.total,
     });
     attemptId = begun.attemptId;
+    attemptNumber = begun.attemptNumber;
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";
     if (msg === "ORDER_EXPIRED") {
@@ -142,7 +145,7 @@ export async function initiateOrderPayment(input: {
   if (input.paymentMethod === PAYMENT_METHOD.PIX) {
     return processPix(order, attemptId);
   }
-  return processCard(order, attemptId);
+  return processCard(order, attemptId, attemptNumber);
 }
 
 async function processPix(
@@ -200,7 +203,8 @@ async function processPix(
 
 async function processCard(
   order: NonNullable<Awaited<ReturnType<typeof loadOrderForPayment>>>,
-  attemptId: string
+  attemptId: string,
+  attemptNumber: number
 ): Promise<InitiatePaymentResult> {
   let items;
   try {
@@ -227,7 +231,7 @@ async function processCard(
     const { checkoutUrl, slug: invoiceSlug } =
       await createInfinitePayCheckoutLink({
         items,
-        orderNsu: order.id,
+        orderNsu: buildInfinitePayOrderNsu(order.id, attemptNumber),
         redirectUrl: infinitePayOrderRedirectUrl(order.id),
         webhookUrl: infinitePayWebhookUrl(),
         ...(customer ? { customer } : {}),

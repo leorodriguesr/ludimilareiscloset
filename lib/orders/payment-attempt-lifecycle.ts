@@ -84,18 +84,43 @@ export async function activatePaymentAttempt(input: {
   gatewayReference: string;
   expiresAt?: Date | null;
 }): Promise<boolean> {
-  const result = await prisma.paymentAttempt.updateMany({
-    where: {
-      id: input.attemptId,
-      status: PAYMENT_ATTEMPT_STATUS.CREATED,
-    },
-    data: {
-      status: PAYMENT_ATTEMPT_STATUS.ACTIVE,
-      gatewayReference: input.gatewayReference,
-      ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
-    },
+  const reference = input.gatewayReference.trim();
+  if (!reference) return false;
+
+  return prisma.$transaction(async (tx) => {
+    const current = await tx.paymentAttempt.findUnique({
+      where: { id: input.attemptId },
+      select: { id: true, status: true, gateway: true },
+    });
+    if (!current || current.status !== PAYMENT_ATTEMPT_STATUS.CREATED) {
+      return false;
+    }
+
+    // Unique (gateway, gatewayReference): libera a mesma ref em tentativas
+    // não pagas (ex.: SUPERSEDED) para permitir regenerar o link.
+    await tx.paymentAttempt.updateMany({
+      where: {
+        gateway: current.gateway,
+        gatewayReference: reference,
+        status: { not: PAYMENT_ATTEMPT_STATUS.PAID },
+        id: { not: input.attemptId },
+      },
+      data: { gatewayReference: null },
+    });
+
+    const result = await tx.paymentAttempt.updateMany({
+      where: {
+        id: input.attemptId,
+        status: PAYMENT_ATTEMPT_STATUS.CREATED,
+      },
+      data: {
+        status: PAYMENT_ATTEMPT_STATUS.ACTIVE,
+        gatewayReference: reference,
+        ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
+      },
+    });
+    return result.count > 0;
   });
-  return result.count > 0;
 }
 
 export async function failPaymentAttempt(input: {

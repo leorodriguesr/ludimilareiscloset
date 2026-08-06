@@ -4,6 +4,7 @@ import { confirmPaymentFromInfinitePay } from "@/lib/orders/confirm-payment";
 import { getActivePaymentAttempt } from "@/lib/orders/get-active-payment-attempt";
 import { PAYMENT_GATEWAY } from "@/lib/orders/constants";
 import {
+  buildInfinitePayOrderNsu,
   expandInfinitePayPaymentReferences,
   infinitePayPaymentCheckWithFallback,
 } from "@/lib/payments/infinitepay";
@@ -63,11 +64,28 @@ export async function syncOrderPaymentFromReturn(
     orderRow?.infinitePayInvoiceSlug,
   ]);
 
-  const verified = await infinitePayPaymentCheckWithFallback({
-    orderNsu: orderId,
-    transactionNsu,
-    references,
-  });
+  const orderNsuCandidates = [
+    attempt?.attemptNumber != null
+      ? buildInfinitePayOrderNsu(orderId, attempt.attemptNumber)
+      : null,
+    orderId,
+  ].filter((value): value is string => Boolean(value));
+
+  let verified: Awaited<
+    ReturnType<typeof infinitePayPaymentCheckWithFallback>
+  > = null;
+  let matchedOrderNsu = orderId;
+  for (const orderNsu of orderNsuCandidates) {
+    verified = await infinitePayPaymentCheckWithFallback({
+      orderNsu,
+      transactionNsu,
+      references,
+    });
+    if (verified) {
+      matchedOrderNsu = orderNsu;
+      break;
+    }
+  }
 
   if (!verified) {
     return { confirmed: false };
@@ -79,7 +97,7 @@ export async function syncOrderPaymentFromReturn(
       : verified.reference;
 
   const result = await confirmPaymentFromInfinitePay({
-    orderNsu: orderId,
+    orderNsu: matchedOrderNsu,
     invoiceSlug,
     transactionNsu,
     captureMethod: verified.check.captureMethod ?? undefined,

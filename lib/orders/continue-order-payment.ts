@@ -19,6 +19,7 @@ import {
   getMpOrderPixDetails,
 } from "@/lib/payments/create-pix-payment";
 import {
+  buildInfinitePayOrderNsu,
   createInfinitePayCheckoutLink,
   infinitePayCheckoutUrlFromSlug,
   infinitePayOrderRedirectUrl,
@@ -179,6 +180,7 @@ async function restartCardPayment(
   }
 ): Promise<ContinueOrderPaymentSuccess | { ok: false; error: string }> {
   let attemptId: string;
+  let attemptNumber: number;
   try {
     const begun = await beginPaymentAttempt({
       orderId: order.id,
@@ -187,6 +189,7 @@ async function restartCardPayment(
       amount: order.total,
     });
     attemptId = begun.attemptId;
+    attemptNumber = begun.attemptNumber;
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";
     if (msg === "ORDER_EXPIRED") {
@@ -221,7 +224,7 @@ async function restartCardPayment(
     const { checkoutUrl, slug: invoiceSlug } =
       await createInfinitePayCheckoutLink({
         items,
-        orderNsu: order.id,
+        orderNsu: buildInfinitePayOrderNsu(order.id, attemptNumber),
         redirectUrl: infinitePayOrderRedirectUrl(order.id),
         webhookUrl: infinitePayWebhookUrl(),
         ...(customer ? { customer } : {}),
@@ -287,6 +290,8 @@ export async function continueOrderPayment(input: {
   userEmail: string;
   /** Admin/gestor: ignora dono do pedido e TTL de checkout. */
   staffBypass?: boolean;
+  /** Força novo link InfinitePay (não reutiliza tentativa ACTIVE). */
+  forceNewLink?: boolean;
 }): Promise<ContinueOrderPaymentResult> {
   const order = await prisma.order.findUnique({
     where: { id: input.orderId },
@@ -438,6 +443,7 @@ export async function continueOrderPayment(input: {
   }
 
   if (
+    !input.forceNewLink &&
     activeAttempt?.gateway === PAYMENT_GATEWAY.INFINITEPAY &&
     activeAttempt.gatewayReference &&
     isReusableInfinitePayCheckoutReference(activeAttempt.gatewayReference)
