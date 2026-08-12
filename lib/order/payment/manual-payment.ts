@@ -4,6 +4,7 @@ import {
   PaymentChannel,
 } from "@/app/generated/prisma/client";
 import { appendCashLedgerEntry } from "@/lib/cash/ledger";
+import { parsePieceSelections } from "@/lib/exchanges/serialize";
 import { onOrderPaymentConfirmed } from "@/lib/fulfillment/fulfillment-service";
 import {
   ORDER_STATUS,
@@ -11,7 +12,11 @@ import {
   PAYMENT_METHOD,
   type PaymentMethod,
 } from "@/lib/orders/constants";
-import { commitStockReservations } from "@/lib/orders/stock/reservation";
+import { OrderCreateError } from "@/lib/orders/create-order";
+import {
+  commitStockReservations,
+  reserveStockForOrderLines,
+} from "@/lib/orders/stock/reservation";
 import { prisma } from "@/lib/prisma";
 
 function resolvePaymentMethod(
@@ -47,20 +52,38 @@ export async function markOrderPaidManually(input: {
       addressCity: true,
       addressState: true,
       destinationCep: true,
+      items: {
+        select: {
+          productId: true,
+          quantity: true,
+          price: true,
+          pieceSelectionsJson: true,
+        },
+      },
     },
   });
 
   if (!order) {
     return { ok: false, error: "Pedido não encontrado." };
   }
-  if (order.orderSource !== OrderSource.ADMIN_SALE) {
-    return { ok: false, error: "Pagamento manual só se aplica a vendas avulsas." };
-  }
+
   if (order.status === ORDER_STATUS.PAID && order.paidAt) {
     await onOrderPaymentConfirmed(order);
     return { ok: true };
   }
-  if (order.status !== ORDER_STATUS.PENDING_PAYMENT) {
+
+  const isCancelled = order.status === ORDER_STATUS.CANCELLED;
+  const isPendingAdminSale =
+    order.status === ORDER_STATUS.PENDING_PAYMENT &&
+    order.orderSource === OrderSource.ADMIN_SALE;
+
+  if (!isCancelled && !isPendingAdminSale) {
+    if (order.orderSource !== OrderSource.ADMIN_SALE) {
+      return {
+        ok: false,
+        error: "Pagamento manual só se aplica a vendas avulsas.",
+      };
+    }
     return { ok: false, error: "Este pedido não pode ser marcado como pago." };
   }
 
@@ -69,37 +92,80 @@ export async function markOrderPaidManually(input: {
     order.paymentMethod
   );
   const paidAt = new Date();
-  await prisma.$transaction(async (tx) => {
-    await tx.order.update({
-      where: { id: order.id },
-      data: {
-        status: ORDER_STATUS.PAID,
-        paidAt,
-        shippingStatus: "to_pack",
-        paymentMethod,
-        paymentChannel: PaymentChannel.MANUAL,
-        manualPaidByUserId: input.markedByUserId,
-      },
-    });
-    await tx.paymentAttempt.updateMany({
-      where: {
-        orderId: order.id,
-        status: {
-          in: [PAYMENT_ATTEMPT_STATUS.ACTIVE, PAYMENT_ATTEMPT_STATUS.CREATED],
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      if (isCancelled) {
+        const lines = order.items
+          .filter(
+            (item): item is typeof item & { productId: string } =>
+              Boolean(item.productId)
+          )
+          .map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            price: item.price,
+            pieceSelections: parsePieceSelections(item.pieceSelectionsJson),
+          }));
+
+        if (lines.length > 0) {
+          await reserveStockForOrderLines(tx, order.id, lines, paidAt);
+          await commitStockReservations(tx, order.id);
+        }
+      } else {
+        await commitStockReservations(tx, order.id);
+      }
+
+      await tx.order.update({
+        where: { id: order.id },
+        data: {
+          status: ORDER_STATUS.PAID,
+          paidAt,
+          shippingStatus: "to_pack",
+          paymentMethod,
+          paymentChannel: PaymentChannel.MANUAL,
+          manualPaidByUserId: input.markedByUserId,
+          cancellationReason: null,
+          cancelledAt: null,
+          expiredAt: null,
         },
-      },
-      data: { status: PAYMENT_ATTEMPT_STATUS.SUPERSEDED },
+      });
+
+      await tx.paymentAttempt.updateMany({
+        where: {
+          orderId: order.id,
+          status: {
+            in: [
+              PAYMENT_ATTEMPT_STATUS.ACTIVE,
+              PAYMENT_ATTEMPT_STATUS.CREATED,
+            ],
+          },
+        },
+        data: { status: PAYMENT_ATTEMPT_STATUS.SUPERSEDED },
+      });
+
+      await appendCashLedgerEntry(tx, {
+        direction: "IN",
+        kind: "SALE",
+        amount: order.total,
+        description: isCancelled
+          ? `Confirmação de pagamento · pedido #${order.orderNumber ?? order.id.slice(0, 8)}`
+          : `Venda avulsa · pedido #${order.orderNumber ?? order.id.slice(0, 8)}`,
+        orderId: order.id,
+        actorUserId: input.markedByUserId,
+      });
     });
-    await commitStockReservations(tx, order.id);
-    await appendCashLedgerEntry(tx, {
-      direction: "IN",
-      kind: "SALE",
-      amount: order.total,
-      description: `Venda avulsa · pedido #${order.orderNumber ?? order.id.slice(0, 8)}`,
-      orderId: order.id,
-      actorUserId: input.markedByUserId,
-    });
-  });
+  } catch (e) {
+    if (e instanceof OrderCreateError && e.code === "INSUFFICIENT_STOCK") {
+      return {
+        ok: false,
+        error:
+          "Estoque insuficiente para reativar esta venda. Ajuste o estoque e tente novamente.",
+      };
+    }
+    console.error("[markOrderPaidManually]", e);
+    return { ok: false, error: "Não foi possível confirmar o pagamento." };
+  }
 
   await onOrderPaymentConfirmed({
     ...order,

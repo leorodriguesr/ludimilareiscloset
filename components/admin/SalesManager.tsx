@@ -1378,6 +1378,8 @@ function OrderRowActionsMenu({
     !isPaid &&
     !isCancelled &&
     order.status === "pending_payment";
+  const showConfirmPaymentCancelled =
+    canMarkPaid && isCancelled && !isPaid;
   const isPixPayment = order.paymentMethod === "pix";
   const isCardPayment = order.paymentMethod === "card";
 
@@ -1438,6 +1440,43 @@ function OrderRowActionsMenu({
         paidAt: new Date().toISOString(),
         status: "paid",
         paymentChannel: "MANUAL",
+        shippingStatus: "to_pack",
+        cancellationReason: null,
+        cancelledAt: null,
+      });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleConfirmPaymentCancelled() {
+    const label =
+      order.orderNumber != null ? `#${order.orderNumber}` : "esta venda";
+    const confirmed = window.confirm(
+      `Confirmar pagamento da venda ${label}? A venda cancelada volta a ficar ativa e marcada como paga.`
+    );
+    if (!confirmed) return;
+    setBusy("confirm-paid");
+    try {
+      const res = await fetch(`/api/admin/sales/${order.id}/mark-paid`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        window.alert(
+          data?.error ?? "Não foi possível confirmar o pagamento."
+        );
+        return;
+      }
+      onPatchOrder(order.id, {
+        paidAt: new Date().toISOString(),
+        status: "paid",
+        paymentChannel: "MANUAL",
+        shippingStatus: "to_pack",
+        cancellationReason: null,
+        cancelledAt: null,
       });
     } finally {
       setBusy(null);
@@ -1654,6 +1693,22 @@ function OrderRowActionsMenu({
       });
     }
 
+    if (showConfirmPaymentCancelled) {
+      items.push({
+        id: "confirm-paid",
+        label:
+          busy === "confirm-paid" ? "Confirmando…" : "Confirmar pagamento",
+        disabled: busy === "confirm-paid",
+        separatorBefore: items.length > 0,
+        icon: (
+          <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          </svg>
+        ),
+        onClick: () => void handleConfirmPaymentCancelled(),
+      });
+    }
+
     if (!isCancelled) {
       items.push({
         id: "cancel",
@@ -1681,6 +1736,7 @@ function OrderRowActionsMenu({
     order.paymentToken,
     order.status,
     order.total,
+    showConfirmPaymentCancelled,
     showCustomerLink,
     showMarkPaid,
     showPaymentLink,
