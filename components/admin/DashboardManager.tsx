@@ -506,7 +506,7 @@ export function DashboardManager() {
                       Para fora
                     </p>
                     <p className="mt-1 text-xs text-stone-500">
-                      Transportadora e demais envios
+                      Transportadora
                     </p>
                   </div>
                   <div className="mt-4">
@@ -515,7 +515,6 @@ export function DashboardManager() {
                     </p>
                     <p className="mt-1 text-sm font-medium text-sky-700">
                       {percent(metrics.outboundSalesCount, fulfillmentTotal)}%
-                      das pagas
                     </p>
                   </div>
                 </div>
