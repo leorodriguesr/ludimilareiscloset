@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { DashboardManager } from "@/components/admin/DashboardManager";
 import { ProductList } from "@/components/admin/ProductList";
 import { ProductFormModal } from "@/components/admin/ProductFormModal";
 import { BannerForm } from "@/components/admin/BannerForm";
@@ -16,6 +17,7 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import type { Product } from "@/lib/types";
 
 type AdminSection =
+  | "dashboard"
   | "products"
   | "sections"
   | "categories"
@@ -36,6 +38,7 @@ const ADMIN_NAV_GROUPS: {
   {
     title: "Operação",
     items: [
+      { id: "dashboard", label: "Dashboard" },
       { id: "products", label: "Produtos" },
       { id: "sales", label: "Vendas" },
       { id: "shipping", label: "Envios" },
@@ -94,6 +97,16 @@ function AdminNavIcon({ id }: { id: AdminSection }) {
   };
 
   switch (id) {
+    case "dashboard":
+      return (
+        <svg {...iconProps}>
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"
+          />
+        </svg>
+      );
     case "products":
       return (
         <svg {...iconProps}>
@@ -195,9 +208,10 @@ export default function AdminPage() {
   const [bannerUrl, setBannerUrl] = useState("");
   const [bannerMobileUrl, setBannerMobileUrl] = useState("");
   const [activeSection, setActiveSection] = useState<AdminSection>(() => {
-    if (typeof window === "undefined") return "products";
+    if (typeof window === "undefined") return "dashboard";
     const section = new URLSearchParams(window.location.search).get("section");
     const allowed: AdminSection[] = [
+      "dashboard",
       "products",
       "sections",
       "categories",
@@ -210,7 +224,7 @@ export default function AdminPage() {
     ];
     return allowed.includes(section as AdminSection)
       ? (section as AdminSection)
-      : "products";
+      : "dashboard";
   });
   const [showProductModal, setShowProductModal] = useState(false);
   const [productSearchQuery, setProductSearchQuery] = useState("");
@@ -261,7 +275,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (!allowedSections.has(activeSection)) {
-      setActiveSection("products");
+      setActiveSection("dashboard");
     }
   }, [allowedSections, activeSection]);
 
@@ -322,6 +336,12 @@ export default function AdminPage() {
       </aside>
 
       <main className="min-w-0 px-4 py-8 md:ml-56 md:px-10 ">
+        {activeSection === "dashboard" && (
+          <section>
+            <DashboardManager />
+          </section>
+        )}
+
         {activeSection === "products" && (
           <div>
             <div className="mb-6 flex flex-col gap-4 sm:mb-8">

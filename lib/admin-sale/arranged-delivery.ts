@@ -152,3 +152,40 @@ export function shippingFeeDisplayText(
   if (display.kind === "free") return "Grátis";
   return formatPrice(display.amount);
 }
+
+const INSIDE_DELIVERY_LABELS = new Set<string>([
+  ARRANGED_DELIVERY_LABELS.store_delivery,
+  ARRANGED_DELIVERY_LABELS.pickup,
+  ARRANGED_DELIVERY_LABELS.uber,
+]);
+
+function arrangedTypeLabel(input: {
+  fulfillmentType?: string | null;
+  shippingServiceName?: string | null;
+  deliveryNotes?: string | null;
+}): string | null {
+  if (input.fulfillmentType !== "ARRANGED") return null;
+  return resolveArrangedDeliveryDisplay({
+    shippingServiceName: input.shippingServiceName,
+    deliveryNotes: input.deliveryNotes,
+    shippingAmount: 0,
+  }).typeLabel;
+}
+
+/** Motoboy, retirada e Uber — vendas “para dentro”. */
+export function isInsideDelivery(input: {
+  fulfillmentType?: string | null;
+  shippingServiceName?: string | null;
+  deliveryNotes?: string | null;
+}): boolean {
+  const typeLabel = arrangedTypeLabel(input);
+  return typeLabel != null && INSIDE_DELIVERY_LABELS.has(typeLabel);
+}
+
+export function isStoreMotoboyDelivery(input: {
+  fulfillmentType?: string | null;
+  shippingServiceName?: string | null;
+  deliveryNotes?: string | null;
+}): boolean {
+  return arrangedTypeLabel(input) === ARRANGED_DELIVERY_LABELS.store_delivery;
+}
