@@ -63,9 +63,10 @@ function rangeToUtcBounds(range: DashboardDateRange): { gte: Date; lte: Date } {
   };
 }
 
-function normalizeState(value: string | null): string {
+function normalizeState(value: string | null): string | null {
   const trimmed = value?.trim().toUpperCase() ?? "";
-  if (!trimmed) return "Não informado";
+  if (!trimmed) return null;
+  if (trimmed === "NÃO INFORMADO" || trimmed === "NAO INFORMADO") return null;
   return trimmed;
 }
 
@@ -141,16 +142,15 @@ export async function getDashboardMetrics(
     }
 
     const state = normalizeState(order.addressState);
+    if (!state) continue;
     stateCounts.set(state, (stateCounts.get(state) ?? 0) + 1);
   }
 
   const salesByState = [...stateCounts.entries()]
     .map(([state, count]) => ({ state, count }))
-    .sort((a, b) => {
-      if (a.state === "Não informado") return 1;
-      if (b.state === "Não informado") return -1;
-      return b.count - a.count || a.state.localeCompare(b.state, "pt-BR");
-    });
+    .sort(
+      (a, b) => b.count - a.count || a.state.localeCompare(b.state, "pt-BR")
+    );
 
   return {
     from: range.from,
