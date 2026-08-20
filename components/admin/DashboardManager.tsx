@@ -384,71 +384,7 @@ export function DashboardManager() {
             </section>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-            <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
-              <h3 className="flex items-center gap-2 text-sm font-semibold text-stone-900">
-                Destino das vendas
-              </h3>
-              <p className="mt-0.5 text-xs text-stone-500">
-                Como as entregas saíram no período
-              </p>
-
-              <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="rounded-xl border border-stone-100 border-l-2 border-l-sky-400 bg-stone-50/80 px-4 py-4">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-sky-700">
-                      Para fora
-                    </p>
-                    <p className="mt-1 text-xs text-stone-500">
-                      Transportadora e demais envios
-                    </p>
-                  </div>
-                  <div className="mt-4">
-                    <p className="text-4xl font-semibold tabular-nums tracking-tight text-stone-900">
-                      {metrics.outboundSalesCount.toLocaleString("pt-BR")}
-                    </p>
-                    <p className="mt-1 text-sm font-medium text-sky-700">
-                      {percent(metrics.outboundSalesCount, fulfillmentTotal)}%
-                      das pagas
-                    </p>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-stone-100 border-l-2 border-l-teal-400 bg-stone-50/80 px-4 py-4">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-teal-700">
-                      Para dentro
-                    </p>
-                    <p className="mt-1 text-xs text-stone-500">
-                      Motoboy, retirada e Uber
-                    </p>
-                  </div>
-                  <div className="mt-4">
-                    <p className="text-4xl font-semibold tabular-nums tracking-tight text-stone-900">
-                      {metrics.inboundSalesCount.toLocaleString("pt-BR")}
-                    </p>
-                    <p className="mt-1 text-sm font-medium text-teal-700">
-                      {percent(metrics.inboundSalesCount, fulfillmentTotal)}%
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-3 flex items-center justify-between rounded-xl border border-stone-100 border-l-2 border-l-orange-400 bg-stone-50/80 px-4 py-3">
-                <div>
-                  <p className="text-xs font-semibold text-orange-800">
-                    Entregas motoboy
-                  </p>
-                  <p className="mt-0.5 text-xs text-stone-500">
-                    Só entregador da loja
-                  </p>
-                </div>
-                <p className="text-2xl font-semibold tabular-nums text-stone-900">
-                  {metrics.motoboyDeliveriesCount.toLocaleString("pt-BR")}
-                </p>
-              </div>
-            </section>
-
+          <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr] xl:items-start">
             <section className="flex min-h-0 flex-col rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <div>
@@ -553,6 +489,70 @@ export function DashboardManager() {
                   })}
                 </ol>
               )}
+            </section>
+
+            <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-stone-900">
+                Destino das vendas
+              </h3>
+              <p className="mt-0.5 text-xs text-stone-500">
+                Como as entregas saíram no período
+              </p>
+
+              <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-stone-100 border-l-2 border-l-sky-400 bg-stone-50/80 px-4 py-4">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-sky-700">
+                      Para fora
+                    </p>
+                    <p className="mt-1 text-xs text-stone-500">
+                      Transportadora e demais envios
+                    </p>
+                  </div>
+                  <div className="mt-4">
+                    <p className="text-4xl font-semibold tabular-nums tracking-tight text-stone-900">
+                      {metrics.outboundSalesCount.toLocaleString("pt-BR")}
+                    </p>
+                    <p className="mt-1 text-sm font-medium text-sky-700">
+                      {percent(metrics.outboundSalesCount, fulfillmentTotal)}%
+                      das pagas
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-stone-100 border-l-2 border-l-teal-400 bg-stone-50/80 px-4 py-4">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-teal-700">
+                      Para dentro
+                    </p>
+                    <p className="mt-1 text-xs text-stone-500">
+                      Motoboy, retirada e Uber
+                    </p>
+                  </div>
+                  <div className="mt-4">
+                    <p className="text-4xl font-semibold tabular-nums tracking-tight text-stone-900">
+                      {metrics.inboundSalesCount.toLocaleString("pt-BR")}
+                    </p>
+                    <p className="mt-1 text-sm font-medium text-teal-700">
+                      {percent(metrics.inboundSalesCount, fulfillmentTotal)}%
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 flex items-center justify-between rounded-xl border border-stone-100 border-l-2 border-l-orange-400 bg-stone-50/80 px-4 py-3">
+                <div>
+                  <p className="text-xs font-semibold text-orange-800">
+                    Entregas motoboy
+                  </p>
+                  <p className="mt-0.5 text-xs text-stone-500">
+                    Só entregador da loja
+                  </p>
+                </div>
+                <p className="text-2xl font-semibold tabular-nums text-stone-900">
+                  {metrics.motoboyDeliveriesCount.toLocaleString("pt-BR")}
+                </p>
+              </div>
             </section>
           </div>
         </div>
