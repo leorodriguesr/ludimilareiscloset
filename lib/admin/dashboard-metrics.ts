@@ -84,7 +84,7 @@ export async function getDashboardMetrics(
 
   const orders = await prisma.order.findMany({
     where: {
-      createdAt: {
+      paidAt: {
         gte: bounds.gte,
         lte: bounds.lte,
       },

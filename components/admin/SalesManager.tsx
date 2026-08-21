@@ -239,8 +239,9 @@ function orderMatchesSaleDateRange(
 ): boolean {
   const normalized = normalizeSaleDateRange(range.from, range.to);
   if (!normalized) return true;
+  if (!order.paidAt) return false;
 
-  const orderDate = toLocalDateKey(order.createdAt);
+  const orderDate = toLocalDateKey(order.paidAt);
   return orderDate >= normalized.from && orderDate <= normalized.to;
 }
 
@@ -494,7 +495,7 @@ function SaleDatePicker({
             <div
               role="dialog"
               aria-modal="true"
-              aria-label="Selecionar intervalo de datas da venda"
+              aria-label="Selecionar intervalo pela data de pagamento"
               className="fixed left-1/2 top-1/2 z-[101] w-[min(calc(100vw-2rem),19rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-stone-200 bg-white p-4 shadow-2xl"
               onClick={(event) => event.stopPropagation()}
             >
@@ -672,14 +673,6 @@ function resolvePaymentMethodKind(method: string | null): "pix" | "card" | null 
   return null;
 }
 
-function selectedPaymentGatewayLabel(order: AdminOrder): string | null {
-  if (order.paymentChannel === "MANUAL") return null;
-  const selectedMethod = resolvePaymentMethodKind(order.paymentMethod ?? null);
-  if (selectedMethod === "pix") return "Mercado Pago";
-  if (selectedMethod === "card") return "InfinitePay";
-  return null;
-}
-
 const TABLE_CELL_PRIMARY = "text-sm font-medium text-stone-900 truncate";
 const TABLE_CELL_SECONDARY = "text-xs font-normal text-stone-500 truncate";
 
@@ -740,7 +733,7 @@ function Chip({ label, cls }: { label: string; cls: string }) {
 
 function PaymentStatusBadge({ label, cls }: { label: string; cls: string }) {
   return (
-    <span className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${cls}`}>
+    <span className={`inline-flex w-fit shrink-0 items-center whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${cls}`}>
       {label}
     </span>
   );
@@ -789,7 +782,7 @@ function TablePaymentCell({ order }: { order: AdminOrder }) {
           <PaymentMethodIcon kind={methodKind} />
         </span>
       ) : null}
-      <div className="flex min-w-0 flex-col gap-0.5">
+      <div className="flex min-w-0 flex-col items-start gap-0.5">
         <PaymentStatusBadge label={paymentStatus.label} cls={paymentStatus.cls} />
         {order.paidAt ? (
           <p className={`whitespace-nowrap ${TABLE_CELL_SECONDARY}`}>
@@ -905,7 +898,7 @@ function ShippingStatusBadge({
 }) {
   return (
     <span
-      className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${SHIPPING_TONE_CLASS[tone]}`}
+      className={`inline-flex w-fit shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${SHIPPING_TONE_CLASS[tone]}`}
     >
       {shippingStatusIcon(status)}
       {label}
@@ -924,7 +917,7 @@ function TableShippingStatus({
   const ss = sInfo(status);
 
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col items-start gap-0.5">
       <ShippingStatusBadge label={label} tone={ss.tone} status={status} />
       {shippingMethod ? (
         <p className={`whitespace-nowrap ${TABLE_CELL_SECONDARY}`}>{shippingMethod}</p>
@@ -3524,9 +3517,7 @@ export function SalesManager() {
                   </th>
                   <th className="px-4 py-3.5 text-left">Pedido</th>
                   <th className="px-4 py-3.5 text-left">Origem</th>
-                  <th className="px-4 py-3.5 text-left">Data</th>
                   <th className="px-4 py-3.5 text-left">Cliente</th>
-                  <th className="px-4 py-3.5 text-left">Gateway</th>
                   <th className="px-4 py-3.5 text-left">Pagamento</th>
                   <th className="px-4 py-3.5 text-right">Total</th>
                   <th className="px-4 py-3.5 text-left">Envio</th>
@@ -3606,6 +3597,9 @@ export function SalesManager() {
                                 </span>
                               ) : null}
                             </div>
+                            <p className={TABLE_CELL_SECONDARY}>
+                              {fmtDate(order.createdAt)} {fmtTime(order.createdAt)}
+                            </p>
                             {isSaleCancelled ? (
                               <span className="text-xs font-normal text-red-600">Cancelado</span>
                             ) : null}
@@ -3617,19 +3611,8 @@ export function SalesManager() {
                         </td>
 
                         <td className="px-4 py-3.5">
-                          <p className={TABLE_CELL_PRIMARY}>{fmtDate(order.createdAt)}</p>
-                          <p className={TABLE_CELL_SECONDARY}>{fmtTime(order.createdAt)}</p>
-                        </td>
-
-                        <td className="px-4 py-3.5">
                           <p className={`truncate max-w-[200px] ${TABLE_CELL_PRIMARY}`}>
                             {customerName}
-                          </p>
-                        </td>
-
-                        <td className="px-4 py-3.5">
-                          <p className={TABLE_CELL_PRIMARY}>
-                            {selectedPaymentGatewayLabel(order) ?? "—"}
                           </p>
                         </td>
 

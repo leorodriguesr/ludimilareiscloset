@@ -452,7 +452,7 @@ function ShippingStatusBadge({
 }) {
   return (
     <span
-      className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${SHIPPING_TONE_CLASS[tone]}`}
+      className={`inline-flex w-fit shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${SHIPPING_TONE_CLASS[tone]}`}
     >
       {shippingStatusIcon(status)}
       {label}
@@ -471,7 +471,7 @@ function TableShippingStatus({
   const info = sInfo(status);
 
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col items-start gap-0.5">
       <ShippingStatusBadge label={label} tone={info.tone} status={status} />
       {shippingMethod ? (
         <p className={`whitespace-nowrap ${TABLE_CELL_SECONDARY}`}>{shippingMethod}</p>
