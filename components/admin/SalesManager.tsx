@@ -2301,6 +2301,46 @@ function OrderDetailsBody({
   }
 
   async function saveCustomerData() {
+    const nextInternalNotes = customerForm.internalNotes.trim() || null;
+    const nextDeliveryNotes = composeDeliveryNotesFromUserEdit(
+      order.deliveryNotes,
+      order.shippingServiceName,
+      customerForm.deliveryNotes
+    );
+    const notesOnly =
+      !isCustomerContactAddressComplete(customerFieldsForSave) &&
+      customerNotesChanged;
+
+    if (notesOnly) {
+      setSavingCustomer(true);
+      setCustomerError(null);
+      try {
+        const res = await fetch(`/api/admin/orders/${order.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            internalNotes: nextInternalNotes,
+            deliveryNotes: nextDeliveryNotes,
+          }),
+        });
+        const data = (await res.json()) as { error?: string };
+        if (!res.ok) {
+          setCustomerError(data.error ?? "Erro ao salvar dados.");
+          return;
+        }
+        setEditingCustomer(false);
+        onPatchOrder(order.id, {
+          internalNotes: nextInternalNotes,
+          deliveryNotes: nextDeliveryNotes,
+        });
+      } catch {
+        setCustomerError("Erro de conexão.");
+      } finally {
+        setSavingCustomer(false);
+      }
+      return;
+    }
+
     if (!customerForm.recipientName.trim()) {
       setCustomerError("Informe o nome.");
       return;
@@ -2363,13 +2403,6 @@ function OrderDetailsBody({
       setCustomerError("Informe um e-mail válido.");
       return;
     }
-
-    const nextInternalNotes = customerForm.internalNotes.trim() || null;
-    const nextDeliveryNotes = composeDeliveryNotesFromUserEdit(
-      order.deliveryNotes,
-      order.shippingServiceName,
-      customerForm.deliveryNotes
-    );
 
     setSavingCustomer(true);
     setCustomerError(null);
@@ -2435,9 +2468,21 @@ function OrderDetailsBody({
     city: customerForm.addressCity,
     state: customerForm.addressState,
   };
-  const canSaveCustomer = isCustomerContactAddressComplete(customerFieldsForSave);
-  const customerSaveHint =
-    customerContactAddressValidationError(customerFieldsForSave);
+  const originalInternalNotes = (order.internalNotes ?? "").trim();
+  const originalDeliveryNotes = (saleDeliveryUserNotes(order) ?? "").trim();
+  const customerNotesChanged =
+    customerForm.internalNotes.trim() !== originalInternalNotes ||
+    customerForm.deliveryNotes.trim() !== originalDeliveryNotes;
+  const canSaveCustomer =
+    isCustomerContactAddressComplete(customerFieldsForSave) ||
+    customerNotesChanged;
+  const customerSaveHint = isCustomerContactAddressComplete(
+    customerFieldsForSave
+  )
+    ? null
+    : customerNotesChanged
+      ? "As observações serão salvas e o link de preenchimento da cliente continua ativo."
+      : customerContactAddressValidationError(customerFieldsForSave);
 
   const customerName = orderCustomerName(order);
   const customerPhone = order.phone || order.user?.phone || null;
@@ -2676,8 +2721,14 @@ function OrderDetailsBody({
 
             {customerError ? (
               <p className="text-xs text-red-600">{customerError}</p>
-            ) : !canSaveCustomer && customerSaveHint ? (
-              <p className="text-xs text-amber-700">{customerSaveHint}</p>
+            ) : customerSaveHint ? (
+              <p
+                className={`text-xs ${
+                  customerNotesChanged ? "text-stone-500" : "text-amber-700"
+                }`}
+              >
+                {customerSaveHint}
+              </p>
             ) : null}
 
             <div className="flex gap-2">
