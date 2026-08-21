@@ -35,13 +35,6 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Não é pagamento Pix." }, { status: 400 });
   }
 
-  if (order.status === "paid") {
-    return NextResponse.json(
-      { status: "paid" },
-      { headers: { "Cache-Control": "no-store" } }
-    );
-  }
-
   const attempt = await getActivePaymentAttempt(validation.orderId);
   const mpOrderId =
     attempt?.gateway === PAYMENT_GATEWAY.MERCADOPAGO

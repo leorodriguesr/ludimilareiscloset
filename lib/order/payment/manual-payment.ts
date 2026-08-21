@@ -7,6 +7,8 @@ import { appendCashLedgerEntry } from "@/lib/cash/ledger";
 import { parsePieceSelections } from "@/lib/exchanges/serialize";
 import { onOrderPaymentConfirmed } from "@/lib/fulfillment/fulfillment-service";
 import {
+  ORDER_CHARGE_STATUS,
+  ORDER_ITEM_PAYMENT_STATUS,
   ORDER_STATUS,
   PAYMENT_ATTEMPT_STATUS,
   PAYMENT_METHOD,
@@ -41,6 +43,7 @@ export async function markOrderPaidManually(input: {
       id: true,
       orderNumber: true,
       total: true,
+      paidTotal: true,
       orderSource: true,
       status: true,
       paidAt: true,
@@ -57,6 +60,7 @@ export async function markOrderPaidManually(input: {
           productId: true,
           quantity: true,
           price: true,
+          paymentStatus: true,
           pieceSelectionsJson: true,
         },
       },
@@ -68,7 +72,59 @@ export async function markOrderPaidManually(input: {
   }
 
   if (order.status === ORDER_STATUS.PAID && order.paidAt) {
-    await onOrderPaymentConfirmed(order);
+    const pendingCharge = await prisma.orderCharge.findFirst({
+      where: { orderId: order.id, status: ORDER_CHARGE_STATUS.PENDING },
+      orderBy: { sequence: "desc" },
+    });
+    if (!pendingCharge) {
+      await onOrderPaymentConfirmed(order);
+      return { ok: true };
+    }
+
+    const paidAt = new Date();
+    try {
+      await prisma.$transaction(async (tx) => {
+        await commitStockReservations(tx, order.id);
+        await tx.orderCharge.update({
+          where: { id: pendingCharge.id },
+          data: { status: ORDER_CHARGE_STATUS.PAID, paidAt },
+        });
+        await tx.orderItem.updateMany({
+          where: { chargeId: pendingCharge.id },
+          data: {
+            paymentStatus: ORDER_ITEM_PAYMENT_STATUS.PAID,
+            paidAt,
+          },
+        });
+        await tx.order.update({
+          where: { id: order.id },
+          data: { paidTotal: { increment: pendingCharge.amount } },
+        });
+        await tx.paymentAttempt.updateMany({
+          where: {
+            orderId: order.id,
+            status: {
+              in: [
+                PAYMENT_ATTEMPT_STATUS.ACTIVE,
+                PAYMENT_ATTEMPT_STATUS.CREATED,
+              ],
+            },
+          },
+          data: { status: PAYMENT_ATTEMPT_STATUS.SUPERSEDED },
+        });
+        await appendCashLedgerEntry(tx, {
+          direction: "IN",
+          kind: "SALE",
+          amount: pendingCharge.amount,
+          description: `Acréscimo manual · pedido #${order.orderNumber ?? order.id.slice(0, 8)}`,
+          orderId: order.id,
+          actorUserId: input.markedByUserId,
+        });
+      });
+    } catch (e) {
+      console.error("[markOrderPaidManually] addon", e);
+      return { ok: false, error: "Não foi possível confirmar o acréscimo." };
+    }
     return { ok: true };
   }
 
@@ -121,6 +177,7 @@ export async function markOrderPaidManually(input: {
         data: {
           status: ORDER_STATUS.PAID,
           paidAt,
+          paidTotal: order.total,
           shippingStatus: "to_pack",
           paymentMethod,
           paymentChannel: PaymentChannel.MANUAL,
@@ -129,6 +186,22 @@ export async function markOrderPaidManually(input: {
           cancelledAt: null,
           expiredAt: null,
         },
+      });
+
+      await tx.orderItem.updateMany({
+        where: { orderId: order.id },
+        data: {
+          paymentStatus: ORDER_ITEM_PAYMENT_STATUS.PAID,
+          paidAt,
+        },
+      });
+
+      await tx.orderCharge.updateMany({
+        where: {
+          orderId: order.id,
+          status: ORDER_CHARGE_STATUS.PENDING,
+        },
+        data: { status: ORDER_CHARGE_STATUS.PAID, paidAt },
       });
 
       await tx.paymentAttempt.updateMany({

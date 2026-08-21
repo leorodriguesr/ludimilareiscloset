@@ -29,6 +29,9 @@ import {
 import { getFulfillmentStrategy } from "@/lib/fulfillment/fulfillment-types";
 import { initiateOrderPayment } from "@/lib/order/payment/initiate-payment";
 import {
+  ORDER_CHARGE_REASON,
+  ORDER_CHARGE_STATUS,
+  ORDER_ITEM_PAYMENT_STATUS,
   ORDER_PENDING_TTL_MS,
   ORDER_STATUS,
   type PaymentMethod,
@@ -402,6 +405,7 @@ export async function createAdminSale(
         orderDiscountValue: input.orderDiscount?.value ?? null,
         orderDiscountAmount: pricing.orderDiscountAmount,
         total: pricing.total,
+        paidTotal: input.paymentAlreadyPaid ? pricing.total : 0,
         shippingAmount: pricing.shippingAmount,
         shippingQuotedPrice: shipping.shippingQuotedPrice,
         shippingDeliveryDaysMin: shipping.shippingDeliveryDaysMin,
@@ -474,6 +478,31 @@ export async function createAdminSale(
       select: { id: true, orderNumber: true },
     });
 
+    const charge = await tx.orderCharge.create({
+      data: {
+        orderId: order.id,
+        sequence: 1,
+        amount: pricing.total,
+        status: input.paymentAlreadyPaid
+          ? ORDER_CHARGE_STATUS.PAID
+          : ORDER_CHARGE_STATUS.PENDING,
+        reason: ORDER_CHARGE_REASON.INITIAL,
+        paidAt: input.paymentAlreadyPaid ? new Date() : null,
+      },
+      select: { id: true },
+    });
+
+    await tx.orderItem.updateMany({
+      where: { orderId: order.id },
+      data: {
+        chargeId: charge.id,
+        paymentStatus: input.paymentAlreadyPaid
+          ? ORDER_ITEM_PAYMENT_STATUS.PAID
+          : ORDER_ITEM_PAYMENT_STATUS.PENDING,
+        paidAt: input.paymentAlreadyPaid ? new Date() : null,
+      },
+    });
+
     const stockLines = pricing.lines
       .filter(
         (l): l is typeof l & { productId: string } =>
@@ -487,10 +516,13 @@ export async function createAdminSale(
       }));
 
     if (input.paymentAlreadyPaid) {
-      const { commitStockReservations } = await import(
+      const { reserveStockForOrderLines, commitStockReservations } = await import(
         "@/lib/orders/stock/reservation"
       );
-      await commitStockReservations(tx, order.id);
+      if (stockLines.length > 0) {
+        await reserveStockForOrderLines(tx, order.id, stockLines);
+        await commitStockReservations(tx, order.id);
+      }
       const { appendCashLedgerEntry } = await import("@/lib/cash/ledger");
       await appendCashLedgerEntry(tx, {
         direction: "IN",

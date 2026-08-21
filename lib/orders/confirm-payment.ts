@@ -1,4 +1,7 @@
 import {
+  ORDER_CHARGE_PURPOSE,
+  ORDER_CHARGE_STATUS,
+  ORDER_ITEM_PAYMENT_STATUS,
   ORDER_STATUS,
   PAYMENT_ATTEMPT_STATUS,
   PAYMENT_GATEWAY,
@@ -33,6 +36,7 @@ const ORDER_SELECT_FOR_CONFIRMATION = {
   id: true,
   status: true,
   total: true,
+  paidTotal: true,
   expiresAt: true,
   orderSource: true,
   fulfillmentType: true,
@@ -56,6 +60,7 @@ type AttemptWithOrder = {
   id: string;
   orderId: string;
   exchangeId: string | null;
+  chargeId: string | null;
   purpose: string;
   status: string;
   amount: number;
@@ -66,6 +71,7 @@ type AttemptWithOrder = {
     id: string;
     status: string;
     total: number;
+    paidTotal: number;
     expiresAt: Date | null;
     orderSource: OrderSource;
     fulfillmentType: FulfillmentType;
@@ -77,6 +83,10 @@ type AttemptWithOrder = {
     destinationCep: string | null;
   };
 };
+
+function isOrderChargeAttempt(attempt: AttemptWithOrder): boolean {
+  return attempt.purpose === ORDER_CHARGE_PURPOSE && !!attempt.chargeId;
+}
 
 function isExchangeBalanceAttempt(attempt: AttemptWithOrder): boolean {
   return (
@@ -171,7 +181,9 @@ async function validateAttemptForConfirmation(input: {
   const allowSupersededPixRecovery =
     attempt.status === PAYMENT_ATTEMPT_STATUS.SUPERSEDED &&
     attempt.gateway === PAYMENT_GATEWAY.MERCADOPAGO &&
-    attempt.order.status === ORDER_STATUS.PENDING_PAYMENT;
+    (attempt.order.status === ORDER_STATUS.PENDING_PAYMENT ||
+      (isOrderChargeAttempt(attempt) &&
+        attempt.order.status === ORDER_STATUS.PAID));
 
   if (attempt.status === PAYMENT_ATTEMPT_STATUS.SUPERSEDED) {
     if (!allowSupersededPixRecovery) {
@@ -201,7 +213,8 @@ async function validateAttemptForConfirmation(input: {
 
   if (
     attempt.status === PAYMENT_ATTEMPT_STATUS.PAID &&
-    attempt.order.status === ORDER_STATUS.PAID
+    attempt.order.status === ORDER_STATUS.PAID &&
+    !isOrderChargeAttempt(attempt)
   ) {
     return rejectConfirmation({
       gateway: input.gateway,
@@ -227,6 +240,47 @@ async function validateAttemptForConfirmation(input: {
       gatewayReference: input.gatewayReference,
       payload: input.payload,
     });
+  }
+
+  if (isOrderChargeAttempt(attempt)) {
+    const charge = await prisma.orderCharge.findUnique({
+      where: { id: attempt.chargeId! },
+      select: { id: true, status: true, amount: true },
+    });
+    if (!charge || charge.status === ORDER_CHARGE_STATUS.CANCELLED) {
+      return rejectConfirmation({
+        gateway: input.gateway,
+        source: input.source,
+        outcome: WEBHOOK_AUDIT_OUTCOME.REJECTED_ORDER_STATE,
+        reason: "Cobrança de acréscimo inválida.",
+        attempt,
+        gatewayReference: input.gatewayReference,
+        payload: input.payload,
+      });
+    }
+    if (charge.status === ORDER_CHARGE_STATUS.PAID) {
+      return rejectConfirmation({
+        gateway: input.gateway,
+        source: input.source,
+        outcome: WEBHOOK_AUDIT_OUTCOME.IGNORED_ALREADY_PAID,
+        reason: "Acréscimo já está pago.",
+        attempt,
+        gatewayReference: input.gatewayReference,
+        payload: input.payload,
+      });
+    }
+    if (!amountsMatch(attempt.amount, charge.amount)) {
+      return rejectConfirmation({
+        gateway: input.gateway,
+        source: input.source,
+        outcome: WEBHOOK_AUDIT_OUTCOME.REJECTED_AMOUNT,
+        reason: `Valor da tentativa (${attempt.amount}) diverge da cobrança (${charge.amount}).`,
+        attempt,
+        gatewayReference: input.gatewayReference,
+        payload: input.payload,
+      });
+    }
+    return null;
   }
 
   if (attempt.order.status === ORDER_STATUS.PAID) {
@@ -359,6 +413,7 @@ async function confirmAttemptInTransaction(input: {
         data: {
           status: ORDER_STATUS.PAID,
           paidAt,
+          paidTotal: lockedAttempt.amount,
           shippingStatus: "to_pack",
           ...(input.invoiceSlug
             ? { infinitePayInvoiceSlug: input.invoiceSlug }
@@ -371,6 +426,22 @@ async function confirmAttemptInTransaction(input: {
             : {}),
           ...(input.mpOrderId ? { mercadoPagoPaymentId: input.mpOrderId } : {}),
         },
+      });
+
+      await tx.orderItem.updateMany({
+        where: { orderId: lockedAttempt.orderId },
+        data: {
+          paymentStatus: ORDER_ITEM_PAYMENT_STATUS.PAID,
+          paidAt,
+        },
+      });
+
+      await tx.orderCharge.updateMany({
+        where: {
+          orderId: lockedAttempt.orderId,
+          status: ORDER_CHARGE_STATUS.PENDING,
+        },
+        data: { status: ORDER_CHARGE_STATUS.PAID, paidAt },
       });
 
       await commitStockReservations(tx, lockedAttempt.orderId);
@@ -403,6 +474,112 @@ async function confirmAttemptInTransaction(input: {
   });
 
   void onOrderPaymentConfirmed(input.attempt.order);
+
+  return {
+    updated: true,
+    outcome: WEBHOOK_AUDIT_OUTCOME.CONFIRMED,
+    orderId: input.attempt.orderId,
+  };
+}
+
+async function confirmChargeInTransaction(input: {
+  attempt: AttemptWithOrder;
+  gateway: PaymentGateway;
+  source: ConfirmPaymentSource;
+  gatewayTransactionId?: string | null;
+  payload?: unknown;
+}): Promise<ConfirmPaymentResult> {
+  const paidAt = new Date();
+  const chargeId = input.attempt.chargeId!;
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const lockedAttempt = await tx.paymentAttempt.findUnique({
+        where: { id: input.attempt.id },
+        include: {
+          order: { select: ORDER_SELECT_FOR_CONFIRMATION },
+        },
+      });
+
+      if (!lockedAttempt) {
+        throw new ConfirmPaymentRejectedError({
+          updated: false,
+          outcome: WEBHOOK_AUDIT_OUTCOME.REJECTED_NOT_FOUND,
+        });
+      }
+
+      const rejection = await validateAttemptForConfirmation({
+        attempt: lockedAttempt,
+        gateway: input.gateway,
+        source: input.source,
+        gatewayReference: input.attempt.gatewayReference,
+        payload: input.payload,
+      });
+      if (rejection) {
+        throw new ConfirmPaymentRejectedError(rejection);
+      }
+
+      await tx.paymentAttempt.update({
+        where: { id: lockedAttempt.id },
+        data: {
+          status: PAYMENT_ATTEMPT_STATUS.PAID,
+          paidAt,
+          ...(input.gatewayTransactionId
+            ? { gatewayTransactionId: input.gatewayTransactionId }
+            : {}),
+        },
+      });
+
+      await tx.orderCharge.update({
+        where: { id: chargeId },
+        data: { status: ORDER_CHARGE_STATUS.PAID, paidAt },
+      });
+
+      await tx.orderItem.updateMany({
+        where: { chargeId },
+        data: {
+          paymentStatus: ORDER_ITEM_PAYMENT_STATUS.PAID,
+          paidAt,
+        },
+      });
+
+      await tx.order.update({
+        where: { id: lockedAttempt.orderId },
+        data: {
+          paidTotal: {
+            increment: lockedAttempt.amount,
+          },
+        },
+      });
+
+      await commitStockReservations(tx, lockedAttempt.orderId);
+
+      await appendCashLedgerEntry(tx, {
+        direction: "IN",
+        kind: "SALE",
+        amount: lockedAttempt.amount,
+        description: `Acréscimo · pedido ${lockedAttempt.orderId.slice(0, 8)}`,
+        orderId: lockedAttempt.orderId,
+        paymentAttemptId: lockedAttempt.id,
+      });
+    });
+  } catch (e) {
+    if (e instanceof ConfirmPaymentRejectedError) {
+      return e.result;
+    }
+    throw e;
+  }
+
+  await logPaymentWebhookEvent({
+    gateway: input.gateway,
+    source: input.source,
+    outcome: WEBHOOK_AUDIT_OUTCOME.CONFIRMED,
+    orderId: input.attempt.orderId,
+    paymentAttemptId: input.attempt.id,
+    gatewayReference: input.attempt.gatewayReference,
+    reason: "Acréscimo confirmado.",
+    payload: input.payload,
+  });
 
   return {
     updated: true,
@@ -588,6 +765,15 @@ export async function confirmPaymentFromMercadoPago(input: {
     });
   }
 
+  if (isOrderChargeAttempt(attempt)) {
+    return confirmChargeInTransaction({
+      attempt,
+      gateway: PAYMENT_GATEWAY.MERCADOPAGO,
+      source: input.source,
+      payload: input.payload,
+    });
+  }
+
   if (isExchangeBalanceAttempt(attempt)) {
     return confirmExchangeBalanceInTransaction({
       attempt,
@@ -703,6 +889,16 @@ export async function confirmPaymentFromInfinitePay(input: {
       reason: "Nenhuma PaymentAttempt encontrada para o webhook InfinitePay.",
       orderId: orderId || orderNsu || null,
       gatewayReference: slug || null,
+      payload: input.payload,
+    });
+  }
+
+  if (isOrderChargeAttempt(attempt)) {
+    return confirmChargeInTransaction({
+      attempt,
+      gateway: PAYMENT_GATEWAY.INFINITEPAY,
+      source: input.source,
+      gatewayTransactionId: input.transactionNsu?.trim() || null,
       payload: input.payload,
     });
   }

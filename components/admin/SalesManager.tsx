@@ -12,30 +12,16 @@ import {
   type TextareaHTMLAttributes,
 } from "react";
 import { createPortal } from "react-dom";
-import Image from "next/image";
-import { PieceSelector } from "@/components/product/PieceSelector";
-import { CUSTOM_SET_SIZES } from "@/components/admin/CustomSaleSetsForm";
+import { OrderItemsEditor } from "@/components/admin/OrderItemsEditor";
 import { formatPrice } from "@/lib/format";
-import type { CartPieceSelection } from "@/lib/cart/types";
 import type { Product } from "@/lib/types";
 import { StandaloneSaleWizard } from "@/components/admin/StandaloneSaleWizard";
-import {
-  buildCartPieceSelections,
-  pieceSelectionMapFromCart,
-  pieceSelectionsAreComplete,
-  type PieceSelectionMap,
-} from "@/lib/product-piece-selection";
 import {
   isPendingAdminSaleCustomer,
   orderCustomerDisplayEmail,
   orderCustomerDisplayName,
   shouldOfferCustomerDataFillLink,
 } from "@/lib/admin-sale/customer-display";
-import {
-  orderItemDisplayDescription,
-  orderItemDisplayImageUrl,
-  orderItemDisplayName,
-} from "@/lib/orders/order-item-display";
 import {
   composeDeliveryNotesFromUserEdit,
   orderDeliveryUserNotes,
@@ -82,6 +68,7 @@ type OrderItem = {
   productName?: string | null;
   productDescription?: string | null;
   productImageUrl?: string | null;
+  paymentStatus?: string | null;
   product: OrderProduct | null;
 };
 
@@ -105,6 +92,7 @@ type AdminOrder = {
   deliveryNotes?: string | null;
   internalNotes?: string | null;
   total: number;
+  paidTotal?: number;
   shippingAmount: number;
   shippingServiceName: string | null;
   destinationCep: string | null;
@@ -166,8 +154,51 @@ function orderMatchesCustomerSearch(order: AdminOrder, query: string): boolean {
   return haystack.includes(normalizedQuery);
 }
 
+function orderHasUnpaidItems(order: AdminOrder): boolean {
+  return order.items.some((item) => {
+    if (item.paymentStatus) return item.paymentStatus === "pending";
+    return !order.paidAt;
+  });
+}
+
+function orderPayableAmount(order: AdminOrder): number {
+  const pending = order.items.filter((item) =>
+    item.paymentStatus
+      ? item.paymentStatus === "pending"
+      : !order.paidAt
+  );
+  if (order.paidAt && pending.length > 0) {
+    return pending.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  }
+  return order.total;
+}
+
 function isInactiveSale(order: AdminOrder): boolean {
   return order.status === "cancelled" || order.status === "expired";
+}
+
+function gatewayMethodForCancelledSale(order: AdminOrder): "pix" | "card" | null {
+  if (!isInactiveSale(order) || order.paidAt) return null;
+  if (order.paymentChannel === "MANUAL") return null;
+  return (
+    resolvePaymentMethodKind(order.paymentMethod ?? null) ??
+    (order.paymentShare?.type === "pix" || order.paymentShare?.type === "card"
+      ? order.paymentShare.type
+      : null)
+  );
+}
+
+function switchablePaymentMethod(order: AdminOrder): "pix" | "card" | null {
+  if (isInactiveSale(order) || order.paidAt) return null;
+  if (order.paymentChannel === "MANUAL") return null;
+  const current =
+    resolvePaymentMethodKind(order.paymentMethod ?? null) ??
+    (order.paymentShare?.type === "pix" || order.paymentShare?.type === "card"
+      ? order.paymentShare.type
+      : null);
+  if (current === "pix") return "card";
+  if (current === "card") return "pix";
+  return null;
 }
 
 function orderMatchesStatusFilter(order: AdminOrder, filter: FilterKey | null): boolean {
@@ -611,17 +642,6 @@ function fmtFull(iso: string) {
   return new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(iso));
 }
 
-function elapsed(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  const min = Math.floor(ms / 60_000);
-  if (min < 1) return "agora";
-  if (min < 60) return `há ${min}min`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `há ${h}h`;
-  const d = Math.floor(h / 24);
-  return `há ${d} dia${d !== 1 ? "s" : ""}`;
-}
-
 function paymentMethodLabel(method: string | null): string {
   if (!method) return "—";
   const m = method.toLowerCase();
@@ -662,10 +682,6 @@ function selectedPaymentGatewayLabel(order: AdminOrder): string | null {
 
 const TABLE_CELL_PRIMARY = "text-sm font-medium text-stone-900 truncate";
 const TABLE_CELL_SECONDARY = "text-xs font-normal text-stone-500 truncate";
-
-function parsePieces(json: string | null): CartPieceSelection[] {
-  try { return json ? (JSON.parse(json) as CartPieceSelection[]) : []; } catch { return []; }
-}
 
 function cpfDisplay(v: string | null): string {
   if (!v) return "—";
@@ -711,6 +727,9 @@ function sInfo(v: string) {
 }
 
 function payBadge(order: AdminOrder) {
+  if (order.paidAt && orderHasUnpaidItems(order)) {
+    return { label: "Pago parcial", cls: "bg-amber-50 text-amber-800 ring-amber-200" };
+  }
   if (order.paidAt) return { label: "Pago", cls: "bg-emerald-50 text-emerald-700 ring-emerald-200" };
   return { label: "Aguardando", cls: "bg-amber-50 text-amber-700 ring-amber-200" };
 }
@@ -721,7 +740,7 @@ function Chip({ label, cls }: { label: string; cls: string }) {
 
 function PaymentStatusBadge({ label, cls }: { label: string; cls: string }) {
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${cls}`}>
+    <span className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${cls}`}>
       {label}
     </span>
   );
@@ -758,27 +777,26 @@ function PaymentMethodIcon({ kind }: { kind: "pix" | "card" }) {
   );
 }
 
-function TablePaymentCell({
-  order,
-  isSaleCancelled,
-}: {
-  order: AdminOrder;
-  isSaleCancelled: boolean;
-}) {
+function TablePaymentCell({ order }: { order: AdminOrder }) {
   const paymentStatus = tablePaymentStatus(order);
   // Exibe a opção escolhida ao criar o link, não o meio usado dentro do gateway.
   const methodKind = resolvePaymentMethodKind(order.paymentMethod ?? null);
-  const showElapsed = !order.paidAt && !isSaleCancelled;
 
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-1.5">
-        {methodKind ? <PaymentMethodIcon kind={methodKind} /> : null}
-        <PaymentStatusBadge label={paymentStatus.label} cls={paymentStatus.cls} />
-      </div>
-      {showElapsed ? (
-        <p className={TABLE_CELL_SECONDARY}>{elapsed(order.createdAt)}</p>
+    <div className="flex items-start gap-1.5">
+      {methodKind ? (
+        <span className="mt-1 inline-flex">
+          <PaymentMethodIcon kind={methodKind} />
+        </span>
       ) : null}
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <PaymentStatusBadge label={paymentStatus.label} cls={paymentStatus.cls} />
+        {order.paidAt ? (
+          <p className={`whitespace-nowrap ${TABLE_CELL_SECONDARY}`}>
+            {fmtDate(order.paidAt)} {fmtTime(order.paidAt)}
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -887,7 +905,7 @@ function ShippingStatusBadge({
 }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${SHIPPING_TONE_CLASS[tone]}`}
+      className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${SHIPPING_TONE_CLASS[tone]}`}
     >
       {shippingStatusIcon(status)}
       {label}
@@ -906,12 +924,12 @@ function TableShippingStatus({
   const ss = sInfo(status);
 
   return (
-    <>
+    <div className="flex flex-col gap-0.5">
       <ShippingStatusBadge label={label} tone={ss.tone} status={status} />
       {shippingMethod ? (
-        <p className={`mt-1 ${TABLE_CELL_SECONDARY}`}>{shippingMethod}</p>
+        <p className={`whitespace-nowrap ${TABLE_CELL_SECONDARY}`}>{shippingMethod}</p>
       ) : null}
-    </>
+    </div>
   );
 }
 
@@ -1174,6 +1192,129 @@ function buildCardShareMessage(order: AdminOrder, checkoutUrl: string): string {
   ].join("\n");
 }
 
+type PaymentLinkMethod = "pix" | "card";
+
+type PaymentInfoResponse = {
+  type?: "pix" | "card" | "paid";
+  checkoutUrl?: string;
+  paymentPath?: string;
+  paymentToken?: string;
+  amount?: number;
+  error?: string;
+};
+
+async function postPaymentInfo(
+  orderId: string,
+  body: { forceNew: boolean; paymentMethod?: PaymentLinkMethod }
+): Promise<{ ok: boolean; data: PaymentInfoResponse }> {
+  const res = await fetch(`/api/admin/orders/${orderId}/payment-info`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = (await res.json()) as PaymentInfoResponse;
+  return { ok: res.ok, data };
+}
+
+function reactivatedSalePatch(
+  method: PaymentLinkMethod,
+  data: PaymentInfoResponse
+): Partial<AdminOrder> {
+  const patch: Partial<AdminOrder> = {
+    status: "pending_payment",
+    cancelledAt: null,
+    cancellationReason: null,
+    shippingStatus: "to_pack",
+    paymentMethod: method,
+    paymentChannel: "GATEWAY",
+  };
+  if (data.type === "card" && data.checkoutUrl) {
+    patch.paymentShare = { type: "card", checkoutUrl: data.checkoutUrl };
+  }
+  if (data.type === "pix") {
+    if (data.paymentToken) patch.paymentToken = data.paymentToken;
+    if (data.paymentPath && data.paymentToken) {
+      patch.paymentShare = {
+        type: "pix",
+        paymentPath: data.paymentPath,
+        paymentToken: data.paymentToken,
+      };
+    }
+  }
+  return patch;
+}
+
+async function generatePaymentLinkAndCopy(
+  order: AdminOrder,
+  method: PaymentLinkMethod,
+  onPatchOrder: (id: string, patch: Partial<AdminOrder>) => void,
+  failMessage: string
+): Promise<PaymentLinkMethod | null> {
+  const { ok, data } = await postPaymentInfo(order.id, {
+    forceNew: true,
+    paymentMethod: method,
+  });
+  if (!ok) {
+    window.alert(data.error ?? failMessage);
+    return null;
+  }
+  if (data.type === "paid") {
+    window.alert("Pagamento já confirmado.");
+    return null;
+  }
+
+  onPatchOrder(order.id, reactivatedSalePatch(method, data));
+
+  try {
+    if (method === "pix") {
+      const path =
+        data.paymentPath ??
+        (data.paymentToken ? `/venda-avulsa/pagar/${data.paymentToken}` : null);
+      if (!path) {
+        window.alert("Link gerado. Atualize a lista se o Pix não aparecer.");
+        return method;
+      }
+      await navigator.clipboard.writeText(
+        buildPixShareMessage(
+          order,
+          `${window.location.origin}${path}`,
+          data.amount ?? orderPayableAmount(order)
+        )
+      );
+      return method;
+    }
+
+    if (data.type !== "card" || !data.checkoutUrl) {
+      window.alert("Não foi possível gerar um novo link de cartão.");
+      return null;
+    }
+    await navigator.clipboard.writeText(
+      buildCardShareMessage(order, data.checkoutUrl)
+    );
+    return method;
+  } catch {
+    window.alert("O link foi gerado, mas não foi possível copiar.");
+    return method;
+  }
+}
+
+async function resumeCancelledSaleAndCopy(
+  order: AdminOrder,
+  onPatchOrder: (id: string, patch: Partial<AdminOrder>) => void
+): Promise<PaymentLinkMethod | null> {
+  const method = gatewayMethodForCancelledSale(order);
+  if (!method) {
+    window.alert("Esta venda não tem Pix ou cartão para gerar o link.");
+    return null;
+  }
+  return generatePaymentLinkAndCopy(
+    order,
+    method,
+    onPatchOrder,
+    "Não foi possível retomar a venda."
+  );
+}
+
 function AdminSaleLinks({
   order,
   onPatchOrder,
@@ -1185,26 +1326,30 @@ function AdminSaleLinks({
     null
   );
   const [regeneratingCard, setRegeneratingCard] = useState(false);
+  const [resuming, setResuming] = useState(false);
+  const [switching, setSwitching] = useState(false);
 
   const showCustomerLink = shouldOfferCustomerDataFillLink(order);
+  const resumeMethod = gatewayMethodForCancelledSale(order);
+  const canReactivatePayment = resumeMethod != null;
+  const switchTarget = switchablePaymentMethod(order);
 
   const showPaymentLink =
     order.orderSource === "ADMIN_SALE" &&
-    !order.paidAt &&
-    order.status !== "cancelled" &&
-    order.status !== "expired" &&
-    order.paymentChannel !== "MANUAL";
+    !isInactiveSale(order) &&
+    orderHasUnpaidItems(order) &&
+    !(order.paymentChannel === "MANUAL" && !order.paidAt);
   const isPixPayment =
     order.paymentMethod === "pix" || order.paymentShare?.type === "pix";
   const isCardPayment =
     order.paymentMethod === "card" || order.paymentShare?.type === "card";
   const canRegenerateCardLink =
-    showPaymentLink &&
-    isCardPayment &&
-    order.status === "pending_payment";
+    showPaymentLink && isCardPayment;
   const paymentUrl = orderPaymentShareAbsoluteUrl(order);
 
-  if (!showCustomerLink && !showPaymentLink) return null;
+  if (!showCustomerLink && !showPaymentLink && !canReactivatePayment && !switchTarget) {
+    return null;
+  }
 
   async function copyText(
     value: string,
@@ -1262,6 +1407,57 @@ function AdminSaleLinks({
     }
   }
 
+  async function resumeCancelledSale() {
+    const label =
+      order.orderNumber != null ? `#${order.orderNumber}` : "esta venda";
+    const confirmed = window.confirm(
+      `Retomar a venda ${label}? Um novo link de ${resumeMethod === "pix" ? "Pix" : "cartão"} será gerado e a venda terá 24 horas para pagamento.`
+    );
+    if (!confirmed) return;
+
+    setResuming(true);
+    try {
+      const copied = await resumeCancelledSaleAndCopy(order, onPatchOrder);
+      if (copied) {
+        setCopied(copied);
+        setTimeout(() => setCopied(null), 2000);
+      }
+    } catch {
+      window.alert("Erro de conexão ao retomar a venda.");
+    } finally {
+      setResuming(false);
+    }
+  }
+
+  async function switchPaymentMethod() {
+    if (!switchTarget) return;
+    const label =
+      order.orderNumber != null ? `#${order.orderNumber}` : "esta venda";
+    const targetLabel = switchTarget === "pix" ? "Pix" : "Cartão";
+    const confirmed = window.confirm(
+      `Trocar o pagamento da venda ${label} para ${targetLabel}? Um novo link será gerado.`
+    );
+    if (!confirmed) return;
+
+    setSwitching(true);
+    try {
+      const copied = await generatePaymentLinkAndCopy(
+        order,
+        switchTarget,
+        onPatchOrder,
+        "Não foi possível trocar o método de pagamento."
+      );
+      if (copied) {
+        setCopied(copied);
+        setTimeout(() => setCopied(null), 2000);
+      }
+    } catch {
+      window.alert("Erro de conexão ao trocar o pagamento.");
+    } finally {
+      setSwitching(false);
+    }
+  }
+
   const customerUrl =
     order.customerDataToken
       ? `${window.location.origin}/venda-avulsa/completar/${order.customerDataToken}`
@@ -1269,6 +1465,21 @@ function AdminSaleLinks({
 
   return (
     <div className="flex flex-col gap-2">
+      {canReactivatePayment ? (
+        <button
+          type="button"
+          disabled={resuming}
+          onClick={() => void resumeCancelledSale()}
+          className="rounded-lg bg-sky-100 px-4 py-2 text-sm font-semibold text-sky-900 shadow-sm ring-1 ring-sky-200/80 transition-colors hover:bg-sky-200 disabled:opacity-50"
+        >
+          {resuming
+            ? "Retomando venda…"
+            : copied === "pix" || copied === "card"
+              ? "Link copiado!"
+              : "Retomar venda"}
+        </button>
+      ) : null}
+
       {showPaymentLink && (
         <>
           {!paymentUrl ? (
@@ -1281,7 +1492,7 @@ function AdminSaleLinks({
               type="button"
               onClick={() =>
                 void copyText(
-                  buildPixShareMessage(order, paymentUrl, order.total),
+                  buildPixShareMessage(order, paymentUrl, orderPayableAmount(order)),
                   "pix"
                 )
               }
@@ -1304,7 +1515,7 @@ function AdminSaleLinks({
           {canRegenerateCardLink ? (
             <button
               type="button"
-              disabled={regeneratingCard}
+              disabled={regeneratingCard || switching}
               onClick={() => void regenerateCardLink()}
               className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-medium text-sky-900 transition-colors hover:bg-sky-100 disabled:opacity-50"
             >
@@ -1317,6 +1528,23 @@ function AdminSaleLinks({
           ) : null}
         </>
       )}
+
+      {switchTarget ? (
+        <button
+          type="button"
+          disabled={switching || regeneratingCard}
+          onClick={() => void switchPaymentMethod()}
+          className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-medium text-sky-900 transition-colors hover:bg-sky-100 disabled:opacity-50"
+        >
+          {switching
+            ? "Trocando pagamento…"
+            : copied === switchTarget
+              ? "Link copiado!"
+              : switchTarget === "pix"
+                ? "Trocar pagamento para PIX"
+                : "Trocar pagamento para Cartão"}
+        </button>
+      ) : null}
 
       {showCustomerLink && (
         <button
@@ -1364,22 +1592,24 @@ function OrderRowActionsMenu({
   const [mounted, setMounted] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
 
-  const isCancelled = order.status === "cancelled";
+  const isInactive = isInactiveSale(order);
   const isPaid = Boolean(order.paidAt);
   const showCustomerLink = shouldOfferCustomerDataFillLink(order);
   const showPaymentLink =
     order.orderSource === "ADMIN_SALE" &&
-    !order.paidAt &&
-    !isCancelled &&
-    order.paymentChannel !== "MANUAL";
+    !isInactive &&
+    orderHasUnpaidItems(order) &&
+    !(order.paymentChannel === "MANUAL" && !order.paidAt);
   const showMarkPaid =
     canMarkPaid &&
     order.orderSource === "ADMIN_SALE" &&
-    !isPaid &&
-    !isCancelled &&
-    order.status === "pending_payment";
+    !isInactive &&
+    ((!isPaid && order.status === "pending_payment") ||
+      (isPaid && orderHasUnpaidItems(order)));
   const showConfirmPaymentCancelled =
-    canMarkPaid && isCancelled && !isPaid;
+    canMarkPaid && isInactive && !isPaid;
+  const showReactivatePayment = gatewayMethodForCancelledSale(order) != null;
+  const switchTarget = switchablePaymentMethod(order);
   const isPixPayment = order.paymentMethod === "pix";
   const isCardPayment = order.paymentMethod === "card";
 
@@ -1501,7 +1731,7 @@ function OrderRowActionsMenu({
     try {
       if (shareUrl) {
         if (isPix) {
-          await copyText(buildPixShareMessage(order, shareUrl, order.total));
+          await copyText(buildPixShareMessage(order, shareUrl, orderPayableAmount(order)));
           return;
         }
         if (isCard) {
@@ -1571,17 +1801,8 @@ function OrderRowActionsMenu({
 
     setBusy("regen-card");
     try {
-      const res = await fetch(`/api/admin/orders/${order.id}/payment-info`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ forceNew: true }),
-      });
-      const data = (await res.json()) as {
-        type?: "pix" | "card" | "paid";
-        checkoutUrl?: string;
-        error?: string;
-      };
-      if (!res.ok) {
+      const { ok, data } = await postPaymentInfo(order.id, { forceNew: true });
+      if (!ok) {
         window.alert(data.error ?? "Não foi possível gerar um novo link.");
         return;
       }
@@ -1599,6 +1820,50 @@ function OrderRowActionsMenu({
       await copyText(buildCardShareMessage(order, data.checkoutUrl));
     } catch {
       window.alert("Erro de conexão ao gerar o link.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleResumeCancelledSale() {
+    const label =
+      order.orderNumber != null ? `#${order.orderNumber}` : "esta venda";
+    const method = gatewayMethodForCancelledSale(order);
+    const confirmed = window.confirm(
+      `Retomar a venda ${label}? Um novo link de ${method === "pix" ? "Pix" : "cartão"} será gerado e a venda terá 24 horas para pagamento.`
+    );
+    if (!confirmed) return;
+
+    setBusy("resume");
+    try {
+      await resumeCancelledSaleAndCopy(order, onPatchOrder);
+    } catch {
+      window.alert("Erro de conexão ao retomar a venda.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleSwitchPaymentMethod() {
+    if (!switchTarget) return;
+    const label =
+      order.orderNumber != null ? `#${order.orderNumber}` : "esta venda";
+    const targetLabel = switchTarget === "pix" ? "Pix" : "Cartão";
+    const confirmed = window.confirm(
+      `Trocar o pagamento da venda ${label} para ${targetLabel}? Um novo link será gerado.`
+    );
+    if (!confirmed) return;
+
+    setBusy("switch-pay");
+    try {
+      await generatePaymentLinkAndCopy(
+        order,
+        switchTarget,
+        onPatchOrder,
+        "Não foi possível trocar o método de pagamento."
+      );
+    } catch {
+      window.alert("Erro de conexão ao trocar o pagamento.");
     } finally {
       setBusy(null);
     }
@@ -1662,12 +1927,12 @@ function OrderRowActionsMenu({
         onClick: () => void handleCopyPaymentLink(),
       });
 
-      if (isCardPayment && order.status === "pending_payment") {
+      if (isCardPayment && orderHasUnpaidItems(order)) {
         items.push({
           id: "regen-card",
           label:
             busy === "regen-card" ? "Gerando novo link…" : "Gerar novo link cartão",
-          disabled: busy === "regen-card" || busy === "payment",
+          disabled: busy === "regen-card" || busy === "payment" || busy === "switch-pay",
           icon: (
             <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
               <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
@@ -1676,6 +1941,41 @@ function OrderRowActionsMenu({
           onClick: () => void handleRegenerateCardLink(),
         });
       }
+    }
+
+    if (switchTarget) {
+      items.push({
+        id: "switch-pay",
+        label:
+          busy === "switch-pay"
+            ? "Trocando pagamento…"
+            : switchTarget === "pix"
+              ? "Trocar pagamento para PIX"
+              : "Trocar pagamento para Cartão",
+        disabled: busy != null,
+        separatorBefore: !showPaymentLink && items.length > 0,
+        icon: (
+          <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+          </svg>
+        ),
+        onClick: () => void handleSwitchPaymentMethod(),
+      });
+    }
+
+    if (showReactivatePayment) {
+      items.push({
+        id: "resume",
+        label: busy === "resume" ? "Retomando venda…" : "Retomar venda",
+        disabled: busy != null,
+        separatorBefore: items.length > 0,
+        icon: (
+          <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+          </svg>
+        ),
+        onClick: () => void handleResumeCancelledSale(),
+      });
     }
 
     if (showMarkPaid) {
@@ -1709,7 +2009,7 @@ function OrderRowActionsMenu({
       });
     }
 
-    if (!isCancelled) {
+    if (!isInactive) {
       items.push({
         id: "cancel",
         label: "Cancelar",
@@ -1727,7 +2027,7 @@ function OrderRowActionsMenu({
     return items;
   }, [
     busy,
-    isCancelled,
+    isInactive,
     isDetailsOpen,
     onRequestCancel,
     onToggleDetails,
@@ -1740,6 +2040,8 @@ function OrderRowActionsMenu({
     showCustomerLink,
     showMarkPaid,
     showPaymentLink,
+    showReactivatePayment,
+    switchTarget,
     isPixPayment,
     isCardPayment,
   ]);
@@ -1815,15 +2117,6 @@ function OrderRowActionsMenu({
 
 /* ─── Detalhes do pedido (drawer) ─────────────────────────────────── */
 
-function canEditOrderItemPieces(order: AdminOrder): boolean {
-  if (order.status === "cancelled" || order.status === "expired") return false;
-  if (order.labelUrl || order.superfreteShipmentId) return false;
-  if (order.shippingStatus === "shipped" || order.shippingStatus === "delivered") {
-    return false;
-  }
-  return order.status === "pending_payment" || order.status === "paid";
-}
-
 function OrderProductsCards({
   order,
   products,
@@ -1835,324 +2128,13 @@ function OrderProductsCards({
   ensureProducts: () => Promise<Product[]>;
   onRefresh: () => void;
 }) {
-  const editable = canEditOrderItemPieces(order);
-  const [editingItemId, setEditingItemId] = useState<string | null>(null);
-  const [selections, setSelections] = useState<PieceSelectionMap>({});
-  const [editProduct, setEditProduct] = useState<Product | null>(null);
-  const [customDraft, setCustomDraft] = useState<CartPieceSelection[]>([]);
-  const [savingPieces, setSavingPieces] = useState(false);
-  const [piecesError, setPiecesError] = useState<string | null>(null);
-  const [loadingProduct, setLoadingProduct] = useState(false);
-
-  async function startEditCatalogItem(item: OrderItem) {
-    if (!item.productId || !editable) return;
-    setPiecesError(null);
-    setLoadingProduct(true);
-    try {
-      const list = products.length > 0 ? products : await ensureProducts();
-      const product = list.find((p) => p.id === item.productId) ?? null;
-      if (!product || product.pieces.length === 0) {
-        setPiecesError("Produto sem opções de cor/tamanho no catálogo.");
-        return;
-      }
-      const current = parsePieces(item.pieceSelectionsJson);
-      setEditProduct(product);
-      setCustomDraft([]);
-      setSelections(pieceSelectionMapFromCart(product.pieces, current));
-      setEditingItemId(item.id);
-    } finally {
-      setLoadingProduct(false);
-    }
-  }
-
-  function startEditCustomItem(item: OrderItem) {
-    if (item.productId || !editable) return;
-    const current = parsePieces(item.pieceSelectionsJson);
-    if (current.length === 0) {
-      setPiecesError("Este item não tem cor/tamanho para editar.");
-      return;
-    }
-    setPiecesError(null);
-    setEditProduct(null);
-    setSelections({});
-    setCustomDraft(current.map((p) => ({ ...p })));
-    setEditingItemId(item.id);
-  }
-
-  function cancelEditItem() {
-    setEditingItemId(null);
-    setEditProduct(null);
-    setCustomDraft([]);
-    setSelections({});
-    setPiecesError(null);
-  }
-
-  async function persistPieceSelections(
-    item: OrderItem,
-    pieceSelections: CartPieceSelection[]
-  ) {
-    setSavingPieces(true);
-    setPiecesError(null);
-    try {
-      const res = await fetch(
-        `/api/admin/orders/${order.id}/items/${item.id}/piece-selections`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pieceSelections }),
-        }
-      );
-      const data = (await res.json()) as { error?: string };
-      if (!res.ok) {
-        setPiecesError(data.error ?? "Erro ao salvar cor/tamanho.");
-        return;
-      }
-      cancelEditItem();
-      onRefresh(); // soft: cor/tamanho no item exige lista atualizada
-    } catch {
-      setPiecesError("Erro de conexão.");
-    } finally {
-      setSavingPieces(false);
-    }
-  }
-
-  async function saveCatalogItemPieces(item: OrderItem) {
-    if (!editProduct) return;
-    if (!pieceSelectionsAreComplete(editProduct.pieces, selections)) {
-      setPiecesError("Selecione cor e tamanho de cada peça.");
-      return;
-    }
-    await persistPieceSelections(
-      item,
-      buildCartPieceSelections(editProduct.pieces, selections)
-    );
-  }
-
-  async function saveCustomItemPieces(item: OrderItem) {
-    if (customDraft.length === 0) return;
-    await persistPieceSelections(item, customDraft);
-  }
-
   return (
-    <div className="space-y-4">
-      {order.items.map((item) => {
-        const pieces = parsePieces(item.pieceSelectionsJson);
-        const img = orderItemDisplayImageUrl(item);
-        const name = orderItemDisplayName(item);
-        const description = orderItemDisplayDescription(item);
-        const product = item.productId
-          ? products.find((p) => p.id === item.productId)
-          : null;
-        const isCustomItem = !item.productId;
-        const canEditThis =
-          editable &&
-          (isCustomItem
-            ? pieces.length > 0
-            : product
-              ? product.pieces.length > 0
-              : true);
-        const isEditingCatalog =
-          editingItemId === item.id && editProduct != null;
-        const isEditingCustom =
-          editingItemId === item.id && customDraft.length > 0 && !editProduct;
-        const isEditing = isEditingCatalog || isEditingCustom;
-
-        return (
-          <div key={item.id} className="space-y-3">
-            <div className="flex gap-3">
-              <div className="relative h-16 w-12 shrink-0 overflow-hidden rounded-lg bg-stone-100">
-                {img ? (
-                  <Image src={img} alt="" fill className="object-cover" sizes="48px" />
-                ) : (
-                  <div className="flex h-full items-center justify-center text-[9px] text-stone-300">—</div>
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="font-medium leading-snug text-stone-900">{name}</p>
-                  {canEditThis && !isEditing ? (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        isCustomItem
-                          ? startEditCustomItem(item)
-                          : void startEditCatalogItem(item)
-                      }
-                      disabled={loadingProduct}
-                      aria-label="Editar cor e tamanho"
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700 disabled:opacity-50"
-                    >
-                      <PencilIcon />
-                    </button>
-                  ) : null}
-                </div>
-                {description ? (
-                  <p className="mt-0.5 whitespace-pre-wrap text-xs text-stone-500">
-                    {description}
-                  </p>
-                ) : null}
-                {!isEditing && pieces.length > 0 ? (
-                  <ul className="mt-1.5 space-y-0.5 text-xs text-stone-400">
-                    {pieces.map((p, i) => {
-                      const details = [p.pieceName, p.color, p.size]
-                        .filter(Boolean)
-                        .join(" · ");
-                      if (!details) return null;
-                      return <li key={`${item.id}-piece-${i}`}>{details}</li>;
-                    })}
-                  </ul>
-                ) : null}
-                <div className="mt-1.5 flex items-center justify-between gap-2 text-sm">
-                  <span className="text-stone-500">
-                    {item.quantity}× {formatPrice(item.price)}
-                  </span>
-                  <span className="font-semibold tabular-nums text-stone-900">
-                    {formatPrice(item.price * item.quantity)}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {isEditingCatalog && editProduct ? (
-              <div className="rounded-lg border border-stone-200 bg-stone-50/80 p-3">
-                <p className="mb-2 text-xs font-medium text-stone-500">
-                  Editar cor e tamanho
-                </p>
-                <PieceSelector
-                  pieces={editProduct.pieces}
-                  selections={selections}
-                  onSelectionsChange={setSelections}
-                />
-                {piecesError ? (
-                  <p className="mt-2 text-xs text-red-600">{piecesError}</p>
-                ) : null}
-                <div className="mt-3 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={cancelEditItem}
-                    disabled={savingPieces}
-                    className="rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-50"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void saveCatalogItemPieces(item)}
-                    disabled={
-                      savingPieces ||
-                      !pieceSelectionsAreComplete(editProduct.pieces, selections)
-                    }
-                    className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-stone-800 disabled:opacity-50"
-                  >
-                    {savingPieces ? "Salvando…" : "Salvar"}
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
-            {isEditingCustom ? (
-              <div className="space-y-3 rounded-lg border border-stone-200 bg-stone-50/80 p-3">
-                <p className="text-xs font-medium text-stone-500">
-                  Editar cor e tamanho
-                </p>
-                {customDraft.map((piece, index) => {
-                  const sizeOptions =
-                    piece.size &&
-                    !(CUSTOM_SET_SIZES as readonly string[]).includes(piece.size)
-                      ? [...CUSTOM_SET_SIZES, piece.size]
-                      : [...CUSTOM_SET_SIZES];
-                  return (
-                    <div
-                      key={`${item.id}-edit-${index}-${piece.pieceName}`}
-                      className="rounded-lg border border-stone-200 bg-white p-3"
-                    >
-                      <p className="mb-2 text-xs font-semibold text-stone-700">
-                        {piece.pieceName}
-                      </p>
-                      <div>
-                        <label className="mb-0.5 block text-[10px] font-medium text-stone-500">
-                          Cor
-                        </label>
-                        <input
-                          value={piece.color ?? ""}
-                          onChange={(e) =>
-                            setCustomDraft((prev) =>
-                              prev.map((row, i) =>
-                                i === index
-                                  ? { ...row, color: e.target.value || null }
-                                  : row
-                              )
-                            )
-                          }
-                          placeholder="Preto"
-                          className="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
-                        />
-                      </div>
-                      <div className="mt-3">
-                        <label className="mb-1.5 block text-[11px] font-medium text-stone-500">
-                          Tamanho
-                        </label>
-                        <div className="flex flex-wrap gap-1">
-                          {sizeOptions.map((size) => {
-                            const active = piece.size === size;
-                            return (
-                              <button
-                                key={size}
-                                type="button"
-                                onClick={() =>
-                                  setCustomDraft((prev) =>
-                                    prev.map((row, i) =>
-                                      i === index
-                                        ? { ...row, size: active ? null : size }
-                                        : row
-                                    )
-                                  )
-                                }
-                                className={`min-w-[2.5rem] rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all ${
-                                  active
-                                    ? "bg-stone-900 text-white shadow-sm"
-                                    : "bg-stone-100 text-stone-600 hover:bg-stone-200"
-                                }`}
-                              >
-                                {size}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-                {piecesError ? (
-                  <p className="text-xs text-red-600">{piecesError}</p>
-                ) : null}
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={cancelEditItem}
-                    disabled={savingPieces}
-                    className="rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-50"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void saveCustomItemPieces(item)}
-                    disabled={savingPieces}
-                    className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-stone-800 disabled:opacity-50"
-                  >
-                    {savingPieces ? "Salvando…" : "Salvar"}
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
-      {piecesError && !editingItemId ? (
-        <p className="text-xs text-red-600">{piecesError}</p>
-      ) : null}
-    </div>
+    <OrderItemsEditor
+      order={order}
+      products={products}
+      ensureProducts={ensureProducts}
+      onRefresh={onRefresh}
+    />
   );
 }
 
@@ -2507,12 +2489,15 @@ function OrderDetailsBody({
   const deliveryUserNotes = saleDeliveryUserNotes(order);
   const addressBlock = formatOrderAddressBlock(order);
   const showCustomerLink = shouldOfferCustomerDataFillLink(order);
+  const canReactivatePayment = gatewayMethodForCancelledSale(order) != null;
+  const canSwitchPayment = switchablePaymentMethod(order) != null;
   const showPaymentLink =
     order.orderSource === "ADMIN_SALE" &&
-    !order.paidAt &&
-    order.status !== "cancelled" &&
-    order.paymentChannel !== "MANUAL";
-  const hasAdminLinks = showCustomerLink || showPaymentLink;
+    !isInactiveSale(order) &&
+    orderHasUnpaidItems(order) &&
+    !(order.paymentChannel === "MANUAL" && !order.paidAt);
+  const hasAdminLinks =
+    showCustomerLink || showPaymentLink || canReactivatePayment || canSwitchPayment;
   const shippingStatusInfo = sInfo(order.shippingStatus);
 
   return (
@@ -2852,6 +2837,16 @@ function OrderDetailsBody({
           <div className="border-t border-stone-200 pt-2">
             <ReceiptLine label="Total" value={formatPrice(order.total)} bold />
           </div>
+          {(order.paidTotal ?? 0) > 0 && orderHasUnpaidItems(order) ? (
+            <>
+              <ReceiptLine label="Já pago" value={formatPrice(order.paidTotal ?? 0)} />
+              <ReceiptLine
+                label="A pagar"
+                value={formatPrice(orderPayableAmount(order))}
+                bold
+              />
+            </>
+          ) : null}
         </div>
         {isCancelled && order.cancelledAt ? (
           <p className="mt-3 text-xs text-stone-500">Cancelado em {fmtFull(order.cancelledAt)}</p>
@@ -2876,7 +2871,9 @@ function OrderDetailsBody({
                     status={order.shippingStatus}
                   />
                   <p className="mt-1.5 text-xs text-stone-500">
-                    Embalagem e etiqueta são gerenciadas em Envios.
+                    {orderHasUnpaidItems(order)
+                      ? "Há peças aguardando pagamento. A etiqueta só pode ser gerada quando todas estiverem pagas."
+                      : "Embalagem e etiqueta são gerenciadas em Envios."}
                   </p>
                 </div>
                 {order.trackingCode ? (
@@ -3345,7 +3342,7 @@ export function SalesManager() {
           onCreated={() => void fetchOrders()}
         />
       )}
-      <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5 md:justify-between md:overflow-visible">
+      <div className="flex min-w-0 w-full flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5 md:justify-between md:overflow-visible">
         <div className="flex shrink-0 items-center gap-1.5">
           {FILTERS.map(({ key, label }) => (
             <button
@@ -3419,7 +3416,7 @@ export function SalesManager() {
           </label>
         </div>
 
-        <label className="relative ml-1.5 w-full min-w-[9.5rem] shrink-0 md:ml-auto md:w-52 md:max-w-none lg:w-90">
+        <label className="relative ml-1.5 min-w-0 w-full max-w-full flex-1 basis-40 md:ml-auto md:max-w-52 lg:max-w-64">
           <span className="sr-only">Buscar por nome do cliente</span>
           <svg
             className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-400"
@@ -3636,8 +3633,8 @@ export function SalesManager() {
                           </p>
                         </td>
 
-                        <td className="px-4 py-3.5">
-                          <TablePaymentCell order={order} isSaleCancelled={isSaleCancelled} />
+                        <td className="whitespace-nowrap px-4 py-3.5">
+                          <TablePaymentCell order={order} />
                         </td>
 
                         <td className="px-4 py-3.5 text-right">
@@ -3646,7 +3643,7 @@ export function SalesManager() {
                           </p>
                         </td>
 
-                        <td className="px-4 py-3.5">
+                        <td className="whitespace-nowrap px-4 py-3.5">
                           {isSaleCancelled ? (
                             <span className="text-xs text-stone-400">—</span>
                           ) : order.paidAt ? (

@@ -23,6 +23,9 @@ export async function beginPaymentAttempt(input: {
   paymentMethod: PaymentMethod;
   gateway: PaymentGateway;
   amount: number;
+  purpose?: string;
+  chargeId?: string | null;
+  allowPaidOrder?: boolean;
 }): Promise<BeginPaymentAttemptResult> {
   return prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
@@ -30,12 +33,15 @@ export async function beginPaymentAttempt(input: {
       select: { id: true, status: true, expiresAt: true, total: true, orderSource: true },
     });
 
-    if (!order || order.status !== ORDER_STATUS.PENDING_PAYMENT) {
+    const pendingOk = order?.status === ORDER_STATUS.PENDING_PAYMENT;
+    const paidAddonOk =
+      Boolean(input.allowPaidOrder) && order?.status === ORDER_STATUS.PAID;
+    if (!order || (!pendingOk && !paidAddonOk)) {
       throw new Error("ORDER_NOT_PENDING");
     }
 
     const now = new Date();
-    if (order.expiresAt && order.expiresAt <= now) {
+    if (!paidAddonOk && order.expiresAt && order.expiresAt <= now) {
       throw new Error("ORDER_EXPIRED");
     }
 
@@ -66,6 +72,8 @@ export async function beginPaymentAttempt(input: {
         gateway: input.gateway,
         status: PAYMENT_ATTEMPT_STATUS.CREATED,
         amount: input.amount,
+        purpose: input.purpose ?? "order",
+        chargeId: input.chargeId ?? null,
       },
       select: { id: true, attemptNumber: true },
     });

@@ -9,7 +9,7 @@ import {
   PAYMENT_GATEWAY,
   PAYMENT_METHOD,
 } from "@/lib/orders/constants";
-import { continueOrderPayment } from "@/lib/orders/continue-order-payment";
+import { continueAdminSalePayment } from "@/lib/admin-sale/continue-admin-sale-payment";
 import {
   infinitePayCheckoutUrlFromSlug,
   isReusableInfinitePayCheckoutReference,
@@ -29,14 +29,21 @@ type OrderShareSource = {
   paymentChannel: string | null;
   paymentToken: string | null;
   paymentTokenExpiresAt?: Date | string | null;
+  items?: { paymentStatus?: string | null }[];
 };
+
+function hasUnpaidItems(order: OrderShareSource): boolean {
+  return (order.items ?? []).some(
+    (item) => (item.paymentStatus ?? "pending") === "pending"
+  );
+}
 
 function needsPaymentShare(order: OrderShareSource): boolean {
   if (order.orderSource !== OrderSource.ADMIN_SALE) return false;
-  if (order.paidAt) return false;
   if (order.status === ORDER_STATUS.CANCELLED) return false;
   if (order.status === ORDER_STATUS.EXPIRED) return false;
-  if (order.paymentChannel === "MANUAL") return false;
+  if (order.paidAt && !hasUnpaidItems(order)) return false;
+  if (order.paymentChannel === "MANUAL" && !hasUnpaidItems(order)) return false;
   return (
     order.paymentMethod === PAYMENT_METHOD.PIX ||
     order.paymentMethod === PAYMENT_METHOD.CARD
@@ -168,11 +175,10 @@ export async function attachOrderPaymentShare<T extends OrderShareSource>(
     await Promise.all(
       missingCardIds.map(async (orderId) => {
         try {
-          const result = await continueOrderPayment({
+          const result = await continueAdminSalePayment({
             orderId,
             userId: "system",
-            userEmail: "",
-            staffBypass: true,
+            forceNewLink: false,
           });
           if (result.ok && result.type === "card") {
             cardShareById.set(orderId, {

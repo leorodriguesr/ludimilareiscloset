@@ -45,13 +45,21 @@ export async function ensureOrderPaymentToken(
   if (!order) return null;
   if (order.orderSource !== OrderSource.ADMIN_SALE) return null;
   if (order.paymentMethod !== PAYMENT_METHOD.PIX) return null;
-  if (order.paidAt || order.status === ORDER_STATUS.PAID) return null;
   if (
     order.status === ORDER_STATUS.CANCELLED ||
     order.status === ORDER_STATUS.EXPIRED
   ) {
     return null;
   }
+
+  const pendingCharge = await prisma.orderCharge.findFirst({
+    where: { orderId: order.id, status: "pending" },
+    select: { id: true },
+  });
+  const fullyPaid =
+    (Boolean(order.paidAt) || order.status === ORDER_STATUS.PAID) &&
+    !pendingCharge;
+  if (fullyPaid) return null;
 
   const now = new Date();
   if (
@@ -122,8 +130,13 @@ export async function validatePaymentToken(token: string): Promise<
     return { ok: false, error: "Este link não é de pagamento Pix." };
   }
 
+  const pendingCharge = await prisma.orderCharge.findFirst({
+    where: { orderId: order.id, status: "pending" },
+    select: { id: true },
+  });
   const paid =
-    order.status === ORDER_STATUS.PAID || Boolean(order.paidAt);
+    (order.status === ORDER_STATUS.PAID || Boolean(order.paidAt)) &&
+    !pendingCharge;
 
   return { ok: true, orderId: order.id, paid };
 }

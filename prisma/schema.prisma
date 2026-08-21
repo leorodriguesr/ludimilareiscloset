@@ -227,6 +227,8 @@ model Order {
   orderDiscountValue  Float?
   orderDiscountAmount Float           @default(0)
   total     Float
+  /** Soma das cobranças já pagas (pedido + acréscimos). */
+  paidTotal Float           @default(0)
   /** Valor do frete/entrega (R$), validado no servidor na criação. */
   shippingAmount      Float   @default(0)
   /** Cotação escolhida no checkout (R$). */
@@ -290,6 +292,7 @@ model Order {
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
   items              OrderItem[]
+  charges            OrderCharge[]
   paymentAttempts    PaymentAttempt[]
   stockReservations  StockReservation[]
   events             OrderEvent[]
@@ -433,7 +436,27 @@ model OrderEvent {
   @@index([orderId, createdAt])
 }
 
-/** Tentativa de pagamento (pedido ou saldo de troca). */
+/** Cobrança de um pedido: inicial ou acréscimo após o pagamento. */
+model OrderCharge {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sequence  Int
+  amount    Float
+  /** pending | paid | cancelled */
+  status    String   @default("pending")
+  /** initial | addon */
+  reason    String   @default("initial")
+  createdAt DateTime @default(now())
+  paidAt    DateTime?
+  items     OrderItem[]
+  attempts  PaymentAttempt[]
+
+  @@unique([orderId, sequence])
+  @@index([orderId, status])
+}
+
+/** Tentativa de pagamento (pedido, acréscimo ou saldo de troca). */
 model PaymentAttempt {
   id                    String    @id @default(cuid())
   orderId               String
@@ -441,7 +464,9 @@ model PaymentAttempt {
   /** Quando preenchido: cobrança do saldo da troca (não confirma o pedido). */
   exchangeId            String?
   exchange              Exchange? @relation(fields: [exchangeId], references: [id], onDelete: Cascade)
-  /** order | exchange_balance */
+  chargeId              String?
+  charge                OrderCharge? @relation(fields: [chargeId], references: [id], onDelete: SetNull)
+  /** order | order_charge | exchange_balance */
   purpose               String    @default("order")
   /** Sequencial por Order: 1, 2, 3… */
   attemptNumber         Int
@@ -554,9 +579,15 @@ model OrderItem {
   price     Float
   /** JSON: [{ pieceName, size, color }] — opções escolhidas por peça. */
   pieceSelectionsJson String?
+  /** pending | paid */
+  paymentStatus String    @default("pending")
+  paidAt        DateTime?
+  chargeId      String?
+  charge        OrderCharge? @relation(fields: [chargeId], references: [id], onDelete: SetNull)
 
   @@index([orderId])
   @@index([productId])
+  @@index([chargeId])
 }
 
 model Category {

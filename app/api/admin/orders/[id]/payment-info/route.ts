@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ensureOrderPaymentToken } from "@/lib/admin-sale/payment-page";
-import { continueOrderPayment } from "@/lib/orders/continue-order-payment";
+import { continueAdminSalePayment } from "@/lib/admin-sale/continue-admin-sale-payment";
 import { requireStaffApi } from "@/lib/auth/require-staff-api";
 
 interface RouteContext {
@@ -11,13 +11,15 @@ async function respondPaymentInfo(input: {
   orderId: string;
   userId: string;
   forceNewLink?: boolean;
+  reactivateCancelled?: boolean;
+  paymentMethod?: "pix" | "card";
 }): Promise<NextResponse> {
-  const result = await continueOrderPayment({
+  const result = await continueAdminSalePayment({
     orderId: input.orderId,
     userId: input.userId,
-    userEmail: "",
-    staffBypass: true,
     forceNewLink: input.forceNewLink,
+    reactivateCancelled: input.reactivateCancelled,
+    paymentMethod: input.paymentMethod,
   });
 
   if (!result.ok) {
@@ -100,9 +102,16 @@ export async function POST(
   }
 
   let forceNew = true;
+  let paymentMethod: "pix" | "card" | undefined;
   try {
-    const body = (await request.json()) as { forceNew?: unknown };
+    const body = (await request.json()) as {
+      forceNew?: unknown;
+      paymentMethod?: unknown;
+    };
     if (body?.forceNew === false) forceNew = false;
+    if (body?.paymentMethod === "pix" || body?.paymentMethod === "card") {
+      paymentMethod = body.paymentMethod;
+    }
   } catch {
     // body opcional — POST implica regenerar
   }
@@ -111,5 +120,7 @@ export async function POST(
     orderId: id.trim(),
     userId: gate.userId,
     forceNewLink: forceNew,
+    reactivateCancelled: true,
+    paymentMethod,
   });
 }

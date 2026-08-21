@@ -36,5 +36,23 @@ export const PAYMENT_GATEWAY = {
 export type PaymentGateway =
   (typeof PAYMENT_GATEWAY)[keyof typeof PAYMENT_GATEWAY];
 
-/** Tempo fixo de vida de uma Order pendente (não renova). */
+export const ORDER_ITEM_PAYMENT_STATUS = {
+  PENDING: "pending",
+  PAID: "paid",
+} as const;
+
+export const ORDER_CHARGE_STATUS = {
+  PENDING: "pending",
+  PAID: "paid",
+  CANCELLED: "cancelled",
+} as const;
+
+export const ORDER_CHARGE_REASON = {
+  INITIAL: "initial",
+  ADDON: "addon",
+} as const;
+
+export const ORDER_CHARGE_PURPOSE = "order_charge";
+
+/** Tempo de vida de uma Order pendente. Reinicia se o admin reabrir uma cancelada. */
 export const ORDER_PENDING_TTL_MS = 24 * 60 * 60 * 1000;

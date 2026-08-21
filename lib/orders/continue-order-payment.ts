@@ -54,7 +54,7 @@ export type ContinueOrderPaymentSuccess =
 
 export type ContinueOrderPaymentResult =
   | ContinueOrderPaymentSuccess
-  | { ok: false; error: string; code?: "expired" | "not_pending" | "forbidden" | "not_found" };
+  | { ok: false; error: string; code?: "expired" | "not_pending" | "forbidden" | "not_found" | "insufficient_stock" };
 
 function guestDisplayName(email: string | null | undefined): string {
   const local = email?.split("@")[0]?.trim();
@@ -407,18 +407,22 @@ export async function continueOrderPayment(input: {
 
         /** Reutiliza o PIX enquanto o MP ainda expõe qr_code (não depende só de expiresAt local). */
         if (mp.pixCode) {
-          return {
-            ok: true,
-            type: "pix",
-            orderId: fresh.id,
-            pixCode: mp.pixCode,
-            pixQrBase64: mp.pixQrBase64,
-            expiresAt:
-              mp.expiresAt ??
-              activeAttempt.expiresAt?.toISOString() ??
-              new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-            amount: fresh.total,
-          };
+          const amountMatches =
+            Math.abs((activeAttempt.amount ?? 0) - fresh.total) <= 0.01;
+          if (!input.forceNewLink && amountMatches) {
+            return {
+              ok: true,
+              type: "pix",
+              orderId: fresh.id,
+              pixCode: mp.pixCode,
+              pixQrBase64: mp.pixQrBase64,
+              expiresAt:
+                mp.expiresAt ??
+                activeAttempt.expiresAt?.toISOString() ??
+                new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+              amount: fresh.total,
+            };
+          }
         }
       } catch (e) {
         console.error("[continueOrderPayment] consulta MP", e);

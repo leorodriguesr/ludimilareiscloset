@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { CartPieceSelection } from "@/lib/cart/types";
 import { validatePaymentToken } from "@/lib/admin-sale/payment-page";
 import { formatPrice } from "@/lib/format";
-import { continueOrderPayment } from "@/lib/orders/continue-order-payment";
+import { continueAdminSalePayment } from "@/lib/admin-sale/continue-admin-sale-payment";
 import {
   orderItemDisplayDescription,
   orderItemDisplayImageUrl,
@@ -46,6 +46,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           productDescription: true,
           productImageUrl: true,
           pieceSelectionsJson: true,
+          paymentStatus: true,
           product: {
             select: {
               name: true,
@@ -67,7 +68,15 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Venda não encontrada." }, { status: 404 });
   }
 
-  const items = order.items.map((item) => ({
+  const pendingItems = order.items.filter(
+    (item) => item.paymentStatus === "pending"
+  );
+  const displayItems =
+    order.status === "paid" && pendingItems.length > 0
+      ? pendingItems
+      : order.items;
+
+  const items = displayItems.map((item) => ({
     id: item.id,
     name: orderItemDisplayName(item),
     description: orderItemDisplayDescription(item),
@@ -81,33 +90,43 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     })),
   }));
 
-  const summary = {
-    orderNumber: order.orderNumber,
-    total: order.total,
-    totalFormatted: formatPrice(order.total),
-    shippingAmount: order.shippingAmount,
-    shippingServiceName: order.shippingServiceName,
-    deliveryNotes: order.deliveryNotes,
-    items,
-  };
+  const isAddon = order.status === "paid" && pendingItems.length > 0;
 
   if (validation.paid) {
     return NextResponse.json({
       status: "paid",
-      ...summary,
+      orderNumber: order.orderNumber,
+      total: order.total,
+      totalFormatted: formatPrice(order.total),
+      shippingAmount: order.shippingAmount,
+      shippingServiceName: order.shippingServiceName,
+      deliveryNotes: order.deliveryNotes,
+      items,
+      isAddon: false,
     });
   }
 
-  const pay = await continueOrderPayment({
+  const pay = await continueAdminSalePayment({
     orderId: validation.orderId,
-    userId: "",
-    userEmail: "",
-    staffBypass: true,
+    userId: "public",
+    forceNewLink: false,
   });
 
   if (!pay.ok) {
     return NextResponse.json({ error: pay.error }, { status: 400 });
   }
+
+  const payableTotal = pay.type === "pix" ? pay.amount : order.total;
+  const summary = {
+    orderNumber: order.orderNumber,
+    total: payableTotal,
+    totalFormatted: formatPrice(payableTotal),
+    shippingAmount: isAddon ? 0 : order.shippingAmount,
+    shippingServiceName: isAddon ? null : order.shippingServiceName,
+    deliveryNotes: order.deliveryNotes,
+    items,
+    isAddon,
+  };
 
   if (pay.type === "paid") {
     return NextResponse.json({

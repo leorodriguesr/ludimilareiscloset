@@ -88,6 +88,7 @@ async function loadOrderForLabel(orderId: string) {
         select: {
           quantity: true,
           price: true,
+          paymentStatus: true,
           productName: true,
           product: {
             select: {
@@ -383,6 +384,17 @@ export async function generateOrderLabel(orderId: string) {
     throw new ShippingQuoteError(
       "VALIDATION",
       "Não é possível gerar etiqueta para venda cancelada.",
+      400
+    );
+  }
+
+  const hasUnpaidItems = order.items.some(
+    (item) => item.paymentStatus === "pending"
+  );
+  if (hasUnpaidItems) {
+    throw new ShippingQuoteError(
+      "VALIDATION",
+      "Há itens aguardando pagamento. Conclua o acréscimo antes de gerar a etiqueta.",
       400
     );
   }

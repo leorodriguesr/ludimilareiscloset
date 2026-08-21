@@ -48,6 +48,7 @@ type ShipmentItem = {
   productName?: string | null;
   productDescription?: string | null;
   productImageUrl?: string | null;
+  paymentStatus?: string | null;
   product: {
     id: string;
     name: string;
@@ -170,6 +171,10 @@ function parsePieces(json: string | null): CartPieceSelection[] {
   } catch {
     return [];
   }
+}
+
+function shipmentItemIsUnpaid(item: ShipmentItem): boolean {
+  return (item.paymentStatus ?? "pending") !== "paid";
 }
 
 function cepDisplay(value: string | null | undefined): string | null {
@@ -447,7 +452,7 @@ function ShippingStatusBadge({
 }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${SHIPPING_TONE_CLASS[tone]}`}
+      className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${SHIPPING_TONE_CLASS[tone]}`}
     >
       {shippingStatusIcon(status)}
       {label}
@@ -466,12 +471,12 @@ function TableShippingStatus({
   const info = sInfo(status);
 
   return (
-    <>
+    <div className="flex flex-col gap-0.5">
       <ShippingStatusBadge label={label} tone={info.tone} status={status} />
       {shippingMethod ? (
-        <p className={`mt-1 ${TABLE_CELL_SECONDARY}`}>{shippingMethod}</p>
+        <p className={`whitespace-nowrap ${TABLE_CELL_SECONDARY}`}>{shippingMethod}</p>
       ) : null}
-    </>
+    </div>
   );
 }
 
@@ -506,6 +511,7 @@ function PackingSlipContent({ order }: { order: ShipmentOrder }) {
     order.fulfillmentType !== "ARRANGED" && deliveryDaysLabel !== "—";
   const items = order.items ?? [];
   const totalUnits = items.reduce((sum, item) => sum + item.quantity, 0);
+  const hasUnpaidItems = items.some(shipmentItemIsUnpaid);
 
   return (
     <div className="space-y-5">
@@ -579,6 +585,11 @@ function PackingSlipContent({ order }: { order: ShipmentOrder }) {
             {items.length} item{items.length !== 1 ? "s" : ""} · {totalUnits} un.
           </p>
         </div>
+        {hasUnpaidItems ? (
+          <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
+            Há peça(s) com pagamento pendente. Não envie essas peças até o pagamento ser confirmado.
+          </p>
+        ) : null}
         {items.length === 0 ? (
           <p className="mt-3 text-sm text-stone-400">Nenhum produto neste pedido.</p>
         ) : (
@@ -587,6 +598,7 @@ function PackingSlipContent({ order }: { order: ShipmentOrder }) {
               const pieces = parsePieces(item.pieceSelectionsJson);
               const img = orderItemDisplayImageUrl(item);
               const productName = orderItemDisplayName(item);
+              const unpaid = shipmentItemIsUnpaid(item);
               return (
                 <li key={item.id} className="flex gap-3 py-3.5">
                   <div className="relative h-20 w-16 shrink-0 overflow-hidden rounded-lg bg-stone-100">
@@ -605,7 +617,18 @@ function PackingSlipContent({ order }: { order: ShipmentOrder }) {
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="font-medium leading-snug text-stone-900">{productName}</p>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-medium leading-snug text-stone-900">{productName}</p>
+                      <span
+                        className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          unpaid
+                            ? "bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200"
+                            : "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200"
+                        }`}
+                      >
+                        {unpaid ? "Pagamento pendente" : "Pago"}
+                      </span>
+                    </div>
                     {pieces.length > 0 ? (
                       <ul className="mt-1 space-y-0.5 text-xs text-stone-500">
                         {pieces.map((piece, index) => {
@@ -709,6 +732,7 @@ function PackingListPrint({
             const deliveryNotes = shipmentDeliveryUserNotes(order);
             const hasNotes = Boolean(saleNotes || deliveryNotes);
             const items = order.items ?? [];
+            const hasUnpaidItems = items.some(shipmentItemIsUnpaid);
             return (
               <li
                 key={order.id}
@@ -722,6 +746,11 @@ function PackingListPrint({
                   <p className="mt-1 inline-block rounded border border-black px-2 py-0.5 text-sm font-semibold">
                     Entrega: {deliveryOption}
                   </p>
+                  {hasUnpaidItems ? (
+                    <p className="mt-1.5 text-sm font-bold uppercase tracking-wide">
+                      Atenção: peça com pagamento pendente — não enviar
+                    </p>
+                  ) : null}
                   {hasNotes ? (
                     <div className="mt-2 rounded border-2 border-black bg-stone-100 px-2.5 py-2">
                       <p className="text-[10px] font-bold uppercase tracking-wide">
@@ -744,14 +773,25 @@ function PackingListPrint({
                       {items.map((item) => {
                         const productName = orderItemDisplayName(item);
                         const pieces = parsePieces(item.pieceSelectionsJson);
+                        const unpaid = shipmentItemIsUnpaid(item);
                         return (
-                          <div key={item.id} className="min-w-[9rem] max-w-[14rem]">
+                          <div
+                            key={item.id}
+                            className={`min-w-[9rem] max-w-[14rem] ${
+                              unpaid ? "rounded border-2 border-black px-2 py-1.5" : ""
+                            }`}
+                          >
                             <p className="text-sm font-semibold leading-snug">
                               {productName}
                               {item.quantity > 1 ? (
                                 <span className="font-normal"> × {item.quantity}</span>
                               ) : null}
                             </p>
+                            {unpaid ? (
+                              <p className="mt-0.5 text-xs font-bold uppercase tracking-wide">
+                                Pagamento pendente
+                              </p>
+                            ) : null}
                             {pieces.length > 0 ? (
                               <ul className="mt-1 space-y-0.5 text-sm">
                                 {pieces.map((piece, index) => {
@@ -1419,31 +1459,39 @@ function useShipmentActions(
   };
 }
 
+function orderHasUnpaidItems(order: ShipmentOrder): boolean {
+  return (order.items ?? []).some(shipmentItemIsUnpaid);
+}
+
 function shipmentCapabilities(order: ShipmentOrder, trackingCode?: string | null) {
   const isArranged = order.fulfillmentType === "ARRANGED";
   const isSaleCancelled = order.status === "cancelled";
   const isPaid = Boolean(order.paidAt);
   const effectiveTracking = trackingCode ?? order.trackingCode;
+  const hasUnpaidItems = orderHasUnpaidItems(order);
 
   return {
     isArranged,
     isSaleCancelled,
-    canSelectForBulk: !order.labelUrl && !isSaleCancelled && !isArranged,
+    canSelectForBulk: !order.labelUrl && !isSaleCancelled && !isArranged && !hasUnpaidItems,
     canChangeShipping: !order.labelUrl && !order.superfreteShipmentId && !isSaleCancelled && !isArranged,
-    canMarkPacked: isPaid && !isSaleCancelled && order.shippingStatus === "to_pack",
+    canMarkPacked: isPaid && !isSaleCancelled && !hasUnpaidItems && order.shippingStatus === "to_pack",
     canMarkArrangedShipped:
       isArranged &&
       !isSaleCancelled &&
+      !hasUnpaidItems &&
       order.shippingStatus !== "shipped" &&
       order.shippingStatus !== "delivered",
     canMarkCarrierShipped:
       !isSaleCancelled &&
+      !hasUnpaidItems &&
       canManuallyMarkCarrierAsShipped({
         fulfillmentType: order.fulfillmentType,
         shippingStatus: order.shippingStatus,
         trackingCode: effectiveTracking,
       }),
-    canGenerateLabel: !order.labelUrl && !isSaleCancelled && !isArranged,
+    canGenerateLabel: !order.labelUrl && !isSaleCancelled && !isArranged && !hasUnpaidItems,
+    hasUnpaidItems,
     labelAutoGenerateFailed: hasLabelAutoGenerateError(order),
     labelAutoGenerateTitle: labelAutoGenerateErrorTooltip(order),
   };
@@ -1528,19 +1576,17 @@ function ShipmentRowActionsMenu({
   const actions = useMemo(() => {
     const items: MenuAction[] = [];
 
-    if (caps.canMarkPacked) {
-      items.push({
-        id: "view-packing",
-        label: "Ver detalhes",
-        icon: (
-          <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.644C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .638C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-          </svg>
-        ),
-        onClick: onViewPacking,
-      });
-    }
+    items.push({
+      id: "view-packing",
+      label: "Ver detalhes",
+      icon: (
+        <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.644C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .638C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+        </svg>
+      ),
+      onClick: onViewPacking,
+    });
 
     if (caps.canChangeShipping) {
       items.push({
@@ -1719,7 +1765,7 @@ function ShipmentRowActionsMenu({
   ]);
 
   return (
-    <td className="px-3 py-3.5">
+    <td className="px-3 py-3.5" onClick={(event) => event.stopPropagation()}>
       <div className="flex justify-center">
         <button
           ref={btnRef}
@@ -1827,8 +1873,11 @@ function ShipmentRow({
   const deliveryNotesHint = shipmentDeliveryUserNotes(order) ?? "";
 
   return (
-    <tr className="border-b border-stone-100 align-top transition-colors hover:bg-stone-50/60">
-      <td className="px-4 py-3.5">
+    <tr
+      className="cursor-pointer border-b border-stone-100 align-top transition-colors hover:bg-stone-50/60"
+      onClick={onViewPacking}
+    >
+      <td className="px-4 py-3.5" onClick={(event) => event.stopPropagation()}>
         <input
           type="checkbox"
           checked={selected}
@@ -1846,22 +1895,26 @@ function ShipmentRow({
               <span className="text-xs font-normal text-stone-600">Avulsa</span>
             ) : null}
             {saleNotes ? (
-              <OrderNotesHint
-                notes={saleNotes}
-                title="Observações da venda"
-                ariaLabel="Ver observações internas da venda"
-                tone="violet"
-                icon="doc"
-              />
+              <span onClick={(event) => event.stopPropagation()}>
+                <OrderNotesHint
+                  notes={saleNotes}
+                  title="Observações da venda"
+                  ariaLabel="Ver observações internas da venda"
+                  tone="violet"
+                  icon="doc"
+                />
+              </span>
             ) : null}
             {deliveryNotesHint ? (
-              <OrderNotesHint
-                notes={deliveryNotesHint}
-                title="Observações da entrega"
-                ariaLabel="Ver observações da entrega"
-                tone="sky"
-                icon="truck"
-              />
+              <span onClick={(event) => event.stopPropagation()}>
+                <OrderNotesHint
+                  notes={deliveryNotesHint}
+                  title="Observações da entrega"
+                  ariaLabel="Ver observações da entrega"
+                  tone="sky"
+                  icon="truck"
+                />
+              </span>
             ) : null}
             {caps.labelAutoGenerateFailed ? (
               <LabelAutoGenerateWarningIcon title={caps.labelAutoGenerateTitle} />
@@ -1878,8 +1931,14 @@ function ShipmentRow({
         </div>
       </td>
       <td className="px-4 py-3.5">
-        <p className={TABLE_CELL_PRIMARY}>{fmtDate(order.createdAt)}</p>
-        <p className={TABLE_CELL_SECONDARY}>{fmtTime(order.createdAt)}</p>
+        {order.paidAt ? (
+          <>
+            <p className={TABLE_CELL_PRIMARY}>{fmtDate(order.paidAt)}</p>
+            <p className={TABLE_CELL_SECONDARY}>{fmtTime(order.paidAt)}</p>
+          </>
+        ) : (
+          <p className={TABLE_CELL_SECONDARY}>—</p>
+        )}
       </td>
       <td className="px-4 py-3.5 truncate">
         <p
@@ -1938,25 +1997,11 @@ function ShipmentRow({
           {freightPrice != null ? formatPrice(freightPrice) : "—"}
         </p>
       </td>
-      <td className="px-4 py-3.5">
-        {caps.canMarkPacked ? (
-          <button
-            type="button"
-            onClick={onViewPacking}
-            title="Ver detalhes"
-            className="group text-left transition-opacity hover:opacity-80"
-          >
-            <TableShippingStatus
-              status={order.shippingStatus}
-              shippingMethod={shippingMethod}
-            />
-          </button>
-        ) : (
-          <TableShippingStatus
-            status={order.shippingStatus}
-            shippingMethod={shippingMethod}
-          />
-        )}
+      <td className="whitespace-nowrap px-4 py-3.5">
+        <TableShippingStatus
+          status={order.shippingStatus}
+          shippingMethod={shippingMethod}
+        />
       </td>
       <ShipmentRowActionsMenu
         order={order}
@@ -2530,7 +2575,7 @@ export function ShippingManager() {
                     />
                   </th>
                   <th className="px-4 py-3.5 text-left">Pedido</th>
-                  <th className="px-4 py-3.5 text-left">Data</th>
+                  <th className="px-4 py-3.5 text-left">Pagamento</th>
                   <th className="px-4 py-3.5 text-left">Frete</th>
                   <th className="px-4 py-3.5 text-left">Destinatário</th>
                   <th className="px-4 py-3.5 text-left">Rastreio</th>

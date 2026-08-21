@@ -86,6 +86,7 @@ export async function GET(request: NextRequest) {
               productName: true,
               productDescription: true,
               productImageUrl: true,
+              paymentStatus: true,
               product: {
                 select: {
                   id: true,

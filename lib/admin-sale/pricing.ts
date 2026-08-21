@@ -14,6 +14,8 @@ export type AdminSaleCatalogLineInput = {
   quantity: number;
   pieceSelections?: CartPieceSelection[];
   itemDiscount?: DiscountInput;
+  /** Preço unitário informado pelo admin (substitui o de catálogo). */
+  unitPrice?: number;
 };
 
 export type AdminSaleCustomPieceInput = {
@@ -181,13 +183,21 @@ async function resolveCatalogLine(
     usePix ? (catalogPromoPrice ?? catalogListPrice) : catalogListPrice
   );
 
-  const lineOriginal = round2(catalogUnitPrice * qty);
-  const unitDiscount = calculateDiscountAmount(
-    catalogUnitPrice,
-    line.itemDiscount
+  const hasOverride =
+    line.unitPrice != null && Number.isFinite(Number(line.unitPrice));
+  const unitPrice = hasOverride
+    ? round2(Math.max(Number(line.unitPrice), 0))
+    : round2(
+        Math.max(
+          catalogUnitPrice -
+            calculateDiscountAmount(catalogUnitPrice, line.itemDiscount),
+          0
+        )
+      );
+  const itemDiscountAmount = round2(
+    Math.max(catalogUnitPrice - unitPrice, 0) * qty
   );
-  const itemDiscountAmount = round2(unitDiscount * qty);
-  const unitPrice = round2(Math.max(catalogUnitPrice - unitDiscount, 0));
+  const lineOriginal = round2(catalogUnitPrice * qty);
   const lineSubtotalFinal = round2(unitPrice * qty);
 
   return {
@@ -301,6 +311,7 @@ export function normalizeAdminSaleLineInput(
     };
   }
 
+  const unitPriceRaw = Number(row.unitPrice);
   return {
     kind: "catalog",
     productId: String(row.productId ?? ""),
@@ -309,5 +320,6 @@ export function normalizeAdminSaleLineInput(
       ? (row.pieceSelections as CartPieceSelection[])
       : undefined,
     ...(itemDiscount ? { itemDiscount } : {}),
+    ...(Number.isFinite(unitPriceRaw) ? { unitPrice: unitPriceRaw } : {}),
   };
 }
