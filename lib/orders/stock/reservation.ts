@@ -109,6 +109,43 @@ export async function commitStockReservations(
   await tx.stockReservation.deleteMany({ where: { orderId } });
 }
 
+/** Baixa estoque das linhas informadas sem mexer nas reservas do pedido. */
+export async function decrementCommittedStockForLines(
+  tx: ReservationTx,
+  lines: StockReservationLine[]
+): Promise<void> {
+  const demands = await buildStockDemands(lines, tx);
+  if (demands.length === 0) return;
+
+  const productIds = [...new Set(demands.map((d) => d.productId))];
+
+  for (const demand of demands) {
+    if (demand.pieceVariantId) {
+      await tx.$executeRawUnsafe(
+        `UPDATE "PieceVariant"
+         SET "quantity" = MAX(0, "quantity" - ?)
+         WHERE "id" = ?`,
+        demand.quantity,
+        demand.pieceVariantId
+      );
+    } else {
+      await tx.$executeRawUnsafe(
+        `UPDATE "Product"
+         SET "stockQuantity" = MAX(0, COALESCE("stockQuantity", 0) - ?),
+             "updatedAt" = datetime('now')
+         WHERE "id" = ? AND "stockType" = ?`,
+        demand.quantity,
+        demand.productId,
+        StockType.LIMITED
+      );
+    }
+  }
+
+  for (const productId of productIds) {
+    await syncProductStockQuantityFromVariants(tx, productId);
+  }
+}
+
 async function syncProductStockQuantityFromVariants(
   tx: ReservationTx,
   productId: string

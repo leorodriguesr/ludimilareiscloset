@@ -1,3 +1,4 @@
+import { continueAdminSalePayment } from "@/lib/admin-sale/continue-admin-sale-payment";
 import {
   CustomerDataStatus,
   OrderSource,
@@ -17,6 +18,8 @@ import {
 import { OrderCreateError } from "@/lib/orders/create-order";
 import {
   commitStockReservations,
+  decrementCommittedStockForLines,
+  releaseStockReservations,
   reserveStockForOrderLines,
 } from "@/lib/orders/stock/reservation";
 import { prisma } from "@/lib/prisma";
@@ -245,6 +248,198 @@ export async function markOrderPaidManually(input: {
     customerDataStatus:
       order.customerDataStatus ?? CustomerDataStatus.PENDING,
   });
+
+  return { ok: true };
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+export async function markOrderItemPaidManually(input: {
+  orderId: string;
+  itemId: string;
+  markedByUserId: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const order = await prisma.order.findUnique({
+    where: { id: input.orderId },
+    select: {
+      id: true,
+      orderNumber: true,
+      status: true,
+      paidAt: true,
+      items: {
+        select: {
+          id: true,
+          productId: true,
+          quantity: true,
+          price: true,
+          lineSubtotalFinal: true,
+          paymentStatus: true,
+          pieceSelectionsJson: true,
+          chargeId: true,
+        },
+      },
+    },
+  });
+
+  if (!order) {
+    return { ok: false, error: "Pedido não encontrado." };
+  }
+
+  if (!order.paidAt && order.status !== ORDER_STATUS.PAID) {
+    return {
+      ok: false,
+      error: "Só é possível marcar peça avulsa em venda já paga (acréscimo).",
+    };
+  }
+
+  const item = order.items.find((row) => row.id === input.itemId);
+  if (!item) {
+    return { ok: false, error: "Peça não encontrada nesta venda." };
+  }
+  if (item.paymentStatus === ORDER_ITEM_PAYMENT_STATUS.PAID) {
+    return { ok: true };
+  }
+
+  const itemAmount = round2(
+    item.lineSubtotalFinal != null
+      ? item.lineSubtotalFinal
+      : item.price * item.quantity
+  );
+  const paidAt = new Date();
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.orderItem.update({
+        where: { id: item.id },
+        data: {
+          paymentStatus: ORDER_ITEM_PAYMENT_STATUS.PAID,
+          paidAt,
+        },
+      });
+
+      const remainingPending = await tx.orderItem.findMany({
+        where: {
+          orderId: order.id,
+          paymentStatus: ORDER_ITEM_PAYMENT_STATUS.PENDING,
+        },
+        select: {
+          id: true,
+          productId: true,
+          quantity: true,
+          price: true,
+          lineSubtotalFinal: true,
+          pieceSelectionsJson: true,
+          chargeId: true,
+        },
+      });
+
+      if (item.chargeId) {
+        const remainingOnCharge = remainingPending.filter(
+          (row) => row.chargeId === item.chargeId
+        );
+        if (remainingOnCharge.length === 0) {
+          await tx.orderCharge.update({
+            where: { id: item.chargeId },
+            data: { status: ORDER_CHARGE_STATUS.PAID, paidAt },
+          });
+          await tx.paymentAttempt.updateMany({
+            where: {
+              orderId: order.id,
+              chargeId: item.chargeId,
+              status: {
+                in: [
+                  PAYMENT_ATTEMPT_STATUS.ACTIVE,
+                  PAYMENT_ATTEMPT_STATUS.CREATED,
+                ],
+              },
+            },
+            data: { status: PAYMENT_ATTEMPT_STATUS.SUPERSEDED },
+          });
+        } else {
+          const remainingAmount = round2(
+            remainingOnCharge.reduce(
+              (sum, row) =>
+                sum +
+                (row.lineSubtotalFinal != null
+                  ? row.lineSubtotalFinal
+                  : row.price * row.quantity),
+              0
+            )
+          );
+          await tx.orderCharge.update({
+            where: { id: item.chargeId },
+            data: { amount: remainingAmount },
+          });
+        }
+      }
+
+      await tx.order.update({
+        where: { id: order.id },
+        data: { paidTotal: { increment: itemAmount } },
+      });
+
+      if (item.productId) {
+        await decrementCommittedStockForLines(tx, [
+          {
+            productId: item.productId,
+            quantity: item.quantity,
+            price: item.price,
+            pieceSelections: parsePieceSelections(item.pieceSelectionsJson),
+          },
+        ]);
+      }
+
+      await releaseStockReservations(tx, order.id);
+      const remainingStock = remainingPending
+        .filter(
+          (row): row is typeof row & { productId: string } =>
+            Boolean(row.productId)
+        )
+        .map((row) => ({
+          productId: row.productId,
+          quantity: row.quantity,
+          price: row.price,
+          pieceSelections: parsePieceSelections(row.pieceSelectionsJson),
+        }));
+      if (remainingStock.length > 0) {
+        await reserveStockForOrderLines(tx, order.id, remainingStock, paidAt);
+      }
+
+      await appendCashLedgerEntry(tx, {
+        direction: "IN",
+        kind: "SALE",
+        amount: itemAmount,
+        description: `Acréscimo manual (peça) · pedido #${order.orderNumber ?? order.id.slice(0, 8)}`,
+        orderId: order.id,
+        actorUserId: input.markedByUserId,
+      });
+    });
+  } catch (e) {
+    if (e instanceof OrderCreateError && e.code === "INSUFFICIENT_STOCK") {
+      return {
+        ok: false,
+        error: "Estoque insuficiente para confirmar esta peça.",
+      };
+    }
+    console.error("[markOrderItemPaidManually]", e);
+    return { ok: false, error: "Não foi possível confirmar o pagamento da peça." };
+  }
+
+  const stillPending = await prisma.orderItem.count({
+    where: {
+      orderId: order.id,
+      paymentStatus: ORDER_ITEM_PAYMENT_STATUS.PENDING,
+    },
+  });
+  if (stillPending > 0) {
+    await continueAdminSalePayment({
+      orderId: order.id,
+      userId: input.markedByUserId,
+      forceNewLink: true,
+    });
+  }
 
   return { ok: true };
 }

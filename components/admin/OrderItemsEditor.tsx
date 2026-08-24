@@ -152,7 +152,7 @@ export function OrderItemsEditor({
   const [customDraft, setCustomDraft] = useState<CartPieceSelection[]>([]);
   const [savingPieces, setSavingPieces] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [markingPaid, setMarkingPaid] = useState(false);
+  const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
   const [editUnitPrice, setEditUnitPrice] = useState("");
 
   const pendingItems = order.items.filter(
@@ -198,19 +198,18 @@ export function OrderItemsEditor({
     await persistLines([...currentPersistableItems().map(itemToApiLine), ...newLines]);
   }
 
-  async function markPendingItemsPaid() {
-    const count = pendingItems.length;
+  async function markPendingItemPaid(item: EditableOrderItem) {
     const confirmed = window.confirm(
-      count === 1
-        ? "Confirmar que esta peça foi paga? O acréscimo entra no caixa e a etiqueta pode ser gerada."
-        : `Confirmar pagamento das ${count} peças em aberto? O acréscimo entra no caixa e a etiqueta pode ser gerada.`
+      "Confirmar que esta peça foi paga? As demais peças em aberto continuam aguardando pagamento."
     );
     if (!confirmed) return;
-    setMarkingPaid(true);
+    setMarkingPaidId(item.id);
     setError(null);
     try {
       const res = await fetch(`/api/admin/sales/${order.id}/mark-paid`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId: item.id }),
       });
       const data = (await res.json().catch(() => null)) as { error?: string } | null;
       if (!res.ok) {
@@ -221,7 +220,7 @@ export function OrderItemsEditor({
     } catch {
       setError("Erro de conexão.");
     } finally {
-      setMarkingPaid(false);
+      setMarkingPaidId(null);
     }
   }
 
@@ -483,11 +482,11 @@ export function OrderItemsEditor({
             {canConfirmItemPaid ? (
               <button
                 type="button"
-                disabled={markingPaid || saving}
-                onClick={() => void markPendingItemsPaid()}
+                disabled={markingPaidId != null || saving}
+                onClick={() => void markPendingItemPaid(item)}
                 className="mt-2 w-full rounded-lg border border-emerald-200 bg-emerald-50 py-1.5 text-xs font-semibold text-emerald-800 transition-colors hover:bg-emerald-100 disabled:opacity-50"
               >
-                {markingPaid ? "Confirmando…" : "Marcar peça como paga"}
+                {markingPaidId === item.id ? "Confirmando…" : "Marcar peça como paga"}
               </button>
             ) : null}
             {canEdit || canDelete ? (

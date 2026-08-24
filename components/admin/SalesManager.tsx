@@ -173,6 +173,27 @@ function orderPayableAmount(order: AdminOrder): number {
   return order.total;
 }
 
+function manualMarkPaidOrderPatch(order: AdminOrder): Partial<AdminOrder> {
+  const isAddon = Boolean(order.paidAt) && orderHasUnpaidItems(order);
+  const now = new Date().toISOString();
+  return {
+    paidAt: order.paidAt ?? now,
+    status: "paid",
+    paymentChannel: isAddon ? order.paymentChannel : "MANUAL",
+    paidTotal: isAddon
+      ? (order.paidTotal ?? 0) + orderPayableAmount(order)
+      : order.total,
+    items: order.items.map((item) =>
+      (item.paymentStatus ?? "pending") === "paid"
+        ? item
+        : { ...item, paymentStatus: "paid" }
+    ),
+    cancellationReason: null,
+    cancelledAt: null,
+    ...(isAddon ? {} : { shippingStatus: "to_pack" }),
+  };
+}
+
 function isInactiveSale(order: AdminOrder): boolean {
   return order.status === "cancelled" || order.status === "expired";
 }
@@ -1661,14 +1682,7 @@ function OrderRowActionsMenu({
         window.alert(data?.error ?? "Não foi possível marcar a venda como paga.");
         return;
       }
-      onPatchOrder(order.id, {
-        paidAt: new Date().toISOString(),
-        status: "paid",
-        paymentChannel: "MANUAL",
-        shippingStatus: "to_pack",
-        cancellationReason: null,
-        cancelledAt: null,
-      });
+      onPatchOrder(order.id, manualMarkPaidOrderPatch(order));
     } finally {
       setBusy(null);
     }
@@ -2273,22 +2287,7 @@ function OrderDetailsBody({
         setMarkPaidError(data?.error ?? "Não foi possível marcar a venda como paga.");
         return;
       }
-      const now = new Date().toISOString();
-      onPatchOrder(order.id, {
-        paidAt: order.paidAt ?? now,
-        status: "paid",
-        paymentChannel: isAddon ? order.paymentChannel : "MANUAL",
-        paidTotal: isAddon
-          ? (order.paidTotal ?? 0) + orderPayableAmount(order)
-          : order.total,
-        items: order.items.map((item) =>
-          (item.paymentStatus ?? "pending") === "paid"
-            ? item
-            : { ...item, paymentStatus: "paid" }
-        ),
-        ...(isAddon ? {} : { shippingStatus: "to_pack" }),
-      });
-      onRefresh();
+      onPatchOrder(order.id, manualMarkPaidOrderPatch(order));
     } catch {
       setMarkPaidError("Erro de conexão.");
     } finally {
@@ -3020,6 +3019,13 @@ function SaleOrderDrawer({
   const [entered, setEntered] = useState(false);
   const [displayOrder, setDisplayOrder] = useState<AdminOrder | null>(null);
 
+  const patchDisplayOrder: typeof onPatchOrder = (id, patch) => {
+    setDisplayOrder((current) =>
+      current && current.id === id ? { ...current, ...patch } : current
+    );
+    onPatchOrder(id, patch);
+  };
+
   useEffect(() => {
     if (open && order) {
       setDisplayOrder(order);
@@ -3112,7 +3118,7 @@ function SaleOrderDrawer({
           <OrderDetailsBody
             order={displayOrder}
             onRefresh={onRefresh}
-            onPatchOrder={onPatchOrder}
+            onPatchOrder={patchDisplayOrder}
             products={products}
             ensureProducts={ensureProducts}
             openCancelForm={openCancelForm}
