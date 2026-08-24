@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { PERMISSION } from "@/lib/auth/permissions";
 import { PieceSelector } from "@/components/product/PieceSelector";
 import { CUSTOM_SET_SIZES } from "@/components/admin/CustomSaleSetsForm";
 import {
@@ -128,12 +130,15 @@ export function OrderItemsEditor({
     superfreteShipmentId: string | null;
     shippingStatus: string;
     paymentMethod?: string | null;
+    paidAt?: string | null;
     items: EditableOrderItem[];
   };
   products: Product[];
   ensureProducts: () => Promise<Product[]>;
   onRefresh: () => void;
 }) {
+  const { hasPermission } = useAuth();
+  const canMarkPaid = hasPermission(PERMISSION.ADMIN_SALE_MARK_PAID);
   const mutable = canMutateItems(order);
   const paidLocked = order.status === "paid";
   const [saving, setSaving] = useState(false);
@@ -147,6 +152,7 @@ export function OrderItemsEditor({
   const [customDraft, setCustomDraft] = useState<CartPieceSelection[]>([]);
   const [savingPieces, setSavingPieces] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [markingPaid, setMarkingPaid] = useState(false);
   const [editUnitPrice, setEditUnitPrice] = useState("");
 
   const pendingItems = order.items.filter(
@@ -190,6 +196,33 @@ export function OrderItemsEditor({
 
   async function addLines(newLines: unknown[]) {
     await persistLines([...currentPersistableItems().map(itemToApiLine), ...newLines]);
+  }
+
+  async function markPendingItemsPaid() {
+    const count = pendingItems.length;
+    const confirmed = window.confirm(
+      count === 1
+        ? "Confirmar que esta peça foi paga? O acréscimo entra no caixa e a etiqueta pode ser gerada."
+        : `Confirmar pagamento das ${count} peças em aberto? O acréscimo entra no caixa e a etiqueta pode ser gerada.`
+    );
+    if (!confirmed) return;
+    setMarkingPaid(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/sales/${order.id}/mark-paid`, {
+        method: "POST",
+      });
+      const data = (await res.json().catch(() => null)) as { error?: string } | null;
+      if (!res.ok) {
+        setError(data?.error ?? "Não foi possível confirmar o pagamento da peça.");
+        return;
+      }
+      onRefresh();
+    } catch {
+      setError("Erro de conexão.");
+    } finally {
+      setMarkingPaid(false);
+    }
   }
 
   async function deleteItem(item: EditableOrderItem) {
@@ -389,6 +422,8 @@ export function OrderItemsEditor({
     const img = orderItemDisplayImageUrl(item);
     const name = orderItemDisplayName(item);
     const paid = item.paymentStatus === "paid";
+    const canConfirmItemPaid =
+      canMarkPaid && Boolean(order.paidAt) && !paid;
     const isEditingPieces = editingPiecesId === item.id;
     const canDelete = mutable && !paid;
     const canEdit =
@@ -445,6 +480,16 @@ export function OrderItemsEditor({
                 {formatPrice(item.price * item.quantity)}
               </span>
             </div>
+            {canConfirmItemPaid ? (
+              <button
+                type="button"
+                disabled={markingPaid || saving}
+                onClick={() => void markPendingItemsPaid()}
+                className="mt-2 w-full rounded-lg border border-emerald-200 bg-emerald-50 py-1.5 text-xs font-semibold text-emerald-800 transition-colors hover:bg-emerald-100 disabled:opacity-50"
+              >
+                {markingPaid ? "Confirmando…" : "Marcar peça como paga"}
+              </button>
+            ) : null}
             {canEdit || canDelete ? (
               <div className="mt-0.5 flex items-center justify-end gap-0.5">
                 {canEdit ? (

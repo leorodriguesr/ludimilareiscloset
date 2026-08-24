@@ -1646,7 +1646,9 @@ function OrderRowActionsMenu({
   async function handleMarkPaid() {
     const label = order.orderNumber != null ? `#${order.orderNumber}` : "esta venda";
     const confirmed = window.confirm(
-      `Marcar a venda ${label} como paga? Isso registra pagamento manual e libera o pedido para envio.`
+      isPaid && orderHasUnpaidItems(order)
+        ? `Confirmar pagamento das peças em aberto da venda ${label}? O acréscimo entra no caixa e a etiqueta pode ser gerada.`
+        : `Marcar a venda ${label} como paga? Isso registra pagamento manual e libera o pedido para envio.`
     );
     if (!confirmed) return;
     setBusy("mark-paid");
@@ -1974,7 +1976,12 @@ function OrderRowActionsMenu({
     if (showMarkPaid) {
       items.push({
         id: "mark-paid",
-        label: busy === "mark-paid" ? "Marcando…" : "Marcar como paga",
+        label:
+          busy === "mark-paid"
+            ? "Marcando…"
+            : isPaid && orderHasUnpaidItems(order)
+              ? "Confirmar pagamento das peças em aberto"
+              : "Marcar como paga",
         disabled: busy === "mark-paid",
         separatorBefore: items.length > 0,
         icon: (
@@ -2247,8 +2254,11 @@ function OrderDetailsBody({
 
   async function markSalePaid() {
     const label = order.orderNumber != null ? `#${order.orderNumber}` : "esta venda";
+    const isAddon = Boolean(order.paidAt) && orderHasUnpaidItems(order);
     const confirmed = window.confirm(
-      `Marcar a venda ${label} como paga? Isso registra pagamento manual e libera o pedido para envio.`
+      isAddon
+        ? `Confirmar pagamento das peças em aberto da venda ${label}? O acréscimo entra no caixa e a etiqueta pode ser gerada.`
+        : `Marcar a venda ${label} como paga? Isso registra pagamento manual e libera o pedido para envio.`
     );
     if (!confirmed) return;
 
@@ -2263,11 +2273,22 @@ function OrderDetailsBody({
         setMarkPaidError(data?.error ?? "Não foi possível marcar a venda como paga.");
         return;
       }
+      const now = new Date().toISOString();
       onPatchOrder(order.id, {
-        paidAt: new Date().toISOString(),
+        paidAt: order.paidAt ?? now,
         status: "paid",
-        paymentChannel: "MANUAL",
+        paymentChannel: isAddon ? order.paymentChannel : "MANUAL",
+        paidTotal: isAddon
+          ? (order.paidTotal ?? 0) + orderPayableAmount(order)
+          : order.total,
+        items: order.items.map((item) =>
+          (item.paymentStatus ?? "pending") === "paid"
+            ? item
+            : { ...item, paymentStatus: "paid" }
+        ),
+        ...(isAddon ? {} : { shippingStatus: "to_pack" }),
       });
+      onRefresh();
     } catch {
       setMarkPaidError("Erro de conexão.");
     } finally {
@@ -2883,8 +2904,8 @@ function OrderDetailsBody({
 
             {canMarkPaid &&
             order.orderSource === "ADMIN_SALE" &&
-            !order.paidAt &&
-            order.status === "pending_payment" ? (
+            ((!order.paidAt && order.status === "pending_payment") ||
+              (Boolean(order.paidAt) && orderHasUnpaidItems(order))) ? (
               <div className="space-y-2 border-t border-stone-100 pt-3">
                 <button
                   type="button"
@@ -2892,7 +2913,11 @@ function OrderDetailsBody({
                   onClick={() => void markSalePaid()}
                   className="flex w-full items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 py-2 text-sm font-medium text-emerald-800 transition-colors hover:bg-emerald-100 disabled:opacity-50"
                 >
-                  {markingPaid ? "Marcando…" : "Marcar como paga"}
+                  {markingPaid
+                    ? "Marcando…"
+                    : order.paidAt
+                      ? "Confirmar pagamento das peças em aberto"
+                      : "Marcar como paga"}
                 </button>
                 {markPaidError ? (
                   <p className="text-xs text-red-600">{markPaidError}</p>
