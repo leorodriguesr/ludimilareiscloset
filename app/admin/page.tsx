@@ -42,7 +42,7 @@ const ADMIN_NAV_GROUPS: {
       { id: "products", label: "Produtos" },
       { id: "sales", label: "Vendas" },
       { id: "shipping", label: "Envios" },
-      { id: "exchanges", label: "Trocas" },
+      // { id: "exchanges", label: "Trocas" },
     ],
   },
   {
