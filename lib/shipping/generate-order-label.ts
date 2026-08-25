@@ -21,6 +21,7 @@ import {
 } from "@/lib/shipping/melhor-envio/label";
 import type { MelhorEnvioQuotePackage } from "@/lib/shipping/melhor-envio/quote";
 import {
+  isCancelledProviderShipmentStatus,
   mapSuperfreteStatusToShippingStatus,
   parseSuperfreteServiceId,
   resolveOrderShippingServiceId,
@@ -400,7 +401,8 @@ export async function generateOrderLabel(orderId: string) {
   }
 
   const labelCancelled =
-    order.shippingStatus === "cancelled" || order.superfreteStatus === "cancelled";
+    order.shippingStatus === "cancelled" ||
+    isCancelledProviderShipmentStatus(order.superfreteStatus);
 
   if (labelCancelled) {
     await prisma.order.update({
@@ -514,6 +516,17 @@ export async function generateOrderLabel(orderId: string) {
   };
 }
 
+function cancelledLabelClearData() {
+  return {
+    superfreteStatus: "cancelled",
+    shippingStatus: "cancelled" as const,
+    superfreteShipmentId: null,
+    labelUrl: null,
+    trackingCode: null,
+    labelGeneratedAt: null,
+  };
+}
+
 export async function syncOrderShipmentFromSuperfrete(
   orderId: string,
   options?: {
@@ -545,6 +558,14 @@ export async function syncOrderShipmentFromSuperfrete(
   const shipmentId = order.superfreteShipmentId;
   let info = await fetchInfoForProvider(provider, shipmentId);
 
+  if (isCancelledProviderShipmentStatus(info.status)) {
+    await prisma.order.update({
+      where: { id: orderId },
+      data: cancelledLabelClearData(),
+    });
+    return { ...info, status: "cancelled", labelUrl: null, tracking: null };
+  }
+
   if (options?.tryCheckout !== false && info.status === "pending") {
     try {
       await checkoutForProvider(provider, [shipmentId]);
@@ -557,12 +578,20 @@ export async function syncOrderShipmentFromSuperfrete(
     }
   }
 
+  if (isCancelledProviderShipmentStatus(info.status)) {
+    await prisma.order.update({
+      where: { id: orderId },
+      data: cancelledLabelClearData(),
+    });
+    return { ...info, status: "cancelled", labelUrl: null, tracking: null };
+  }
+
   // Melhor Envio: generate + print liberam o código de rastreio.
   // Antes o print vinha DEPOIS do poll — por isso o rastreio só aparecia no sync manual.
   if (
     provider === SHIPPING_PROVIDERS.MELHOR_ENVIO &&
     info.status !== "pending" &&
-    info.status !== "cancelled"
+    !isCancelledProviderShipmentStatus(info.status)
   ) {
     try {
       const { generateMelhorEnvioLabels } = await import(
@@ -578,7 +607,7 @@ export async function syncOrderShipmentFromSuperfrete(
   if (
     !labelUrl &&
     info.status !== "pending" &&
-    info.status !== "cancelled" &&
+    !isCancelledProviderShipmentStatus(info.status) &&
     info.status !== "unknown"
   ) {
     try {
@@ -595,18 +624,31 @@ export async function syncOrderShipmentFromSuperfrete(
     info = await fetchInfoForProvider(provider, shipmentId);
   }
 
-  if (options?.pollTracking && !info.tracking && info.status !== "pending") {
+  if (
+    options?.pollTracking &&
+    !info.tracking &&
+    info.status !== "pending" &&
+    !isCancelledProviderShipmentStatus(info.status)
+  ) {
     info = await fetchInfoWithPollForProvider(provider, shipmentId, {
       maxWaitMs: options.maxWaitMs ?? 12_000,
       intervalMs: 1500,
     });
   }
 
+  if (isCancelledProviderShipmentStatus(info.status)) {
+    await prisma.order.update({
+      where: { id: orderId },
+      data: cancelledLabelClearData(),
+    });
+    return { ...info, status: "cancelled", labelUrl: null, tracking: null };
+  }
+
   const mappedStatus = mapSuperfreteStatusToShippingStatus(info.status);
-  // Etiqueta ativa não pode permanecer "cancelled" no pedido.
   const nextShippingStatus =
     mappedStatus ??
-    (order.shippingStatus === "cancelled" && info.status !== "cancelled"
+    (order.shippingStatus === "cancelled" &&
+    !isCancelledProviderShipmentStatus(info.status)
       ? "packed"
       : null);
 
@@ -656,14 +698,7 @@ export async function cancelOrderLabel(orderId: string, reason?: string) {
 
   await prisma.order.update({
     where: { id: orderId },
-    data: {
-      superfreteStatus: "cancelled",
-      shippingStatus: "cancelled",
-      superfreteShipmentId: null,
-      labelUrl: null,
-      trackingCode: null,
-      labelGeneratedAt: null,
-    },
+    data: cancelledLabelClearData(),
   });
 }
 

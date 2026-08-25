@@ -50,10 +50,51 @@ export const SUPERFRETE_STATUS_LABELS: Record<string, string> = {
   posted: "Postado",
   delivered: "Entregue",
   cancelled: "Cancelado",
+  canceled: "Cancelado",
   undelivered: "Não entregue",
   paused: "Pausado",
   suspended: "Suspenso",
 };
+
+/** Melhor Envio usa `canceled`; internamente gravamos `cancelled`. */
+export function normalizeProviderShipmentStatus(
+  status: string | null | undefined
+): string {
+  const raw = (status ?? "").trim().toLowerCase();
+  if (!raw) return "unknown";
+  if (raw === "canceled" || raw === "cancelled") return "cancelled";
+  if (raw === "not delivered" || raw === "not_delivered") return "undelivered";
+  return raw;
+}
+
+export function isCancelledProviderShipmentStatus(
+  status: string | null | undefined
+): boolean {
+  return normalizeProviderShipmentStatus(status) === "cancelled";
+}
+
+function hasProviderTimestamp(value: unknown): boolean {
+  if (value == null) return false;
+  const text = String(value).trim();
+  return text !== "" && text.toLowerCase() !== "null";
+}
+
+/** Status a partir do payload (inclui `canceled_at` do Melhor Envio). */
+export function providerShipmentStatusFromPayload(payload: {
+  status?: unknown;
+  canceled_at?: unknown;
+  cancelled_at?: unknown;
+}): string {
+  if (
+    hasProviderTimestamp(payload.canceled_at) ||
+    hasProviderTimestamp(payload.cancelled_at)
+  ) {
+    return "cancelled";
+  }
+  return normalizeProviderShipmentStatus(
+    typeof payload.status === "string" ? payload.status : undefined
+  );
+}
 
 /**
  * Mapeia status bruto do provedor (SuperFrete/Melhor Envio) para `shippingStatus`.
@@ -62,7 +103,7 @@ export const SUPERFRETE_STATUS_LABELS: Record<string, string> = {
 export function mapSuperfreteStatusToShippingStatus(
   sfStatus: string | null | undefined
 ): "to_pack" | "packed" | "shipped" | "delivered" | "cancelled" | null {
-  switch (sfStatus) {
+  switch (normalizeProviderShipmentStatus(sfStatus)) {
     case "posted":
       return "shipped";
     case "delivered":

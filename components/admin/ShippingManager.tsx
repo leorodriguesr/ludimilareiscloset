@@ -13,6 +13,7 @@ import { createPortal } from "react-dom";
 import Image from "next/image";
 import { formatPrice } from "@/lib/format";
 import { formatDeliveryDaysLabel } from "@/lib/shipping/delivery-days-label";
+import { isCancelledProviderShipmentStatus } from "@/lib/shipping/service-id";
 import { shippingTrackingUrl } from "@/lib/shipping/tracking-url";
 import type { NormalizedShippingOption } from "@/lib/shipping/types";
 import { orderCustomerDisplayName } from "@/lib/admin-sale/customer-display";
@@ -1419,14 +1420,30 @@ function useShipmentActions(
         }
       }
       if (key === "sync") {
-        if (tracking) patch.trackingCode = tracking;
-        if (data.labelUrl !== undefined) patch.labelUrl = data.labelUrl || null;
-        if (data.shippingStatus) patch.shippingStatus = data.shippingStatus;
-        if (data.superfreteStatus || data.status) {
-          patch.superfreteStatus = data.superfreteStatus ?? data.status ?? null;
-        }
-        if (data.superfreteShipmentId !== undefined) {
-          patch.superfreteShipmentId = data.superfreteShipmentId;
+        const syncedCancelled =
+          data.shippingStatus === "cancelled" ||
+          isCancelledProviderShipmentStatus(
+            data.superfreteStatus ?? data.status
+          );
+        if (syncedCancelled) {
+          patch.shippingStatus = "cancelled";
+          patch.superfreteStatus = "cancelled";
+          patch.superfreteShipmentId = null;
+          patch.labelUrl = null;
+          patch.trackingCode = null;
+          patch.labelGeneratedAt = null;
+          setLocalTracking(null);
+          setAwaitingTracking(false);
+        } else {
+          if (tracking) patch.trackingCode = tracking;
+          if (data.labelUrl !== undefined) patch.labelUrl = data.labelUrl || null;
+          if (data.shippingStatus) patch.shippingStatus = data.shippingStatus;
+          if (data.superfreteStatus || data.status) {
+            patch.superfreteStatus = data.superfreteStatus ?? data.status ?? null;
+          }
+          if (data.superfreteShipmentId !== undefined) {
+            patch.superfreteShipmentId = data.superfreteShipmentId;
+          }
         }
       }
       if (Object.keys(patch).length > 0) {
@@ -1490,7 +1507,13 @@ function shipmentCapabilities(order: ShipmentOrder, trackingCode?: string | null
         shippingStatus: order.shippingStatus,
         trackingCode: effectiveTracking,
       }),
-    canGenerateLabel: !order.labelUrl && !isSaleCancelled && !isArranged && !hasUnpaidItems,
+    canGenerateLabel:
+      !isSaleCancelled &&
+      !isArranged &&
+      !hasUnpaidItems &&
+      (!order.labelUrl ||
+        order.shippingStatus === "cancelled" ||
+        isCancelledProviderShipmentStatus(order.superfreteStatus)),
     hasUnpaidItems,
     labelAutoGenerateFailed: hasLabelAutoGenerateError(order),
     labelAutoGenerateTitle: labelAutoGenerateErrorTooltip(order),

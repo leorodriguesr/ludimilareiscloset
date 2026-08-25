@@ -12,6 +12,10 @@ import {
   meAsRecord,
   meNum,
 } from "@/lib/shipping/melhor-envio/client";
+import {
+  isCancelledProviderShipmentStatus,
+  providerShipmentStatusFromPayload,
+} from "@/lib/shipping/service-id";
 import { ShippingQuoteError } from "@/lib/shipping/types";
 import type { MelhorEnvioQuotePackage } from "@/lib/shipping/melhor-envio/quote";
 
@@ -220,6 +224,22 @@ export async function printMelhorEnvioLabel(
   return url;
 }
 
+function orderInfoFromMelhorEnvioPayload(
+  shipmentId: string,
+  info: Record<string, unknown>
+): SuperfreteOrderInfo {
+  return {
+    id: String(info.id ?? shipmentId),
+    status: providerShipmentStatusFromPayload(info),
+    tracking: extractMelhorEnvioTracking(info),
+    price: meNum(info.price),
+    serviceId: meNum(info.service_id ?? info.serviceId),
+    deliveryMin: meNum(info.delivery_min ?? info.deliveryMin),
+    deliveryMax: meNum(info.delivery_max ?? info.deliveryMax),
+    labelUrl: null,
+  };
+}
+
 export async function fetchMelhorEnvioOrderInfo(
   shipmentId: string
 ): Promise<SuperfreteOrderInfo> {
@@ -237,16 +257,36 @@ export async function fetchMelhorEnvioOrderInfo(
     );
   }
 
-  return {
-    id: String(info.id ?? shipmentId),
-    status: String(info.status ?? "unknown"),
-    tracking: extractMelhorEnvioTracking(info),
-    price: meNum(info.price),
-    serviceId: meNum(info.service_id ?? info.serviceId),
-    deliveryMin: meNum(info.delivery_min ?? info.deliveryMin),
-    deliveryMax: meNum(info.delivery_max ?? info.deliveryMax),
-    labelUrl: null,
-  };
+  let parsed = orderInfoFromMelhorEnvioPayload(shipmentId, info);
+
+  // Tracking da ME pode ficar em cache (~1h). GET /orders/{id} reflete cancelamento no painel.
+  if (!isCancelledProviderShipmentStatus(parsed.status)) {
+    try {
+      const orderRaw = await melhorEnvioRequest(
+        "GET",
+        `/api/v2/me/orders/${encodeURIComponent(shipmentId)}`
+      );
+      const orderInfo = meAsRecord(orderRaw);
+      if (orderInfo) {
+        const overlay = orderInfoFromMelhorEnvioPayload(shipmentId, orderInfo);
+        parsed = {
+          ...parsed,
+          status: overlay.status,
+          tracking: overlay.tracking ?? parsed.tracking,
+          price: overlay.price ?? parsed.price,
+          serviceId: overlay.serviceId ?? parsed.serviceId,
+          deliveryMin: overlay.deliveryMin ?? parsed.deliveryMin,
+          deliveryMax: overlay.deliveryMax ?? parsed.deliveryMax,
+        };
+      }
+    } catch (e) {
+      if (e instanceof ShippingQuoteError && (e.status === 404 || e.status === 410)) {
+        parsed = { ...parsed, status: "cancelled", tracking: null, labelUrl: null };
+      }
+    }
+  }
+
+  return parsed;
 }
 
 /** Protocolo interno ME (ORD-...) — não é código de rastreio. */
@@ -313,7 +353,12 @@ export async function fetchMelhorEnvioOrderInfoWithTrackingPoll(
 
   let info = await fetchMelhorEnvioOrderInfo(shipmentId);
   let attempt = 1;
-  while (!info.tracking && attempt < maxAttempts && Date.now() < deadline) {
+  while (
+    !info.tracking &&
+    !isCancelledProviderShipmentStatus(info.status) &&
+    attempt < maxAttempts &&
+    Date.now() < deadline
+  ) {
     await new Promise((r) => setTimeout(r, intervalMs));
     info = await fetchMelhorEnvioOrderInfo(shipmentId);
     attempt++;
@@ -334,6 +379,10 @@ export async function cancelMelhorEnvioOrder(
     const root = meAsRecord(can);
     const row = meAsRecord(root?.[shipmentId]);
     if (row && row.cancellable === false) {
+      const info = await fetchMelhorEnvioOrderInfo(shipmentId);
+      if (isCancelledProviderShipmentStatus(info.status)) {
+        return;
+      }
       throw new ShippingQuoteError(
         "VALIDATION",
         "Esta etiqueta não pode mais ser cancelada no Melhor Envio.",
@@ -345,11 +394,19 @@ export async function cancelMelhorEnvioOrder(
     if (e instanceof ShippingQuoteError && e.code === "VALIDATION") throw e;
   }
 
-  await melhorEnvioRequest("POST", "/api/v2/me/shipment/cancel", {
-    order: {
-      id: shipmentId,
-      reason_id: "2",
-      description: reason.slice(0, 255),
-    },
-  });
+  try {
+    await melhorEnvioRequest("POST", "/api/v2/me/shipment/cancel", {
+      order: {
+        id: shipmentId,
+        reason_id: "2",
+        description: reason.slice(0, 255),
+      },
+    });
+  } catch (e) {
+    const info = await fetchMelhorEnvioOrderInfo(shipmentId).catch(() => null);
+    if (info && isCancelledProviderShipmentStatus(info.status)) {
+      return;
+    }
+    throw e;
+  }
 }

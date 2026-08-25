@@ -11,6 +11,7 @@ import {
 } from "@/lib/shipping/superfrete-account";
 
 import { ShippingQuoteError } from "@/lib/shipping/types";
+import { providerShipmentStatusFromPayload } from "@/lib/shipping/service-id";
 
 export { ShippingQuoteError };
 
@@ -240,7 +241,7 @@ export async function fetchSuperfreteOrderInfo(
 
   return {
     id: String(obj.id ?? shipmentId),
-    status: String(obj.status ?? "unknown"),
+    status: providerShipmentStatusFromPayload(obj),
     tracking: extractTracking(obj),
     price: typeof obj.price === "number" ? obj.price : null,
     serviceId: Number.isFinite(serviceId) ? serviceId : null,

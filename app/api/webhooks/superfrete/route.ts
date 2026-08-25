@@ -1,7 +1,11 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { mapSuperfreteStatusToShippingStatus } from "@/lib/shipping/service-id";
+import {
+  isCancelledProviderShipmentStatus,
+  mapSuperfreteStatusToShippingStatus,
+  normalizeProviderShipmentStatus,
+} from "@/lib/shipping/service-id";
 
 type SuperfreteWebhookPayload = {
   event?: string;
@@ -90,17 +94,29 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, matched: false });
   }
 
-  const sfStatus = data.status ?? event.replace(/^order\./, "");
+  const sfStatus = normalizeProviderShipmentStatus(
+    data.status ?? event.replace(/^order\./, "")
+  );
   const mappedStatus = mapSuperfreteStatusToShippingStatus(sfStatus);
   const tracking = data.tracking?.trim() || undefined;
+  const labelCancelled = isCancelledProviderShipmentStatus(sfStatus);
 
-  const updates: Record<string, unknown> = {
-    superfreteStatus: sfStatus || undefined,
-    ...(tracking ? { trackingCode: tracking } : {}),
-    ...(mappedStatus ? { shippingStatus: mappedStatus } : {}),
-  };
+  const updates: Record<string, unknown> = labelCancelled
+    ? {
+        superfreteStatus: "cancelled",
+        shippingStatus: "cancelled",
+        superfreteShipmentId: null,
+        labelUrl: null,
+        trackingCode: null,
+        labelGeneratedAt: null,
+      }
+    : {
+        superfreteStatus: sfStatus || undefined,
+        ...(tracking ? { trackingCode: tracking } : {}),
+        ...(mappedStatus ? { shippingStatus: mappedStatus } : {}),
+      };
 
-  if (data.id) {
+  if (!labelCancelled && data.id) {
     updates.superfreteShipmentId = data.id;
   }
 

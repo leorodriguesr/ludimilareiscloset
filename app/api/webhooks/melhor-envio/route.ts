@@ -2,7 +2,11 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { isMelhorEnvioProtocolCode } from "@/lib/shipping/melhor-envio/label";
-import { mapSuperfreteStatusToShippingStatus } from "@/lib/shipping/service-id";
+import {
+  isCancelledProviderShipmentStatus,
+  mapSuperfreteStatusToShippingStatus,
+  providerShipmentStatusFromPayload,
+} from "@/lib/shipping/service-id";
 import { SHIPPING_PROVIDERS } from "@/lib/shipping/providers";
 
 type MeWebhookPayload = {
@@ -12,6 +16,8 @@ type MeWebhookPayload = {
     status?: string;
     tracking?: string | null;
     tracking_url?: string | null;
+    canceled_at?: string | null;
+    cancelled_at?: string | null;
     tags?: { tag?: string; url?: string }[];
   };
 };
@@ -121,8 +127,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "missing data" }, { status: 200 });
   }
 
-  const meStatus = data.status ?? event.replace(/^order\./, "");
-  const mappedStatus = mapSuperfreteStatusToShippingStatus(meStatus);
+  const meStatus = providerShipmentStatusFromPayload({
+    status: data.status ?? event.replace(/^order\./, ""),
+    canceled_at: data.canceled_at,
+    cancelled_at: data.cancelled_at,
+  });
+  const labelCancelled =
+    isCancelledProviderShipmentStatus(meStatus) || event === "order.cancelled";
+  const mappedStatus = labelCancelled
+    ? "cancelled"
+    : mapSuperfreteStatusToShippingStatus(meStatus);
   const trackingRaw = data.tracking?.trim() || undefined;
   const tracking =
     trackingRaw && !isMelhorEnvioProtocolCode(trackingRaw)
@@ -132,14 +146,28 @@ export async function POST(request: NextRequest) {
 
   const orderId = await resolveOrderId(data);
   if (orderId) {
-    const updates: Record<string, unknown> = {
-      shippingProvider: SHIPPING_PROVIDERS.MELHOR_ENVIO,
-      superfreteStatus: meStatus || undefined,
-      ...(tracking ? { trackingCode: tracking } : {}),
-      ...(mappedStatus ? { shippingStatus: mappedStatus } : {}),
-    };
-    if (data.id) updates.superfreteShipmentId = data.id;
-    if (tagUrl && (event === "order.generated" || event === "order.released")) {
+    const updates: Record<string, unknown> = labelCancelled
+      ? {
+          shippingProvider: SHIPPING_PROVIDERS.MELHOR_ENVIO,
+          superfreteStatus: "cancelled",
+          shippingStatus: "cancelled",
+          superfreteShipmentId: null,
+          labelUrl: null,
+          trackingCode: null,
+          labelGeneratedAt: null,
+        }
+      : {
+          shippingProvider: SHIPPING_PROVIDERS.MELHOR_ENVIO,
+          superfreteStatus: meStatus || undefined,
+          ...(tracking ? { trackingCode: tracking } : {}),
+          ...(mappedStatus ? { shippingStatus: mappedStatus } : {}),
+        };
+    if (!labelCancelled && data.id) updates.superfreteShipmentId = data.id;
+    if (
+      !labelCancelled &&
+      tagUrl &&
+      (event === "order.generated" || event === "order.released")
+    ) {
       updates.labelUrl = tagUrl;
       updates.labelGeneratedAt = new Date();
     }
@@ -158,19 +186,28 @@ export async function POST(request: NextRequest) {
     const shippingStatus =
       mappedStatus === "shipped" || mappedStatus === "delivered"
         ? mappedStatus
-        : meStatus === "cancelled"
+        : labelCancelled || meStatus === "cancelled"
           ? "cancelled"
           : "labeled";
 
     try {
       await prisma.exchangeShipping.update({
         where: { id: exchangeShippingId },
-        data: {
-          superfreteStatus: meStatus || undefined,
-          ...(tracking ? { trackingCode: tracking } : {}),
-          shippingStatus,
-          ...(tagUrl ? { labelUrl: tagUrl, labelGeneratedAt: new Date() } : {}),
-        },
+        data: labelCancelled
+          ? {
+              superfreteStatus: "cancelled",
+              shippingStatus: "cancelled",
+              superfreteShipmentId: null,
+              labelUrl: null,
+              trackingCode: null,
+              labelGeneratedAt: null,
+            }
+          : {
+              superfreteStatus: meStatus || undefined,
+              ...(tracking ? { trackingCode: tracking } : {}),
+              shippingStatus,
+              ...(tagUrl ? { labelUrl: tagUrl, labelGeneratedAt: new Date() } : {}),
+            },
       });
       return NextResponse.json({
         ok: true,
