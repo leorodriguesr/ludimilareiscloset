@@ -128,12 +128,12 @@ const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "cancelled", label: "Etiqueta cancelada" },
 ];
 
-type ShippingTone = "amber" | "blue" | "emerald" | "red";
+type ShippingTone = "amber" | "stone" | "blue" | "emerald" | "red";
 
 const SHIPPING_STATUS = [
   { value: "to_pack", label: "Por embalar", tone: "amber" },
-  { value: "packed", label: "Por enviar", tone: "blue" },
-  { value: "shipped", label: "Enviado", tone: "emerald" },
+  { value: "packed", label: "Por enviar", tone: "stone" },
+  { value: "shipped", label: "Enviado", tone: "blue" },
   { value: "delivered", label: "Entregue", tone: "emerald" },
   { value: "cancelled", label: "Cancelado", tone: "red" },
 ] as const satisfies ReadonlyArray<{ value: string; label: string; tone: ShippingTone }>;
@@ -437,6 +437,7 @@ function shippingStatusIcon(status: string) {
 
 const SHIPPING_TONE_CLASS: Record<ShippingTone, string> = {
   amber: "bg-amber-50 text-amber-800 ring-amber-200",
+  stone: "bg-stone-50 text-stone-700 ring-stone-200",
   blue: "bg-blue-50 text-blue-900 ring-blue-200",
   emerald: "bg-emerald-50 text-emerald-700 ring-emerald-200",
   red: "bg-red-50 text-red-700 ring-red-200",
