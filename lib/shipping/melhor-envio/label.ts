@@ -13,6 +13,7 @@ import {
   meNum,
 } from "@/lib/shipping/melhor-envio/client";
 import {
+  coalesceProviderShipmentStatus,
   isCancelledProviderShipmentStatus,
   providerShipmentStatusFromPayload,
 } from "@/lib/shipping/service-id";
@@ -224,13 +225,27 @@ export async function printMelhorEnvioLabel(
   return url;
 }
 
+function statusFromMelhorEnvioInfo(info: Record<string, unknown>): string {
+  const nestedTracking = meAsRecord(info.tracking);
+  return coalesceProviderShipmentStatus(
+    providerShipmentStatusFromPayload({
+      status: info.status,
+      canceled_at: info.canceled_at,
+      cancelled_at: info.cancelled_at,
+      delivered_at: info.delivered_at,
+    }),
+    typeof nestedTracking?.status === "string" ? nestedTracking.status : undefined,
+    typeof info.situation === "string" ? info.situation : undefined
+  );
+}
+
 function orderInfoFromMelhorEnvioPayload(
   shipmentId: string,
   info: Record<string, unknown>
 ): SuperfreteOrderInfo {
   return {
     id: String(info.id ?? shipmentId),
-    status: providerShipmentStatusFromPayload(info),
+    status: statusFromMelhorEnvioInfo(info),
     tracking: extractMelhorEnvioTracking(info),
     price: meNum(info.price),
     serviceId: meNum(info.service_id ?? info.serviceId),
@@ -271,7 +286,7 @@ export async function fetchMelhorEnvioOrderInfo(
         const overlay = orderInfoFromMelhorEnvioPayload(shipmentId, orderInfo);
         parsed = {
           ...parsed,
-          status: overlay.status,
+          status: coalesceProviderShipmentStatus(parsed.status, overlay.status),
           tracking: overlay.tracking ?? parsed.tracking,
           price: overlay.price ?? parsed.price,
           serviceId: overlay.serviceId ?? parsed.serviceId,

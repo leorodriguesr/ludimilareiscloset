@@ -19,6 +19,7 @@ import type { NormalizedShippingOption } from "@/lib/shipping/types";
 import { orderCustomerDisplayName } from "@/lib/admin-sale/customer-display";
 import {
   arrangedDeliveryLabelFromServiceName,
+  isInsideDelivery,
   orderDeliveryUserNotes,
   resolveArrangedDeliveryDisplay,
   splitArrangedDeliveryNotes,
@@ -29,7 +30,6 @@ import {
   labelAutoGenerateErrorTooltip,
   LabelAutoGenerateWarningIcon,
 } from "@/components/admin/LabelPendingBanner";
-import { canManuallyMarkCarrierAsShipped } from "@/lib/fulfillment/shipping-status-policy";
 import {
   orderItemDisplayImageUrl,
   orderItemDisplayName,
@@ -1396,8 +1396,8 @@ function useShipmentActions(
 
       const patch: Partial<ShipmentOrder> = {};
       if (key === "pack") patch.shippingStatus = "packed";
-      if (key === "shipped" || key === "shipped-manual") {
-        patch.shippingStatus = "shipped";
+      if (key === "arranged-delivered") {
+        patch.shippingStatus = "delivered";
       }
       if (key === "cancel") {
         patch.shippingStatus = "cancelled";
@@ -1480,12 +1480,16 @@ function orderHasUnpaidItems(order: ShipmentOrder): boolean {
   return (order.items ?? []).some(shipmentItemIsUnpaid);
 }
 
-function shipmentCapabilities(order: ShipmentOrder, trackingCode?: string | null) {
+function shipmentCapabilities(order: ShipmentOrder) {
   const isArranged = order.fulfillmentType === "ARRANGED";
   const isSaleCancelled = order.status === "cancelled";
   const isPaid = Boolean(order.paidAt);
-  const effectiveTracking = trackingCode ?? order.trackingCode;
   const hasUnpaidItems = orderHasUnpaidItems(order);
+  const insideDelivery = isInsideDelivery({
+    fulfillmentType: order.fulfillmentType,
+    shippingServiceName: order.shippingServiceName,
+    deliveryNotes: order.deliveryNotes,
+  });
 
   return {
     isArranged,
@@ -1493,20 +1497,12 @@ function shipmentCapabilities(order: ShipmentOrder, trackingCode?: string | null
     canSelectForBulk: !order.labelUrl && !isSaleCancelled && !isArranged && !hasUnpaidItems,
     canChangeShipping: !order.labelUrl && !order.superfreteShipmentId && !isSaleCancelled && !isArranged,
     canMarkPacked: isPaid && !isSaleCancelled && !hasUnpaidItems && order.shippingStatus === "to_pack",
-    canMarkArrangedShipped:
-      isArranged &&
+    canMarkArrangedDelivered:
+      insideDelivery &&
+      isPaid &&
       !isSaleCancelled &&
       !hasUnpaidItems &&
-      order.shippingStatus !== "shipped" &&
       order.shippingStatus !== "delivered",
-    canMarkCarrierShipped:
-      !isSaleCancelled &&
-      !hasUnpaidItems &&
-      canManuallyMarkCarrierAsShipped({
-        fulfillmentType: order.fulfillmentType,
-        shippingStatus: order.shippingStatus,
-        trackingCode: effectiveTracking,
-      }),
     canGenerateLabel:
       !isSaleCancelled &&
       !isArranged &&
@@ -1547,7 +1543,7 @@ function ShipmentRowActionsMenu({
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [mounted, setMounted] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
-  const caps = shipmentCapabilities(order, trackingCode);
+  const caps = shipmentCapabilities(order);
 
   useEffect(() => setMounted(true), []);
 
@@ -1684,31 +1680,21 @@ function ShipmentRowActionsMenu({
       });
     }
 
-    if (caps.canMarkArrangedShipped) {
+    if (caps.canMarkArrangedDelivered) {
       items.push({
-        id: "shipped",
-        label: busy === "shipped" ? "Salvando…" : "Marcar enviado",
+        id: "arranged-delivered",
+        label: busy === "arranged-delivered" ? "Salvando…" : "Marcar como entregue",
         separatorBefore: items.length > 0,
-        disabled: busy === "shipped",
-        icon: <TruckIcon className="h-[18px] w-[18px]" />,
-        onClick: () => void runAction("shipped", `/api/admin/sales/${order.id}/mark-shipped`),
-      });
-    }
-
-    if (caps.canMarkCarrierShipped) {
-      items.push({
-        id: "shipped-manual",
-        label: busy === "shipped-manual" ? "Salvando…" : "Marcar enviado",
-        separatorBefore: items.length > 0,
-        disabled: busy === "shipped-manual",
-        icon: <TruckIcon className="h-[18px] w-[18px]" />,
+        disabled: busy === "arranged-delivered",
+        icon: (
+          <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          </svg>
+        ),
         onClick: () =>
           void runAction(
-            "shipped-manual",
-            `/api/admin/orders/${order.id}`,
-            "PATCH",
-            { shippingStatus: "shipped" },
-            { openPdf: false }
+            "arranged-delivered",
+            `/api/admin/sales/${order.id}/mark-shipped`
           ),
       });
     }
@@ -1773,8 +1759,7 @@ function ShipmentRowActionsMenu({
     busy,
     caps.canChangeShipping,
     caps.canGenerateLabel,
-    caps.canMarkArrangedShipped,
-    caps.canMarkCarrierShipped,
+    caps.canMarkArrangedDelivered,
     caps.canMarkPacked,
     onChangeShipping,
     onViewPacking,

@@ -64,6 +64,7 @@ export function normalizeProviderShipmentStatus(
   if (!raw) return "unknown";
   if (raw === "canceled" || raw === "cancelled") return "cancelled";
   if (raw === "not delivered" || raw === "not_delivered") return "undelivered";
+  if (raw === "entregue" || raw === "delivered") return "delivered";
   return raw;
 }
 
@@ -84,6 +85,7 @@ export function providerShipmentStatusFromPayload(payload: {
   status?: unknown;
   canceled_at?: unknown;
   cancelled_at?: unknown;
+  delivered_at?: unknown;
 }): string {
   if (
     hasProviderTimestamp(payload.canceled_at) ||
@@ -91,9 +93,67 @@ export function providerShipmentStatusFromPayload(payload: {
   ) {
     return "cancelled";
   }
+  if (hasProviderTimestamp(payload.delivered_at)) {
+    return "delivered";
+  }
   return normalizeProviderShipmentStatus(
     typeof payload.status === "string" ? payload.status : undefined
   );
+}
+
+const PROVIDER_STATUS_RANK: Record<string, number> = {
+  pending: 1,
+  released: 2,
+  generated: 2,
+  paused: 2,
+  suspended: 2,
+  posted: 3,
+  undelivered: 3,
+  delivered: 4,
+  cancelled: 10,
+};
+
+/** Escolhe o status mais avançado entre várias fontes (webhook event + payload, tracking + GET). */
+export function coalesceProviderShipmentStatus(
+  ...values: Array<string | null | undefined>
+): string {
+  let best = "unknown";
+  let bestRank = -1;
+  for (const value of values) {
+    const normalized = normalizeProviderShipmentStatus(value);
+    if (normalized === "unknown") continue;
+    const rank = PROVIDER_STATUS_RANK[normalized] ?? 0;
+    if (rank >= bestRank) {
+      best = normalized;
+      bestRank = rank;
+    }
+  }
+  return best;
+}
+
+const SHIPPING_STATUS_RANK: Record<string, number> = {
+  to_pack: 0,
+  packed: 1,
+  shipped: 2,
+  delivered: 3,
+};
+
+/**
+ * Evita rebaixar um pedido já entregue quando o provedor reenvia `posted`.
+ * Cancelamento sempre aplica.
+ */
+export function mergeShippingStatusFromProvider(
+  current: string | null | undefined,
+  mapped: "to_pack" | "packed" | "shipped" | "delivered" | "cancelled" | null
+): "to_pack" | "packed" | "shipped" | "delivered" | "cancelled" | null {
+  if (!mapped) return null;
+  if (mapped === "cancelled") return "cancelled";
+  const currentRank = SHIPPING_STATUS_RANK[current ?? ""];
+  const nextRank = SHIPPING_STATUS_RANK[mapped];
+  if (currentRank != null && nextRank != null && nextRank < currentRank) {
+    return null;
+  }
+  return mapped;
 }
 
 /**

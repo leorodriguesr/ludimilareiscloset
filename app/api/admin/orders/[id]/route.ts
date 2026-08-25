@@ -71,7 +71,7 @@ export async function PATCH(
       return NextResponse.json(
         {
           error:
-            "Status de envio bloqueado: enviado/recebido são atualizados automaticamente pela SuperFrete.",
+            "Status de envio bloqueado: enviado e entregue são atualizados pelo Melhor Envio.",
         },
         { status: 400 }
       );
@@ -93,9 +93,9 @@ export async function PATCH(
         return NextResponse.json(
           {
             error:
-              s === "shipped"
-                ? "Só é possível marcar como enviado manualmente quando já houver código de rastreio."
-                : "Pedidos com transportadora só avançam para recebido via SuperFrete.",
+              s === "delivered"
+                ? "Pedidos com transportadora passam para entregue pelo Melhor Envio."
+                : "Só é possível marcar como enviado manualmente quando já houver código de rastreio.",
           },
           { status: 400 }
         );

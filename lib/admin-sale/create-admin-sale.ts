@@ -641,11 +641,14 @@ export async function markArrangedOrderShipped(input: {
   if (!order.paidAt) {
     return { ok: false, error: "O pedido precisa estar pago." };
   }
+  if (order.status === "cancelled") {
+    return { ok: false, error: "Pedido cancelado." };
+  }
 
   await prisma.order.update({
     where: { id: order.id },
     data: {
-      shippingStatus: "shipped",
+      shippingStatus: "delivered",
       arrangedShippedAt: new Date(),
       arrangedShippedByUserId: input.shippedByUserId,
     },

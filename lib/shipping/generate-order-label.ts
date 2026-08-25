@@ -21,8 +21,10 @@ import {
 } from "@/lib/shipping/melhor-envio/label";
 import type { MelhorEnvioQuotePackage } from "@/lib/shipping/melhor-envio/quote";
 import {
+  coalesceProviderShipmentStatus,
   isCancelledProviderShipmentStatus,
   mapSuperfreteStatusToShippingStatus,
+  mergeShippingStatusFromProvider,
   parseSuperfreteServiceId,
   resolveOrderShippingServiceId,
 } from "@/lib/shipping/service-id";
@@ -645,12 +647,14 @@ export async function syncOrderShipmentFromSuperfrete(
   }
 
   const mappedStatus = mapSuperfreteStatusToShippingStatus(info.status);
-  const nextShippingStatus =
+  const nextShippingStatus = mergeShippingStatusFromProvider(
+    order.shippingStatus,
     mappedStatus ??
-    (order.shippingStatus === "cancelled" &&
-    !isCancelledProviderShipmentStatus(info.status)
-      ? "packed"
-      : null);
+      (order.shippingStatus === "cancelled" &&
+      !isCancelledProviderShipmentStatus(info.status)
+        ? "packed"
+        : null)
+  );
 
   const trackingUpdate = (() => {
     // Sempre grava o rastreio da transportadora quando disponível (ex.: ME… → AD…BR).
