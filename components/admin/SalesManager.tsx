@@ -14,6 +14,8 @@ import {
 import { createPortal } from "react-dom";
 import { OrderItemsEditor } from "@/components/admin/OrderItemsEditor";
 import { formatPrice } from "@/lib/format";
+import { formatDeliveryDaysLabel } from "@/lib/shipping/delivery-days-label";
+import type { NormalizedShippingOption } from "@/lib/shipping/types";
 import type { Product } from "@/lib/types";
 import { StandaloneSaleWizard } from "@/components/admin/StandaloneSaleWizard";
 import {
@@ -25,11 +27,14 @@ import {
 import {
   composeDeliveryNotesFromUserEdit,
   orderDeliveryUserNotes,
+  parseArrangedDeliveryMode,
   resolveArrangedDeliveryDisplay,
   resolveShippingFeeDisplay,
   shippingFeeDisplayText,
   splitArrangedDeliveryNotes,
   arrangedDeliveryLabelFromServiceName,
+  ARRANGED_DELIVERY_LABELS,
+  type ArrangedDeliveryMode,
 } from "@/lib/admin-sale/arranged-delivery";
 import { OrderNotesHint } from "@/components/admin/OrderNotesHint";
 import {
@@ -1005,6 +1010,15 @@ function ExpandedSection({
     </div>
   );
 }
+
+const ARRANGED_DELIVERY_OPTIONS: {
+  id: ArrangedDeliveryMode;
+  hint?: string;
+}[] = [
+  { id: "store_delivery", hint: "Frete a combinar" },
+  { id: "pickup" },
+  { id: "uber", hint: "Frete a combinar" },
+];
 
 function PencilIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
@@ -2184,6 +2198,17 @@ function OrderDetailsBody({
   const [savingCustomer, setSavingCustomer] = useState(false);
   const [customerError, setCustomerError] = useState<string | null>(null);
   const [cepLookupError, setCepLookupError] = useState<string | null>(null);
+  const [editingDeliveryType, setEditingDeliveryType] = useState(false);
+  const [savingDeliveryType, setSavingDeliveryType] = useState(false);
+  const [deliveryTypeError, setDeliveryTypeError] = useState<string | null>(null);
+  const [pickingCarrier, setPickingCarrier] = useState(false);
+  const [quotingShipping, setQuotingShipping] = useState(false);
+  const [shippingQuoteOptions, setShippingQuoteOptions] = useState<
+    NormalizedShippingOption[]
+  >([]);
+  const [selectedShippingOptionId, setSelectedShippingOptionId] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     if (openCancelForm) {
@@ -2512,6 +2537,139 @@ function OrderDetailsBody({
   const hasAdminLinks =
     showCustomerLink || showPaymentLink || canReactivatePayment || canSwitchPayment;
   const shippingStatusInfo = sInfo(order.shippingStatus);
+  const currentArrangedMode = parseArrangedDeliveryMode({
+    shippingServiceName: order.shippingServiceName,
+    deliveryNotes: order.deliveryNotes,
+  });
+  const canEditDeliveryType =
+    order.orderSource === "ADMIN_SALE" &&
+    !isInactiveSale(order) &&
+    !order.labelUrl &&
+    !order.superfreteShipmentId &&
+    order.shippingStatus !== "shipped" &&
+    order.shippingStatus !== "delivered";
+  const showDeliveryTypePicker = canEditDeliveryType && editingDeliveryType;
+  const isCarrierDelivery = order.fulfillmentType === "CARRIER";
+
+  function resetDeliveryEditor() {
+    setEditingDeliveryType(false);
+    setPickingCarrier(false);
+    setShippingQuoteOptions([]);
+    setSelectedShippingOptionId(null);
+    setDeliveryTypeError(null);
+  }
+
+  async function saveArrangedDelivery(arrangedMode: ArrangedDeliveryMode) {
+    setSavingDeliveryType(true);
+    setDeliveryTypeError(null);
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}/shipping`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ arrangedMode }),
+      });
+      const data = (await res.json()) as {
+        error?: string;
+        fulfillmentType?: string;
+        shippingServiceName?: string | null;
+        shippingAmount?: number;
+        total?: number;
+        deliveryNotes?: string | null;
+      };
+      if (!res.ok) {
+        setDeliveryTypeError(data.error ?? "Não foi possível atualizar o tipo de entrega.");
+        return;
+      }
+      onPatchOrder(order.id, {
+        fulfillmentType: data.fulfillmentType ?? "ARRANGED",
+        shippingServiceName: data.shippingServiceName ?? null,
+        shippingAmount: data.shippingAmount ?? 0,
+        total: data.total ?? order.total,
+        deliveryNotes: data.deliveryNotes ?? null,
+        shippingProvider: null,
+      });
+      resetDeliveryEditor();
+    } catch {
+      setDeliveryTypeError("Erro de conexão.");
+    } finally {
+      setSavingDeliveryType(false);
+    }
+  }
+
+  async function loadCarrierQuotes() {
+    const cep = onlyDigits(order.destinationCep ?? "", 8);
+    if (cep.length !== 8) {
+      setDeliveryTypeError(
+        "Preencha o CEP da cliente em Dados pessoais antes de escolher o envio."
+      );
+      setPickingCarrier(true);
+      setShippingQuoteOptions([]);
+      return;
+    }
+    setPickingCarrier(true);
+    setQuotingShipping(true);
+    setDeliveryTypeError(null);
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}/shipping/quote`);
+      const data = (await res.json()) as {
+        error?: string;
+        options?: NormalizedShippingOption[];
+      };
+      if (!res.ok) {
+        setDeliveryTypeError(data.error ?? "Não foi possível cotar o frete.");
+        setShippingQuoteOptions([]);
+        return;
+      }
+      const options = data.options ?? [];
+      setShippingQuoteOptions(options);
+      setSelectedShippingOptionId(options[0]?.id ?? null);
+    } catch {
+      setDeliveryTypeError("Erro de conexão.");
+      setShippingQuoteOptions([]);
+    } finally {
+      setQuotingShipping(false);
+    }
+  }
+
+  async function saveCarrierDelivery() {
+    if (!selectedShippingOptionId) {
+      setDeliveryTypeError("Selecione uma opção de frete.");
+      return;
+    }
+    setSavingDeliveryType(true);
+    setDeliveryTypeError(null);
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}/shipping`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ optionId: selectedShippingOptionId }),
+      });
+      const data = (await res.json()) as {
+        error?: string;
+        fulfillmentType?: string;
+        shippingServiceName?: string | null;
+        shippingAmount?: number;
+        total?: number;
+        shippingProvider?: string | null;
+      };
+      if (!res.ok) {
+        setDeliveryTypeError(data.error ?? "Não foi possível salvar o envio.");
+        return;
+      }
+      onPatchOrder(order.id, {
+        fulfillmentType: data.fulfillmentType ?? "CARRIER",
+        shippingServiceName: data.shippingServiceName ?? null,
+        shippingAmount: data.shippingAmount ?? order.shippingAmount,
+        total: data.total ?? order.total,
+        shippingProvider: data.shippingProvider ?? order.shippingProvider,
+      });
+      resetDeliveryEditor();
+    } catch {
+      setDeliveryTypeError("Erro de conexão.");
+    } finally {
+      setSavingDeliveryType(false);
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -2779,22 +2937,181 @@ function OrderDetailsBody({
               ) : (
                 <p className="text-sm text-stone-400">Não informado</p>
               )}
-              {arrangedDelivery ? (
-                <p className="mt-2 text-xs text-stone-500">
-                  {arrangedDelivery.typeLabel}
-                  {arrangedDelivery.showPrice
-                    ? ` · ${order.shippingAmount > 0 ? formatPrice(order.shippingAmount) : "Grátis"}`
-                    : arrangedDelivery.typeLabel === "Entregador da loja" ||
-                        arrangedDelivery.typeLabel === "Uber"
-                      ? " · A combinar"
-                      : null}
-                </p>
-              ) : shippingMethod ? (
-                <p className="mt-2 text-xs text-stone-500">
-                  {shippingMethod}
-                  {" · "}
-                  {order.shippingAmount > 0 ? formatPrice(order.shippingAmount) : "Frete grátis"}
-                </p>
+              {canEditDeliveryType && showDeliveryTypePicker ? (
+                <div className="mt-3 space-y-2">
+                  <p className="text-xs font-medium text-stone-500">Tipo de entrega</p>
+                  <div className="space-y-1.5">
+                    {ARRANGED_DELIVERY_OPTIONS.map((option) => (
+                      <label
+                        key={option.id}
+                        className={`flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2 text-sm transition-colors ${
+                          !pickingCarrier && currentArrangedMode === option.id
+                            ? "border-sky-300 bg-sky-50"
+                            : "border-stone-200 hover:border-stone-300"
+                        } ${savingDeliveryType ? "pointer-events-none opacity-60" : ""}`}
+                      >
+                        <input
+                          type="radio"
+                          name={`delivery-type-${order.id}`}
+                          className="mt-0.5 accent-sky-600"
+                          checked={!pickingCarrier && currentArrangedMode === option.id}
+                          disabled={savingDeliveryType || quotingShipping}
+                          onChange={() => {
+                            setPickingCarrier(false);
+                            setShippingQuoteOptions([]);
+                            void saveArrangedDelivery(option.id);
+                          }}
+                        />
+                        <span>
+                          <span className="font-medium text-stone-800">
+                            {ARRANGED_DELIVERY_LABELS[option.id]}
+                          </span>
+                          {option.hint ? (
+                            <span className="block text-xs text-stone-500">{option.hint}</span>
+                          ) : null}
+                        </span>
+                      </label>
+                    ))}
+                    <label
+                      className={`flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2 text-sm transition-colors ${
+                        pickingCarrier || (!currentArrangedMode && isCarrierDelivery)
+                          ? "border-sky-300 bg-sky-50"
+                          : "border-stone-200 hover:border-stone-300"
+                      } ${savingDeliveryType ? "pointer-events-none opacity-60" : ""}`}
+                    >
+                      <input
+                        type="radio"
+                        name={`delivery-type-${order.id}`}
+                        className="mt-0.5 accent-sky-600"
+                        checked={pickingCarrier || (!currentArrangedMode && isCarrierDelivery)}
+                        disabled={savingDeliveryType || quotingShipping}
+                        onChange={() => void loadCarrierQuotes()}
+                      />
+                      <span>
+                        <span className="font-medium text-stone-800">Envio</span>
+                        <span className="block text-xs text-stone-500">
+                          Transportadora com valor de frete
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                  {pickingCarrier ? (
+                    <div className="space-y-2 rounded-lg border border-stone-200 bg-stone-50 p-3">
+                      {quotingShipping ? (
+                        <p className="text-xs text-stone-500">Consultando opções de frete…</p>
+                      ) : shippingQuoteOptions.length > 0 ? (
+                        <ul className="space-y-1.5">
+                          {shippingQuoteOptions.map((opt) => (
+                            <li key={opt.id}>
+                              <label
+                                className={`flex cursor-pointer items-start justify-between gap-3 rounded-lg border bg-white px-3 py-2 text-sm ${
+                                  selectedShippingOptionId === opt.id
+                                    ? "border-sky-300"
+                                    : "border-stone-200"
+                                }`}
+                              >
+                                <span className="flex min-w-0 items-start gap-2">
+                                  <input
+                                    type="radio"
+                                    name={`carrier-option-${order.id}`}
+                                    className="mt-0.5 accent-sky-600"
+                                    checked={selectedShippingOptionId === opt.id}
+                                    onChange={() => setSelectedShippingOptionId(opt.id)}
+                                  />
+                                  <span>
+                                    <span className="font-medium text-stone-800">
+                                      {opt.carrierName} — {opt.serviceName}
+                                    </span>
+                                    <span className="block text-xs text-stone-500">
+                                      {formatDeliveryDaysLabel(
+                                        opt.deliveryDaysMin,
+                                        opt.deliveryDaysMax
+                                      )}
+                                    </span>
+                                  </span>
+                                </span>
+                                <span className="shrink-0 font-semibold tabular-nums text-stone-900">
+                                  {formatPrice(opt.price)}
+                                </span>
+                              </label>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-xs text-stone-500">
+                          Nenhuma opção de frete disponível para este CEP.
+                        </p>
+                      )}
+                      <button
+                        type="button"
+                        disabled={
+                          savingDeliveryType ||
+                          quotingShipping ||
+                          !selectedShippingOptionId
+                        }
+                        onClick={() => void saveCarrierDelivery()}
+                        className="w-full rounded-lg bg-stone-900 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50"
+                      >
+                        {savingDeliveryType ? "Salvando…" : "Confirmar envio"}
+                      </button>
+                    </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={savingDeliveryType}
+                    onClick={() => resetDeliveryEditor()}
+                    className="text-xs font-medium text-stone-500 hover:text-stone-800 disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  {deliveryTypeError ? (
+                    <p className="text-xs text-red-600">{deliveryTypeError}</p>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="mt-2 flex items-start justify-between gap-2">
+                  {arrangedDelivery ? (
+                    <p className="text-xs text-stone-500">
+                      {arrangedDelivery.typeLabel}
+                      {arrangedDelivery.showPrice
+                        ? ` · ${order.shippingAmount > 0 ? formatPrice(order.shippingAmount) : "Grátis"}`
+                        : arrangedDelivery.typeLabel === "Entregador da loja" ||
+                            arrangedDelivery.typeLabel === "Uber"
+                          ? " · A combinar"
+                          : null}
+                    </p>
+                  ) : shippingMethod ? (
+                    <p className="text-xs text-stone-500">
+                      {shippingMethod}
+                      {" · "}
+                      {order.shippingAmount > 0
+                        ? formatPrice(order.shippingAmount)
+                        : "Frete grátis"}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-stone-400">Tipo de entrega não definido</p>
+                  )}
+                  {canEditDeliveryType ? (
+                    <button
+                      type="button"
+                      disabled={savingDeliveryType}
+                      onClick={() => {
+                        setDeliveryTypeError(null);
+                        setPickingCarrier(isCarrierDelivery);
+                        setEditingDeliveryType(true);
+                        if (order.fulfillmentType === "CARRIER") {
+                          void loadCarrierQuotes();
+                        }
+                      }}
+                      className="shrink-0 text-xs font-medium text-stone-500 hover:text-stone-800 disabled:opacity-50"
+                    >
+                      Alterar
+                    </button>
+                  ) : null}
+                </div>
+              )}
+              {canEditDeliveryType && !showDeliveryTypePicker && deliveryTypeError ? (
+                <p className="mt-1 text-xs text-red-600">{deliveryTypeError}</p>
               ) : null}
             </div>
 

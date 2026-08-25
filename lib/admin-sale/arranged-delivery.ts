@@ -22,6 +22,20 @@ export function arrangedDeliveryLabelFromServiceName(
   return LABEL_VALUES.has(name) ? name : name;
 }
 
+export function parseArrangedDeliveryMode(input: {
+  shippingServiceName?: string | null;
+  deliveryNotes?: string | null;
+}): ArrangedDeliveryMode | null {
+  const fromService = arrangedDeliveryLabelFromServiceName(input.shippingServiceName);
+  const fromNotes = splitArrangedDeliveryNotes(input.deliveryNotes).systemLabel;
+  const label = fromService ?? fromNotes;
+  if (!label) return null;
+  for (const [mode, text] of Object.entries(ARRANGED_DELIVERY_LABELS)) {
+    if (text === label) return mode as ArrangedDeliveryMode;
+  }
+  return null;
+}
+
 export function splitArrangedDeliveryNotes(deliveryNotes: string | null | undefined): {
   systemLabel: string | null;
   userNotes: string | null;
