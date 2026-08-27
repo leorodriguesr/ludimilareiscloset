@@ -136,6 +136,7 @@ enum ExchangeBalanceStatus {
 enum ExchangeEventType {
   CREATED
   REVERSE_LABEL_GENERATED
+  RETURN_MANUAL_REGISTERED
   RETURN_POSTED
   RECEIVED
   INSPECTED
@@ -334,6 +335,9 @@ model Exchange {
   productsDelta        Float @default(0)
   /** Fretes cobrados do cliente nesta troca. */
   shippingCustomerTotal Float @default(0)
+  /** Ajuste manual no saldo (positivo = cobrar; negativo = restituir). */
+  balanceAdjustmentAmount Float @default(0)
+  balanceAdjustmentReason String?
   /** Saldo: positivo = cliente deve; negativo = crédito. */
   balanceAmount        Float @default(0)
   balanceStatus        ExchangeBalanceStatus @default(NONE)
@@ -394,6 +398,9 @@ model ExchangeShipping {
   cost                  Float?
   paidBy                ExchangeShippingPaidBy @default(STORE)
   trackingCode          String?
+  postingLocationName   String?
+  postingLocationAddress String?
+  manualConfiguredAt    DateTime?
   superfreteShipmentId  String?
   superfreteStatus      String?
   labelUrl              String?

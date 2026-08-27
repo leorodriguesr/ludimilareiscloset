@@ -36,6 +36,7 @@ export async function GET(request: NextRequest) {
             orderNumber: true,
             recipientName: true,
             email: true,
+            destinationCep: true,
             fulfillmentType: true,
             shippingServiceName: true,
             deliveryNotes: true,
@@ -78,6 +79,26 @@ export async function POST(request: NextRequest) {
           return {
             orderItemId: String(r.orderItemId ?? ""),
             quantity: Math.floor(Number(r.quantity)),
+            pieceSelections: Array.isArray(r.pieceSelections)
+              ? r.pieceSelections
+                  .map((row) => {
+                    if (!row || typeof row !== "object") return null;
+                    const p = row as Record<string, unknown>;
+                    if (typeof p.pieceName !== "string") return null;
+                    return {
+                      pieceName: p.pieceName,
+                      size: typeof p.size === "string" ? p.size : null,
+                      color: typeof p.color === "string" ? p.color : null,
+                    };
+                  })
+                  .filter(
+                    (x): x is {
+                      pieceName: string;
+                      size: string | null;
+                      color: string | null;
+                    } => x != null
+                  )
+              : undefined,
           };
         })
       : [];
@@ -157,6 +178,12 @@ export async function POST(request: NextRequest) {
     const kind: ExchangeKind =
       b.kind === "RETURN" ? "RETURN" : "EXCHANGE";
 
+    const refundRaw = b.refundAmount;
+    const refundAmount =
+      refundRaw == null || refundRaw === ""
+        ? null
+        : Number(refundRaw);
+
     const exchange = await createExchange({
       orderId: String(b.orderId ?? ""),
       kind,
@@ -167,6 +194,7 @@ export async function POST(request: NextRequest) {
       returnLines,
       outboundLines: kind === "RETURN" ? [] : outboundLines,
       shippings,
+      refundAmount,
     });
 
     const full = await prisma.exchange.findUnique({

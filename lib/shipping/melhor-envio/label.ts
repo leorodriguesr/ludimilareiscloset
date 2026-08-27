@@ -180,6 +180,144 @@ export async function createMelhorEnvioLabelForOrder(
   };
 }
 
+/**
+ * Logística reversa oficial (Correios PAC/SEDEX).
+ * Gera código de postagem, não etiqueta física para a cliente imprimir.
+ */
+export async function createMelhorEnvioReverseLabel(
+  input: LabelInput & { originalShipmentId?: string | null }
+): Promise<LabelResult> {
+  if (input.serviceId !== 1 && input.serviceId !== 2) {
+    throw new ShippingQuoteError(
+      "VALIDATION",
+      "Reversa Melhor Envio só aceita PAC (1) ou SEDEX (2).",
+      400
+    );
+  }
+  if (!input.from) {
+    throw new ShippingQuoteError(
+      "VALIDATION",
+      "Remetente (cliente) obrigatório na reversa.",
+      400
+    );
+  }
+
+  const senderEmail = (input.from.email ?? "").trim();
+  const senderPhone = (input.from.phone ?? "").replace(/\D/g, "");
+
+  if (!senderEmail || !senderPhone) {
+    throw new ShippingQuoteError(
+      "VALIDATION",
+      "E-mail e telefone da cliente são obrigatórios para a reversa dos Correios.",
+      400
+    );
+  }
+
+  const fromParty = toMeParty(input.from, "Remetente");
+  const toParty = toMeParty(input.to, "Destinatário", {
+    stateRegister: "ISENTO",
+  });
+
+  const insurance =
+    input.insuranceValue != null && Number.isFinite(input.insuranceValue)
+      ? Math.max(0, Math.round(input.insuranceValue * 100) / 100)
+      : 0;
+
+  const volume = volumesFromInput(input, null)[0]!;
+  const products = input.products.map((p) => ({
+    name: p.name.slice(0, 100),
+    quantity: p.quantity,
+    unitary_value: p.unitary_value,
+  }));
+
+  const cartBody: Record<string, unknown> = {
+    service: input.serviceId,
+    new_sender_mail: senderEmail,
+    new_sender_phone: senderPhone,
+    insurance_value: insurance,
+    from: fromParty,
+    to: toParty,
+    products,
+    package: {
+      weight: volume.weight,
+      height: volume.height,
+      width: volume.width,
+      length: volume.length,
+    },
+    options: {
+      receipt: false,
+      own_hand: false,
+      non_commercial: true,
+      platform: "Ludimila Reis Closet",
+      tags: [
+        {
+          tag:
+            input.tag ||
+            (input.orderNumber != null ? String(input.orderNumber) : "reversa"),
+          url: null as string | null,
+        },
+      ],
+    },
+  };
+
+  const originalId = input.originalShipmentId?.trim();
+  if (originalId) {
+    cartBody.order_id = originalId;
+  }
+
+  console.debug(
+    "[MelhorEnvio reverse] POST /api/v2/me/cart/reverse",
+    JSON.stringify(cartBody)
+  );
+  const cartRaw = await melhorEnvioRequest(
+    "POST",
+    "/api/v2/me/cart/reverse",
+    cartBody
+  );
+  const cart = meAsRecord(cartRaw);
+  const shipmentId = typeof cart?.id === "string" ? cart.id : null;
+  if (!shipmentId) {
+    throw new ShippingQuoteError(
+      "PARSE",
+      "ID da reversa não retornado pelo Melhor Envio.",
+      502,
+      cartRaw
+    );
+  }
+
+  try {
+    await checkoutMelhorEnvioOrders([shipmentId]);
+  } catch (e) {
+    const checkoutError =
+      e instanceof Error ? e.message : "Falha no checkout Melhor Envio.";
+    console.warn(
+      `[MelhorEnvio reverse] checkout falhou para ${shipmentId}:`,
+      checkoutError
+    );
+    return {
+      shipmentId,
+      labelUrl: "",
+      superfreteStatus: await resolveStatusAfterCart(shipmentId, "pending"),
+      checkoutError,
+    };
+  }
+
+  try {
+    await generateMelhorEnvioLabels([shipmentId]);
+  } catch (e) {
+    console.warn(
+      `[MelhorEnvio reverse] generate falhou para ${shipmentId}:`,
+      e instanceof Error ? e.message : e
+    );
+  }
+
+  return {
+    shipmentId,
+    labelUrl: "",
+    superfreteStatus: await resolveStatusAfterCart(shipmentId, "released"),
+  };
+}
+
 export async function checkoutMelhorEnvioOrders(
   shipmentIds: string[]
 ): Promise<void> {

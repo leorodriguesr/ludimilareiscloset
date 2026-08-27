@@ -2,6 +2,7 @@ import type {
   ExchangeBalanceStatus,
   ExchangeShippingPaidBy,
 } from "@/app/generated/prisma/client";
+import { computeExchangeProductTotals } from "@/lib/exchanges/product-diff";
 
 export type BalanceShippingInput = {
   quotedPrice: number | null | undefined;
@@ -25,10 +26,15 @@ export function computeExchangeBalance(input: {
   returnedItemsTotal: number;
   newItemsTotal: number;
   shippings: BalanceShippingInput[];
+  samePieceSwap?: boolean;
+  adjustmentAmount?: number;
 }): ComputedExchangeBalance {
-  const returnedItemsTotal = roundMoney(input.returnedItemsTotal);
-  const newItemsTotal = roundMoney(input.newItemsTotal);
-  const productsDelta = roundMoney(newItemsTotal - returnedItemsTotal);
+  const { returnedItemsTotal, newItemsTotal, productsDelta } =
+    computeExchangeProductTotals({
+      returnedItemsTotal: input.returnedItemsTotal,
+      newItemsTotal: input.newItemsTotal,
+      samePieceSwap: Boolean(input.samePieceSwap),
+    });
 
   const shippingCustomerTotal = roundMoney(
     input.shippings.reduce((acc, s) => {
@@ -38,7 +44,9 @@ export function computeExchangeBalance(input: {
     }, 0)
   );
 
-  const balanceAmount = roundMoney(productsDelta + shippingCustomerTotal);
+  const balanceAmount = roundMoney(
+    productsDelta + shippingCustomerTotal + (input.adjustmentAmount ?? 0)
+  );
 
   let balanceStatus: ExchangeBalanceStatus = "NONE";
   if (balanceAmount > 0.009) balanceStatus = "PENDING";

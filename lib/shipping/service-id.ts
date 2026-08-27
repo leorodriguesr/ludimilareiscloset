@@ -60,12 +60,35 @@ export const SUPERFRETE_STATUS_LABELS: Record<string, string> = {
 export function normalizeProviderShipmentStatus(
   status: string | null | undefined
 ): string {
-  const raw = (status ?? "").trim().toLowerCase();
+  const raw = (status ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
   if (!raw) return "unknown";
   if (raw === "canceled" || raw === "cancelled") return "cancelled";
-  if (raw === "not delivered" || raw === "not_delivered") return "undelivered";
+  if (raw === "not delivered") return "undelivered";
   if (raw === "entregue" || raw === "delivered") return "delivered";
-  return raw;
+  // Rastreio em rota: ME/Correios usam vários nomes além de `posted`.
+  if (
+    raw === "posted" ||
+    raw === "postado" ||
+    raw === "received" ||
+    raw === "recebido" ||
+    raw === "in transit" ||
+    raw === "transit" ||
+    raw === "first mile" ||
+    raw === "out for delivery" ||
+    raw === "a caminho" ||
+    raw === "em transito" ||
+    raw === "saiu para entrega" ||
+    raw === "coletado"
+  ) {
+    return "posted";
+  }
+  return raw.replace(/ /g, "_");
 }
 
 export function isCancelledProviderShipmentStatus(

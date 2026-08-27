@@ -151,12 +151,18 @@ export async function inspectExchange(input: {
       exchange.balanceStatus === ExchangeBalanceStatus.PENDING ||
       exchange.balanceStatus === ExchangeBalanceStatus.CREDIT_PENDING;
 
+    const customerOwes =
+      exchange.balanceStatus === ExchangeBalanceStatus.PENDING;
     const nextStatus =
-      outboundItems.length > 0
-        ? ExchangeStatus.READY_OUTBOUND
-        : balanceOpen
-          ? ExchangeStatus.RECEIVED
-          : ExchangeStatus.COMPLETED;
+      exchange.kind === "EXCHANGE" && outboundItems.length === 0
+        ? ExchangeStatus.RECEIVED
+        : outboundItems.length > 0
+          ? customerOwes
+            ? ExchangeStatus.RECEIVED
+            : ExchangeStatus.READY_OUTBOUND
+          : balanceOpen
+            ? ExchangeStatus.RECEIVED
+            : ExchangeStatus.COMPLETED;
 
     const updated = await tx.exchange.update({
       where: { id: exchange.id },

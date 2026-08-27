@@ -29,6 +29,7 @@ import {
 import { appendCashLedgerEntry } from "@/lib/cash/ledger";
 import { EXCHANGE_BALANCE_PURPOSE } from "@/lib/exchanges/initiate-balance-payment";
 import { appendExchangeEvent } from "@/lib/exchanges/events";
+import { maybeReleaseOutboundShipping } from "@/lib/exchanges/release-outbound";
 
 const AMOUNT_TOLERANCE_BRL = 0.01;
 
@@ -707,6 +708,8 @@ async function confirmExchangeBalanceInTransaction(input: {
         exchangeId: exchange.id,
         paymentAttemptId: lockedAttempt.id,
       });
+
+      await maybeReleaseOutboundShipping(tx, exchange.id);
     });
   } catch (e) {
     if (e instanceof ConfirmPaymentRejectedError) {

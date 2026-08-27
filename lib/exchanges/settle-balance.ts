@@ -1,11 +1,13 @@
 import {
   ExchangeBalanceStatus,
   ExchangeEventType,
+  ExchangeKind,
   ExchangeStatus,
 } from "@/app/generated/prisma/client";
 import { appendCashLedgerEntry } from "@/lib/cash/ledger";
 import { ExchangeError } from "@/lib/exchanges/constants";
 import { appendExchangeEvent } from "@/lib/exchanges/events";
+import { maybeReleaseOutboundShipping } from "@/lib/exchanges/release-outbound";
 import { prisma } from "@/lib/prisma";
 
 export async function settleExchangeBalance(input: {
@@ -74,26 +76,13 @@ export async function settleExchangeBalance(input: {
   const label = `Troca #${exchange.exchangeNumber ?? exchange.id.slice(0, 6)}`;
 
   return prisma.$transaction(async (tx) => {
-    const updated = await tx.exchange.update({
+    await tx.exchange.update({
       where: { id: exchange.id },
       data: {
         balanceStatus,
         balancePaidAt: now,
         balancePaidByUserId: input.actorUserId,
         balanceNotes: input.notes?.trim() || exchange.balanceNotes,
-      },
-      include: {
-        items: true,
-        shippings: true,
-        events: { orderBy: { createdAt: "asc" } },
-        order: {
-          select: {
-            id: true,
-            orderNumber: true,
-            recipientName: true,
-            email: true,
-          },
-        },
       },
     });
 
@@ -129,7 +118,49 @@ export async function settleExchangeBalance(input: {
       }
     }
 
-    return updated;
+    if (
+      input.action === "mark_paid" ||
+      input.action === "waive" ||
+      input.action === "mark_credit_settled"
+    ) {
+      await maybeReleaseOutboundShipping(tx, exchange.id, input.actorUserId);
+    }
+
+    if (
+      input.action === "mark_credit_settled" &&
+      exchange.kind === ExchangeKind.RETURN
+    ) {
+      await tx.exchange.update({
+        where: { id: exchange.id },
+        data: {
+          status: ExchangeStatus.COMPLETED,
+          completedAt: now,
+        },
+      });
+      await appendExchangeEvent(tx, {
+        exchangeId: exchange.id,
+        type: ExchangeEventType.COMPLETED,
+        actorUserId: input.actorUserId,
+        payload: { via: "credit_settled" },
+      });
+    }
+
+    return tx.exchange.findUniqueOrThrow({
+      where: { id: exchange.id },
+      include: {
+        items: true,
+        shippings: true,
+        events: { orderBy: { createdAt: "asc" } },
+        order: {
+          select: {
+            id: true,
+            orderNumber: true,
+            recipientName: true,
+            email: true,
+          },
+        },
+      },
+    });
   });
 }
 
@@ -168,6 +199,12 @@ export async function completeExchange(input: {
   }
 
   const hasOutbound = exchange.items.some((i) => i.direction === "OUTBOUND");
+  if (exchange.kind === "EXCHANGE" && !hasOutbound) {
+    throw new ExchangeError(
+      "OUTBOUND_REQUIRED",
+      "Defina o produto de envio depois da conferência."
+    );
+  }
   if (hasOutbound && !exchange.inspectedAt) {
     throw new ExchangeError(
       "NOT_INSPECTED",

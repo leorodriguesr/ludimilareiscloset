@@ -6,17 +6,22 @@ import { formatPrice } from "@/lib/format";
 import {
   EXCHANGE_BALANCE_STATUS_LABELS,
   EXCHANGE_DISPOSITION_LABELS,
-  EXCHANGE_DISPOSITIONS,
   EXCHANGE_KIND_LABELS,
   EXCHANGE_PAID_BY_LABELS,
   EXCHANGE_REASON_LABELS,
   EXCHANGE_STATUS_LABELS,
 } from "@/lib/exchanges/constants";
 import {
+  EXCHANGE_RETURN_METHOD_LABELS,
   EXCHANGE_SHIPPING_METHOD_LABELS,
   isLocalExchangeShippingMethod,
 } from "@/lib/exchanges/shipping-method";
 import { ExchangeWizard } from "@/components/admin/ExchangeWizard";
+import { ExchangeOutboundPlanner } from "@/components/admin/ExchangeOutboundPlanner";
+import { ExchangeInspectModal } from "@/components/admin/ExchangeInspectModal";
+import { ExchangeManualReturnModal } from "@/components/admin/ExchangeManualReturnModal";
+import { ExchangeRefundModal } from "@/components/admin/ExchangeRefundModal";
+import { ExchangeChargeModal } from "@/components/admin/ExchangeChargeModal";
 import type {
   ExchangeItemDisposition,
   ExchangeKind,
@@ -28,6 +33,9 @@ type ExchangeItemRow = {
   id: string;
   direction: "RETURN" | "OUTBOUND";
   productName: string;
+  productImageUrl?: string | null;
+  pieceSelectionsJson?: string | null;
+  productId?: string | null;
   quantity: number;
   unitPrice: number;
   lineTotal: number;
@@ -46,6 +54,9 @@ type ExchangeShippingRow = {
   cost: number | null;
   paidBy: keyof typeof EXCHANGE_PAID_BY_LABELS;
   trackingCode: string | null;
+  postingLocationName?: string | null;
+  postingLocationAddress?: string | null;
+  manualConfiguredAt?: string | null;
   labelUrl: string | null;
   shippingStatus: string;
   superfreteShipmentId: string | null;
@@ -61,11 +72,13 @@ type ExchangeListItem = {
   balanceStatus: keyof typeof EXCHANGE_BALANCE_STATUS_LABELS;
   inspectedAt: string | null;
   createdAt: string;
+  returnedItemsTotal?: number;
   order: {
     id: string;
     orderNumber: number | null;
     recipientName: string | null;
     email: string | null;
+    destinationCep?: string | null;
   };
   items: ExchangeItemRow[];
   shippings: ExchangeShippingRow[];
@@ -102,6 +115,7 @@ type PaymentResult =
 const EVENT_LABELS: Record<string, string> = {
   CREATED: "Criada",
   REVERSE_LABEL_GENERATED: "Etiqueta reversa",
+  RETURN_MANUAL_REGISTERED: "Reversa manual",
   RETURN_POSTED: "Cliente postou",
   RECEIVED: "Recebido",
   INSPECTED: "Conferência",
@@ -125,6 +139,7 @@ const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "RETURN_IN_TRANSIT", label: "Trânsito" },
   { key: "RECEIVED", label: "Recebidas" },
   { key: "READY_OUTBOUND", label: "Reenvio" },
+  { key: "OUTBOUND", label: "Reenvio andamento" },
   { key: "COMPLETED", label: "Concluídas" },
   { key: "CANCELLED", label: "Canceladas" },
 ];
@@ -175,9 +190,11 @@ export function ExchangeManager() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [dispositions, setDispositions] = useState<
-    Record<string, ExchangeItemDisposition>
-  >({});
+  const [inspectId, setInspectId] = useState<string | null>(null);
+  const [manualReturnId, setManualReturnId] = useState<string | null>(null);
+  const [outboundId, setOutboundId] = useState<string | null>(null);
+  const [refundId, setRefundId] = useState<string | null>(null);
+  const [chargeId, setChargeId] = useState<string | null>(null);
   const [paymentResult, setPaymentResult] = useState<PaymentResult | null>(
     null
   );
@@ -204,13 +221,6 @@ export function ExchangeManager() {
       const data = (await res.json()) as { exchange?: ExchangeDetail };
       if (data.exchange) {
         setDetail(data.exchange);
-        const initial: Record<string, ExchangeItemDisposition> = {};
-        for (const item of data.exchange.items) {
-          if (item.direction === "RETURN") {
-            initial[item.id] = item.disposition ?? "RESELLABLE";
-          }
-        }
-        setDispositions(initial);
       } else {
         setDetail(null);
       }
@@ -232,6 +242,24 @@ export function ExchangeManager() {
       setPaymentResult(null);
     }
   }, [selectedId, loadDetail]);
+
+  useEffect(() => {
+    if (!chargeId || !paymentResult) return;
+    const timer = window.setInterval(() => {
+      void (async () => {
+        await loadList();
+        const res = await fetch(`/api/admin/exchanges/${chargeId}`);
+        const data = (await res.json()) as { exchange?: ExchangeDetail };
+        if (data.exchange?.balanceStatus && data.exchange.balanceStatus !== "PENDING") {
+          setPaymentResult(null);
+          setChargeId(null);
+          await loadList();
+          if (selectedId === chargeId) await loadDetail(chargeId);
+        }
+      })();
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [chargeId, paymentResult, loadList, loadDetail, selectedId]);
 
   async function runAction(
     path: string,
@@ -272,31 +300,14 @@ export function ExchangeManager() {
     }
   }
 
-  async function quickInspect(ex: ExchangeListItem) {
-    const returnItems = ex.items.filter((i) => i.direction === "RETURN");
-    if (returnItems.length === 0) {
-      setSelectedId(ex.id);
-      return;
-    }
-    await runAction(
-      "/inspect",
-      {
-        lines: returnItems.map((item) => ({
-          exchangeItemId: item.id,
-          disposition: "RESELLABLE",
-        })),
-      },
-      ex.id
-    );
-  }
-
   async function generatePayment(paymentMethod: "pix" | "card") {
-    if (!selectedId) return;
+    const id = chargeId ?? selectedId;
+    if (!id) return;
     setBusy(true);
     setActionError(null);
     setPaymentResult(null);
     try {
-      const res = await fetch(`/api/admin/exchanges/${selectedId}/payment`, {
+      const res = await fetch(`/api/admin/exchanges/${id}/payment`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paymentMethod }),
@@ -321,7 +332,7 @@ export function ExchangeManager() {
           amount: data.amount,
         });
       }
-      await loadDetail(selectedId);
+      await loadDetail(id);
       await loadList();
     } catch {
       setActionError("Erro de rede ao gerar pagamento.");
@@ -354,6 +365,19 @@ export function ExchangeManager() {
       filter ? exchanges.filter((ex) => ex.status === filter) : exchanges,
     [exchanges, filter]
   );
+
+  const inspectTarget =
+    exchanges.find((ex) => ex.id === inspectId) ??
+    (detail?.id === inspectId ? detail : null);
+  const outboundTarget =
+    exchanges.find((ex) => ex.id === outboundId) ??
+    (detail?.id === outboundId ? detail : null);
+  const refundTarget =
+    exchanges.find((ex) => ex.id === refundId) ??
+    (detail?.id === refundId ? detail : null);
+  const chargeTarget =
+    exchanges.find((ex) => ex.id === chargeId) ??
+    (detail?.id === chargeId ? detail : null);
 
   function toggleFilter(key: FilterKey) {
     setFilter((current) => (current === key ? null : key));
@@ -475,8 +499,7 @@ export function ExchangeManager() {
                           Pedido{" "}
                           {ex.order.orderNumber != null
                             ? `#${ex.order.orderNumber}`
-                            : "—"}{" "}
-                          · {EXCHANGE_REASON_LABELS[ex.reason]}
+                            : "—"}
                         </p>
                       </td>
                       <td
@@ -487,9 +510,6 @@ export function ExchangeManager() {
                           {ex.order.recipientName ||
                             ex.order.email ||
                             "Cliente"}
-                        </p>
-                        <p className="text-[11px] text-stone-400">
-                          {fmtDateTime(ex.createdAt)}
                         </p>
                       </td>
                       <td
@@ -524,7 +544,7 @@ export function ExchangeManager() {
                           {retShip &&
                           isLocalExchangeShippingMethod(retShip.method) ? (
                             <span className="text-xs text-stone-600">
-                              {EXCHANGE_SHIPPING_METHOD_LABELS[
+                              {EXCHANGE_RETURN_METHOD_LABELS[
                                 retShip.method ?? "STORE_PICKUP"
                               ]}
                             </span>
@@ -552,33 +572,12 @@ export function ExchangeManager() {
                                 </a>
                               ) : null}
                               {!retShip?.superfreteShipmentId &&
+                                !retShip?.manualConfiguredAt &&
                                 (ex.status === "AWAITING_RETURN" ||
                                   ex.status === "RETURN_IN_TRANSIT") && (
-                                  <button
-                                    type="button"
-                                    disabled={
-                                      busy || !retShip?.shippingServiceId
-                                    }
-                                    onClick={() =>
-                                      void runAction(
-                                        "/labels",
-                                        {
-                                          type: "RETURN",
-                                          serviceId:
-                                            retShip?.shippingServiceId,
-                                        },
-                                        ex.id
-                                      )
-                                    }
-                                    className={LIST_BTN_PRIMARY}
-                                    title={
-                                      retShip?.shippingServiceId
-                                        ? "Gerar etiqueta reversa"
-                                        : "Cotação sem serviço — abra os detalhes"
-                                    }
-                                  >
-                                    Gerar etiqueta
-                                  </button>
+                                  <span className="text-[11px] text-amber-800">
+                                    Realizar manualmente
+                                  </span>
                                 )}
                               {!retShip?.trackingCode &&
                                 !retShip?.labelUrl &&
@@ -603,36 +602,57 @@ export function ExchangeManager() {
                             <button
                               type="button"
                               disabled={busy}
-                              onClick={() => void quickInspect(ex)}
+                              onClick={() => setInspectId(ex.id)}
                               className={LIST_BTN_OK}
                             >
-                              Conferir
+                              Conferir peça
                             </button>
                           )}
+                          {!ex.inspectedAt &&
+                            retShip?.method === "CARRIER" &&
+                            !retShip.superfreteShipmentId &&
+                            !retShip.manualConfiguredAt && (
+                              <button
+                                type="button"
+                                onClick={() => setManualReturnId(ex.id)}
+                                className={LIST_BTN_SOFT}
+                              >
+                                Configurar reversa
+                              </button>
+                            )}
+                          {ex.kind === "EXCHANGE" &&
+                            !!ex.inspectedAt &&
+                            !ex.items.some((i) => i.direction === "OUTBOUND") &&
+                            ex.status !== "CANCELLED" && (
+                              <button
+                                type="button"
+                                onClick={() => setOutboundId(ex.id)}
+                                className={LIST_BTN_PRIMARY}
+                              >
+                                Definir novo envio
+                              </button>
+                            )}
                           {canCharge && (
                             <button
                               type="button"
                               disabled={busy}
-                              onClick={() => setSelectedId(ex.id)}
+                              onClick={() => {
+                                setChargeId(ex.id);
+                                setPaymentResult(null);
+                              }}
                               className={LIST_BTN_PRIMARY}
                             >
-                              Cobrar
+                              Cobrar cliente
                             </button>
                           )}
                           {canRefund && (
                             <button
                               type="button"
                               disabled={busy}
-                              onClick={() =>
-                                void runAction(
-                                  "/balance",
-                                  { action: "mark_credit_settled" },
-                                  ex.id
-                                )
-                              }
+                              onClick={() => setRefundId(ex.id)}
                               className={LIST_BTN_PRIMARY}
                             >
-                              Reembolso
+                              Devolver dinheiro
                             </button>
                           )}
                           {ex.balanceStatus === "CREDIT_PENDING" &&
@@ -665,21 +685,134 @@ export function ExchangeManager() {
         loading={detailLoading}
         busy={busy}
         actionError={actionError}
-        dispositions={dispositions}
-        setDispositions={setDispositions}
-        paymentResult={paymentResult}
         returnItems={returnItems}
         outboundItems={outboundItems}
         onClose={() => setSelectedId(null)}
         onRunAction={runAction}
-        onGeneratePayment={generatePayment}
+        onInspect={() => selectedId && setInspectId(selectedId)}
+        onOutbound={() => selectedId && setOutboundId(selectedId)}
+        onCharge={() => {
+          if (!selectedId) return;
+          setChargeId(selectedId);
+          setPaymentResult(null);
+        }}
+        onRefund={() => selectedId && setRefundId(selectedId)}
+        onManualReturn={() => selectedId && setManualReturnId(selectedId)}
       />
+
+      {inspectTarget ? (
+        <ExchangeInspectModal
+          pieces={inspectTarget.items.filter((i) => i.direction === "RETURN")}
+          busy={busy}
+          error={actionError}
+          onClose={() => setInspectId(null)}
+          onConfirm={(lines) => {
+            void runAction("/inspect", { lines }, inspectTarget.id).then(
+              (ok) => {
+                if (ok) setInspectId(null);
+              }
+            );
+          }}
+        />
+      ) : null}
+
+      {manualReturnId ? (
+        <ExchangeManualReturnModal
+          exchangeId={manualReturnId}
+          busy={busy}
+          error={actionError}
+          onClose={() => setManualReturnId(null)}
+          onSaved={(body) => {
+            void (async () => {
+              setBusy(true);
+              setActionError(null);
+              try {
+                const res = await fetch(
+                  `/api/admin/exchanges/${manualReturnId}/return-shipping`,
+                  {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body),
+                  }
+                );
+                const data = (await res.json()) as { error?: string };
+                if (!res.ok) {
+                  setActionError(data.error ?? "Falha ao salvar reversa.");
+                  return;
+                }
+                setManualReturnId(null);
+                await loadList();
+                if (selectedId) await loadDetail(selectedId);
+              } catch {
+                setActionError("Erro de rede.");
+              } finally {
+                setBusy(false);
+              }
+            })();
+          }}
+        />
+      ) : null}
+
+      {outboundTarget ? (
+        <ExchangeOutboundPlanner
+          exchangeId={outboundTarget.id}
+          destinationCep={outboundTarget.order.destinationCep ?? null}
+          returnedItems={outboundTarget.items.filter(
+            (i) => i.direction === "RETURN"
+          )}
+          returnedCredit={
+            (outboundTarget as ExchangeDetail).returnedItemsTotal ??
+            outboundTarget.items
+              .filter((i) => i.direction === "RETURN")
+              .reduce((acc, i) => acc + i.lineTotal, 0)
+          }
+          busy={busy}
+          error={actionError}
+          onClose={() => setOutboundId(null)}
+          onSaved={async () => {
+            setOutboundId(null);
+            await loadList();
+            if (selectedId) await loadDetail(selectedId);
+          }}
+        />
+      ) : null}
+
+      {refundTarget ? (
+        <ExchangeRefundModal
+          amount={refundTarget.balanceAmount}
+          busy={busy}
+          error={actionError}
+          onClose={() => setRefundId(null)}
+          onConfirm={(notes) => {
+            void runAction(
+              "/balance",
+              { action: "mark_credit_settled", notes },
+              refundTarget.id
+            ).then((ok) => {
+              if (ok) setRefundId(null);
+            });
+          }}
+        />
+      ) : null}
+
+      {chargeTarget ? (
+        <ExchangeChargeModal
+          amount={chargeTarget.balanceAmount}
+          busy={busy}
+          error={actionError}
+          paymentResult={paymentResult}
+          onClose={() => {
+            setChargeId(null);
+            setPaymentResult(null);
+          }}
+          onGenerate={(method) => void generatePayment(method)}
+        />
+      ) : null}
 
       <ExchangeWizard
         open={wizardOpen}
         onClose={() => setWizardOpen(false)}
-        onCreated={(id) => {
-          setSelectedId(id);
+        onCreated={() => {
           void loadList();
         }}
       />
@@ -693,25 +826,21 @@ function ExchangeDetailDrawer({
   loading,
   busy,
   actionError,
-  dispositions,
-  setDispositions,
-  paymentResult,
   returnItems,
   outboundItems,
   onClose,
   onRunAction,
-  onGeneratePayment,
+  onInspect,
+  onOutbound,
+  onCharge,
+  onRefund,
+  onManualReturn,
 }: {
   open: boolean;
   detail: ExchangeDetail | null;
   loading: boolean;
   busy: boolean;
   actionError: string | null;
-  dispositions: Record<string, ExchangeItemDisposition>;
-  setDispositions: React.Dispatch<
-    React.SetStateAction<Record<string, ExchangeItemDisposition>>
-  >;
-  paymentResult: PaymentResult | null;
   returnItems: ExchangeItemRow[];
   outboundItems: ExchangeItemRow[];
   onClose: () => void;
@@ -720,7 +849,11 @@ function ExchangeDetailDrawer({
     body?: Record<string, unknown>,
     exchangeId?: string
   ) => Promise<boolean>;
-  onGeneratePayment: (method: "pix" | "card") => Promise<void>;
+  onInspect: () => void;
+  onOutbound: () => void;
+  onCharge: () => void;
+  onRefund: () => void;
+  onManualReturn: () => void;
 }) {
   const [mounted, setMounted] = useState(false);
   const [entered, setEntered] = useState(false);
@@ -800,6 +933,7 @@ function ExchangeDetailDrawer({
       d.status === "OUTBOUND" ||
       (d.status === "RECEIVED" &&
         outboundItems.length === 0 &&
+        kind !== "EXCHANGE" &&
         !balanceOpen));
 
   return createPortal(
@@ -859,9 +993,24 @@ function ExchangeDetailDrawer({
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <Mini label="Cliente" value={d.order.recipientName || d.order.email || "—"} />
                 <Mini label="Motivo" value={EXCHANGE_REASON_LABELS[d.reason]} />
-                <Mini label="Devolvido" value={formatPrice(d.returnedItemsTotal)} />
+                {kind === "RETURN" && (
+                  <Mini label="Reembolso" value={formatPrice(d.returnedItemsTotal)} />
+                )}
                 {kind === "EXCHANGE" && (
-                  <Mini label="Novo" value={formatPrice(d.newItemsTotal)} />
+                  <>
+                    <Mini label="Devolvido" value={formatPrice(d.returnedItemsTotal)} />
+                    <Mini label="Novo" value={formatPrice(d.newItemsTotal)} />
+                    <Mini
+                      label="Diferença"
+                      value={
+                        d.productsDelta > 0.009
+                          ? `Cliente ${formatPrice(d.productsDelta)}`
+                          : d.productsDelta < -0.009
+                            ? `Restituir ${formatPrice(Math.abs(d.productsDelta))}`
+                            : formatPrice(0)
+                      }
+                    />
+                  </>
                 )}
                 <Mini label="Saldo" value={balanceLabel(d.balanceAmount)} />
                 <Mini
@@ -887,18 +1036,38 @@ function ExchangeDetailDrawer({
                             {s.type === "RETURN" ? "Retorno" : "Reenvio"}
                           </span>
                           <span className="text-xs text-stone-500">
-                            {local
-                              ? EXCHANGE_SHIPPING_METHOD_LABELS[
-                                  s.method ?? "STORE_PICKUP"
+                            {s.type === "RETURN"
+                              ? EXCHANGE_RETURN_METHOD_LABELS[
+                                  s.method ?? "CARRIER"
                                 ]
-                              : EXCHANGE_PAID_BY_LABELS[s.paidBy]}
+                              : local
+                                ? EXCHANGE_SHIPPING_METHOD_LABELS[
+                                    s.method ?? "STORE_PICKUP"
+                                  ]
+                                : EXCHANGE_PAID_BY_LABELS[s.paidBy]}
                           </span>
                         </div>
                         <p className="text-xs text-stone-500">
-                          {local
-                            ? s.method === "STORE_PICKUP"
-                              ? "Sem etiqueta — cliente na loja ou já combinado."
-                              : "Coleta/entrega local — sem SuperFrete."
+                          {s.type === "RETURN"
+                            ? s.method === "CARRIER"
+                              ? s.superfreteShipmentId
+                                ? s.shippingServiceName ||
+                                  "Código de postagem gerado."
+                                : s.manualConfiguredAt
+                                  ? [
+                                      s.trackingCode,
+                                      s.postingLocationName,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" · ")
+                                  : "Realizar manualmente."
+                              : s.method === "STORE_PICKUP"
+                                ? "A cliente devolve a peça."
+                                : "Moto boy da loja busca a peça."
+                            : local
+                              ? s.method === "STORE_PICKUP"
+                                ? "Sem etiqueta — cliente na loja ou já combinado."
+                                : "Coleta/entrega local — sem SuperFrete."
                             : s.shippingServiceName || "Sem serviço cotado"}
                           {!local && s.quotedPrice != null
                             ? ` · ${formatPrice(s.quotedPrice)}`
@@ -914,15 +1083,34 @@ function ExchangeDetailDrawer({
                             Rastreio: {s.trackingCode}
                           </a>
                         )}
+                        {s.type === "RETURN" &&
+                          s.postingLocationName &&
+                          !s.superfreteShipmentId && (
+                            <p className="mt-1 text-xs text-stone-500">
+                              {s.postingLocationName}
+                              {s.postingLocationAddress
+                                ? ` · ${s.postingLocationAddress}`
+                                : ""}
+                            </p>
+                          )}
+                        {s.type === "RETURN" &&
+                          s.method === "CARRIER" &&
+                          !s.superfreteShipmentId &&
+                          !s.manualConfiguredAt && (
+                            <button
+                              type="button"
+                              onClick={onManualReturn}
+                              className="mt-2 rounded-md bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-700"
+                            >
+                              Configurar reversa
+                            </button>
+                          )}
                         {!local && (
                           <div className="mt-2 flex flex-wrap gap-2">
                             {!s.superfreteShipmentId &&
-                              ((s.type === "RETURN" &&
-                                (d.status === "AWAITING_RETURN" ||
-                                  d.status === "RETURN_IN_TRANSIT")) ||
-                                (s.type === "OUTBOUND" &&
-                                  (d.status === "READY_OUTBOUND" ||
-                                    d.status === "OUTBOUND"))) && (
+                              s.type === "OUTBOUND" &&
+                              (d.status === "READY_OUTBOUND" ||
+                                d.status === "OUTBOUND") && (
                                 <button
                                   type="button"
                                   disabled={busy || !s.shippingServiceId}
@@ -955,50 +1143,24 @@ function ExchangeDetailDrawer({
                 </ul>
               </section>
 
-              <section className="space-y-3">
-                <h4 className="text-xs font-semibold uppercase tracking-wide text-stone-400">
-                  Conferência
+              <section>
+                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">
+                  Peças devolvidas
                 </h4>
                 <ul className="space-y-2">
                   {returnItems.map((item) => (
                     <li
                       key={item.id}
-                      className="rounded-lg border border-stone-100 px-3 py-2 text-sm"
+                      className="flex justify-between rounded-lg border border-stone-100 px-3 py-2 text-sm"
                     >
-                      <div className="flex justify-between gap-2">
-                        <span className="font-medium text-stone-900">
-                          {item.productName}
-                        </span>
-                        <span className="text-stone-500">
-                          {item.quantity}× {formatPrice(item.unitPrice)}
-                        </span>
-                      </div>
-                      {!d.inspectedAt &&
-                        d.status !== "CANCELLED" &&
-                        d.status !== "COMPLETED" && (
-                          <select
-                            value={dispositions[item.id] ?? "RESELLABLE"}
-                            onChange={(e) =>
-                              setDispositions((prev) => ({
-                                ...prev,
-                                [item.id]: e.target
-                                  .value as ExchangeItemDisposition,
-                              }))
-                            }
-                            className="mt-2 w-full rounded-lg border border-stone-200 px-2 py-1.5 text-xs"
-                          >
-                            {EXCHANGE_DISPOSITIONS.map((disp) => (
-                              <option key={disp} value={disp}>
-                                {EXCHANGE_DISPOSITION_LABELS[disp]}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                      {item.disposition && (
-                        <p className="mt-1 text-xs text-stone-500">
-                          {EXCHANGE_DISPOSITION_LABELS[item.disposition]}
-                        </p>
-                      )}
+                      <span className="font-medium text-stone-900">
+                        {item.productName}
+                      </span>
+                      <span className="text-xs text-stone-500">
+                        {item.disposition
+                          ? EXCHANGE_DISPOSITION_LABELS[item.disposition]
+                          : "A conferir"}
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -1008,30 +1170,38 @@ function ExchangeDetailDrawer({
                     <button
                       type="button"
                       disabled={busy}
-                      onClick={() =>
-                        void onRunAction("/inspect", {
-                          lines: returnItems.map((item) => ({
-                            exchangeItemId: item.id,
-                            disposition:
-                              dispositions[item.id] ?? "RESELLABLE",
-                          })),
-                        })
-                      }
-                      className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
+                      onClick={onInspect}
+                      className="mt-3 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
                     >
-                      Recebi e conferir
+                      Conferir peça
                     </button>
                   )}
-                {d.inspectedAt && (
-                  <p className="text-xs text-emerald-700">Peças conferidas.</p>
-                )}
               </section>
+
+              {kind === "EXCHANGE" &&
+                d.inspectedAt &&
+                outboundItems.length === 0 &&
+                d.status !== "CANCELLED" && (
+                  <button
+                    type="button"
+                    onClick={onOutbound}
+                    className="rounded-lg bg-sky-100 px-3 py-2 text-xs font-semibold text-sky-900 ring-1 ring-sky-200"
+                  >
+                    Definir novo envio
+                  </button>
+                )}
 
               {outboundItems.length > 0 && (
                 <section>
                   <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-400">
                     Enviar
                   </h4>
+                  {d.balanceStatus === "PENDING" ? (
+                    <p className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                      O envio libera depois do pagamento da cliente e aparece
+                      em Envios.
+                    </p>
+                  ) : null}
                   <ul className="space-y-2">
                     {outboundItems.map((item) => (
                       <li
@@ -1051,141 +1221,32 @@ function ExchangeDetailDrawer({
               {d.balanceStatus === "CREDIT_PENDING" && !d.inspectedAt && (
                 <section className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-3">
                   <p className="text-sm font-medium text-stone-900">
-                    Reembolso · {formatPrice(Math.abs(d.balanceAmount))}
+                    Valor a restituir · {formatPrice(Math.abs(d.balanceAmount))}
                   </p>
                   <p className="mt-1 text-xs text-stone-500">
-                    Disponível depois de marcar “Recebi e conferir”.
+                    Confira as peças antes de devolver o dinheiro.
                   </p>
                 </section>
               )}
 
               {d.balanceStatus === "CREDIT_PENDING" && d.inspectedAt && (
-                <section className="space-y-2 rounded-xl border border-sky-200 bg-sky-50/70 p-3">
-                  <p className="text-sm font-medium text-sky-950">
-                    Reembolso · {formatPrice(Math.abs(d.balanceAmount))}
-                  </p>
-                  <p className="text-xs text-sky-900/80">
-                    Peças conferidas. Marque quando o dinheiro for devolvido —
-                    isso registra saída no caixa.
-                  </p>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() =>
-                      void onRunAction("/balance", {
-                        action: "mark_credit_settled",
-                      })
-                    }
-                    className="rounded-lg bg-stone-900 px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
-                  >
-                    Marcar reembolso feito
-                  </button>
-                </section>
+                <button
+                  type="button"
+                  onClick={onRefund}
+                  className="rounded-lg bg-stone-900 px-3 py-2 text-xs font-medium text-white"
+                >
+                  Devolver dinheiro · {formatPrice(Math.abs(d.balanceAmount))}
+                </button>
               )}
 
               {d.balanceStatus === "PENDING" && (
-                <section className="space-y-2 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
-                  <p className="text-sm font-medium text-amber-950">
-                    Cobrar diferença · {formatPrice(d.balanceAmount)}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void onGeneratePayment("pix")}
-                      className="rounded-lg bg-stone-900 px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
-                    >
-                      Gerar PIX
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void onGeneratePayment("card")}
-                      className="rounded-lg bg-stone-900 px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
-                    >
-                      Link cartão
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        void onRunAction("/balance", { action: "mark_paid" })
-                      }
-                      className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-medium text-stone-800 disabled:opacity-40"
-                    >
-                      Marcar pago
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        void onRunAction("/balance", { action: "waive" })
-                      }
-                      className="rounded-lg px-3 py-2 text-xs font-medium text-stone-600 hover:bg-white/80 disabled:opacity-40"
-                    >
-                      Dispensar
-                    </button>
-                  </div>
-                  {paymentResult?.type === "pix" && (
-                    <div className="space-y-2 rounded-lg bg-white p-3 text-sm">
-                      <p className="font-medium text-stone-900">
-                        PIX · {formatPrice(paymentResult.amount)}
-                      </p>
-                      {paymentResult.pixQrBase64 && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={`data:image/png;base64,${paymentResult.pixQrBase64}`}
-                          alt="QR Code PIX"
-                          className="mx-auto h-40 w-40"
-                        />
-                      )}
-                      <textarea
-                        readOnly
-                        value={paymentResult.pixCode}
-                        className="w-full rounded-lg border border-stone-200 px-2 py-1.5 text-xs"
-                        rows={3}
-                        onFocus={(e) => e.currentTarget.select()}
-                      />
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void navigator.clipboard.writeText(
-                            paymentResult.pixCode
-                          )
-                        }
-                        className="text-xs font-medium text-sky-800"
-                      >
-                        Copiar código
-                      </button>
-                    </div>
-                  )}
-                  {paymentResult?.type === "card" && (
-                    <div className="rounded-lg bg-white p-3 text-sm">
-                      <p className="font-medium text-stone-900">
-                        Cartão · {formatPrice(paymentResult.amount)}
-                      </p>
-                      <a
-                        href={paymentResult.checkoutUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-2 inline-flex rounded-lg bg-sky-100 px-3 py-2 text-xs font-semibold text-sky-900 ring-1 ring-sky-200"
-                      >
-                        Abrir link de pagamento
-                      </a>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void navigator.clipboard.writeText(
-                            paymentResult.checkoutUrl
-                          )
-                        }
-                        className="ml-2 text-xs font-medium text-sky-800"
-                      >
-                        Copiar link
-                      </button>
-                    </div>
-                  )}
-                </section>
+                <button
+                  type="button"
+                  onClick={onCharge}
+                  className="rounded-lg bg-stone-900 px-3 py-2 text-xs font-medium text-white"
+                >
+                  Cobrar cliente · {formatPrice(d.balanceAmount)}
+                </button>
               )}
 
               <section className="flex flex-wrap gap-2">
@@ -1225,16 +1286,33 @@ function ExchangeDetailDrawer({
                   Timeline
                 </h4>
                 <ol className="space-y-2 border-l border-stone-200 pl-3">
-                  {d.events.map((ev) => (
-                    <li key={ev.id} className="text-sm">
-                      <p className="font-medium text-stone-800">
-                        {EVENT_LABELS[ev.type] ?? ev.type}
-                      </p>
-                      <p className="text-xs text-stone-400">
-                        {fmtDateTime(ev.createdAt)}
-                      </p>
-                    </li>
-                  ))}
+                  {d.events.map((ev) => {
+                    let note: string | null = null;
+                    if (ev.payloadJson) {
+                      try {
+                        const payload = JSON.parse(ev.payloadJson) as {
+                          message?: unknown;
+                        };
+                        if (typeof payload.message === "string") {
+                          note = payload.message;
+                        }
+                      } catch {
+                        note = null;
+                      }
+                    }
+                    return (
+                      <li key={ev.id} className="text-sm">
+                        <p className="font-medium text-stone-800">
+                          {ev.type === "NOTE_ADDED" && note
+                            ? note
+                            : (EVENT_LABELS[ev.type] ?? ev.type)}
+                        </p>
+                        <p className="text-xs text-stone-400">
+                          {fmtDateTime(ev.createdAt)}
+                        </p>
+                      </li>
+                    );
+                  })}
                 </ol>
               </section>
             </div>

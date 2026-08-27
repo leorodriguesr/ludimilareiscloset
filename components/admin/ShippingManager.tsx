@@ -14,8 +14,10 @@ import Image from "next/image";
 import { formatPrice } from "@/lib/format";
 import { formatDeliveryDaysLabel } from "@/lib/shipping/delivery-days-label";
 import { isCancelledProviderShipmentStatus } from "@/lib/shipping/service-id";
+import { canManuallyMarkCarrierAsShipped } from "@/lib/fulfillment/shipping-status-policy";
 import { shippingTrackingUrl } from "@/lib/shipping/tracking-url";
 import type { NormalizedShippingOption } from "@/lib/shipping/types";
+import { ExchangeShipmentQueue } from "@/components/admin/ExchangeShipmentQueue";
 import { orderCustomerDisplayName } from "@/lib/admin-sale/customer-display";
 import {
   arrangedDeliveryLabelFromServiceName,
@@ -832,15 +834,19 @@ function PackingListPrint({
 function PackingSlipModal({
   order,
   canMarkPacked,
+  canMarkShipped,
   packingBusy,
   onClose,
   onMarkPacked,
+  onMarkShipped,
 }: {
   order: ShipmentOrder;
   canMarkPacked: boolean;
+  canMarkShipped: boolean;
   packingBusy: boolean;
   onClose: () => void;
   onMarkPacked: () => void;
+  onMarkShipped: () => void;
 }) {
   const [mounted, setMounted] = useState(false);
 
@@ -890,18 +896,30 @@ function PackingSlipModal({
           <PackingSlipContent order={order} />
         </div>
 
-        <div className="flex gap-2 border-t border-stone-100 px-5 py-4">
+        <div className="flex flex-col gap-2 border-t border-stone-100 px-5 py-4 sm:flex-row">
           {canMarkPacked ? (
             <button
               type="button"
               disabled={packingBusy}
               onClick={onMarkPacked}
-              className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-stone-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:opacity-50"
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-800 transition-colors hover:bg-stone-50 disabled:opacity-50"
             >
               <PackBoxIcon className="h-4 w-4" />
               {packingBusy ? "Salvando…" : "Marcar como embalada"}
             </button>
-          ) : (
+          ) : null}
+          {canMarkShipped ? (
+            <button
+              type="button"
+              disabled={packingBusy}
+              onClick={onMarkShipped}
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-stone-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:opacity-50"
+            >
+              <TruckIcon className="h-4 w-4" />
+              {packingBusy ? "Salvando…" : "Marcar como enviado"}
+            </button>
+          ) : null}
+          {!canMarkPacked && !canMarkShipped ? (
             <button
               type="button"
               onClick={onClose}
@@ -909,7 +927,7 @@ function PackingSlipModal({
             >
               Fechar
             </button>
-          )}
+          ) : null}
         </div>
       </div>
     </div>,
@@ -1397,6 +1415,7 @@ function useShipmentActions(
 
       const patch: Partial<ShipmentOrder> = {};
       if (key === "pack") patch.shippingStatus = "packed";
+      if (key === "ship") patch.shippingStatus = "shipped";
       if (key === "arranged-delivered") {
         patch.shippingStatus = "delivered";
       }
@@ -1481,7 +1500,7 @@ function orderHasUnpaidItems(order: ShipmentOrder): boolean {
   return (order.items ?? []).some(shipmentItemIsUnpaid);
 }
 
-function shipmentCapabilities(order: ShipmentOrder) {
+function shipmentCapabilities(order: ShipmentOrder, trackingCode?: string | null) {
   const isArranged = order.fulfillmentType === "ARRANGED";
   const isSaleCancelled = order.status === "cancelled";
   const isPaid = Boolean(order.paidAt);
@@ -1498,6 +1517,11 @@ function shipmentCapabilities(order: ShipmentOrder) {
     canSelectForBulk: !order.labelUrl && !isSaleCancelled && !isArranged && !hasUnpaidItems,
     canChangeShipping: !order.labelUrl && !order.superfreteShipmentId && !isSaleCancelled && !isArranged,
     canMarkPacked: isPaid && !isSaleCancelled && !hasUnpaidItems && order.shippingStatus === "to_pack",
+    canMarkShipped: canManuallyMarkCarrierAsShipped({
+      fulfillmentType: order.fulfillmentType,
+      shippingStatus: order.shippingStatus,
+      trackingCode: trackingCode ?? order.trackingCode,
+    }),
     canMarkArrangedDelivered:
       insideDelivery &&
       isPaid &&
@@ -1544,7 +1568,7 @@ function ShipmentRowActionsMenu({
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [mounted, setMounted] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
-  const caps = shipmentCapabilities(order);
+  const caps = shipmentCapabilities(order, trackingCode);
 
   useEffect(() => setMounted(true), []);
 
@@ -1631,6 +1655,24 @@ function ShipmentRowActionsMenu({
             `/api/admin/orders/${order.id}`,
             "PATCH",
             { shippingStatus: "packed" },
+            { openPdf: false }
+          ),
+      });
+    }
+
+    if (caps.canMarkShipped) {
+      items.push({
+        id: "ship",
+        label: busy === "ship" ? "Salvando…" : "Marcar como enviado",
+        separatorBefore: items.length > 0,
+        disabled: busy === "ship",
+        icon: <TruckIcon className="h-[18px] w-[18px]" />,
+        onClick: () =>
+          void runAction(
+            "ship",
+            `/api/admin/orders/${order.id}`,
+            "PATCH",
+            { shippingStatus: "shipped" },
             { openPdf: false }
           ),
       });
@@ -1762,6 +1804,7 @@ function ShipmentRowActionsMenu({
     caps.canGenerateLabel,
     caps.canMarkArrangedDelivered,
     caps.canMarkPacked,
+    caps.canMarkShipped,
     onChangeShipping,
     onViewPacking,
     order.id,
@@ -2557,6 +2600,8 @@ export function ShippingManager() {
         </div>
       ) : null}
 
+      <ExchangeShipmentQueue filter={filter} />
+
       {loading ? (
         <div className="flex items-center gap-2.5 py-10 text-sm text-stone-400">
           <span className="h-4 w-4 animate-spin rounded-full border-2 border-stone-200 border-t-stone-700" />
@@ -2630,9 +2675,16 @@ export function ShippingManager() {
           order={
             orders.find((o) => o.id === packingModalOrder.id) ?? packingModalOrder
           }
-          canMarkPacked={shipmentCapabilities(
-            orders.find((o) => o.id === packingModalOrder.id) ?? packingModalOrder
-          ).canMarkPacked}
+          canMarkPacked={
+            shipmentCapabilities(
+              orders.find((o) => o.id === packingModalOrder.id) ?? packingModalOrder
+            ).canMarkPacked
+          }
+          canMarkShipped={
+            shipmentCapabilities(
+              orders.find((o) => o.id === packingModalOrder.id) ?? packingModalOrder
+            ).canMarkShipped
+          }
           packingBusy={packingBusy}
           onClose={() => setPackingModalOrder(null)}
           onMarkPacked={() => {
@@ -2651,6 +2703,30 @@ export function ShippingManager() {
                   return;
                 }
                 patchOrder(orderId, { shippingStatus: "packed" });
+                setPackingModalOrder(null);
+              } catch {
+                alert("Erro de conexão.");
+              } finally {
+                setPackingBusy(false);
+              }
+            })();
+          }}
+          onMarkShipped={() => {
+            void (async () => {
+              const orderId = packingModalOrder.id;
+              setPackingBusy(true);
+              try {
+                const res = await fetch(`/api/admin/orders/${orderId}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ shippingStatus: "shipped" }),
+                });
+                if (!res.ok) {
+                  const data = (await res.json()) as { error?: string };
+                  alert(data.error ?? "Erro ao marcar como enviado.");
+                  return;
+                }
+                patchOrder(orderId, { shippingStatus: "shipped" });
                 setPackingModalOrder(null);
               } catch {
                 alert("Erro de conexão.");

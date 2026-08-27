@@ -1,4 +1,5 @@
 import {
+  ExchangeBalanceStatus,
   ExchangeShippingType,
   ExchangeStatus,
 } from "@/app/generated/prisma/client";
@@ -220,13 +221,19 @@ export async function generateExchangeLabel(input: {
   }
 
   if (input.type === "OUTBOUND") {
+    if (exchange.balanceStatus === ExchangeBalanceStatus.PENDING) {
+      throw new ExchangeError(
+        "PAYMENT_PENDING",
+        "Aguarde o pagamento da cliente antes de gerar a etiqueta de reenvio."
+      );
+    }
     if (
       exchange.status !== ExchangeStatus.READY_OUTBOUND &&
       exchange.status !== ExchangeStatus.OUTBOUND
     ) {
       throw new ExchangeError(
         "INVALID_STATUS",
-        "Conclua a conferência antes de gerar a etiqueta de reenvio."
+        "Conclua a conferência e o pagamento antes de gerar a etiqueta de reenvio."
       );
     }
   }

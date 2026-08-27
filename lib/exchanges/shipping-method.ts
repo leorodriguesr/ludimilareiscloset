@@ -1,8 +1,5 @@
 import type { ExchangeShippingMethod } from "@/app/generated/prisma/client";
-import {
-  ARRANGED_DELIVERY_LABELS,
-  resolveArrangedDeliveryDisplay,
-} from "@/lib/admin-sale/arranged-delivery";
+import { parseArrangedDeliveryMode } from "@/lib/admin-sale/arranged-delivery";
 
 export const EXCHANGE_SHIPPING_METHOD_LABELS: Record<
   ExchangeShippingMethod,
@@ -10,7 +7,17 @@ export const EXCHANGE_SHIPPING_METHOD_LABELS: Record<
 > = {
   CARRIER: "Transportadora",
   STORE_PICKUP: "Na loja / retirada",
-  LOCAL_COURIER: "Coleta local (Uber / motoboy)",
+  LOCAL_COURIER: "Moto boy da loja",
+};
+
+/** Como a peça volta (troca e devolução). */
+export const EXCHANGE_RETURN_METHOD_LABELS: Record<
+  ExchangeShippingMethod,
+  string
+> = {
+  CARRIER: "Transportadora",
+  LOCAL_COURIER: "Moto boy da loja",
+  STORE_PICKUP: "Será devolvida pela cliente",
 };
 
 export function isLocalExchangeShippingMethod(
@@ -25,18 +32,18 @@ export function defaultExchangeShippingMethodForOrder(order: {
   deliveryNotes?: string | null;
   shippingAmount?: number | null;
 }): ExchangeShippingMethod {
-  if (order.fulfillmentType !== "ARRANGED") return "CARRIER";
+  if (order.fulfillmentType === "CARRIER") return "CARRIER";
 
-  const { typeLabel } = resolveArrangedDeliveryDisplay({
-    shippingServiceName: order.shippingServiceName,
-    deliveryNotes: order.deliveryNotes,
-    shippingAmount: order.shippingAmount ?? 0,
-  });
-
-  if (typeLabel === ARRANGED_DELIVERY_LABELS.pickup) {
-    return "STORE_PICKUP";
+  if (order.fulfillmentType === "ARRANGED") {
+    const mode = parseArrangedDeliveryMode({
+      shippingServiceName: order.shippingServiceName,
+      deliveryNotes: order.deliveryNotes,
+    });
+    if (mode === "pickup") return "STORE_PICKUP";
+    return "LOCAL_COURIER";
   }
-  return "LOCAL_COURIER";
+
+  return "CARRIER";
 }
 
 export function exchangeShippingMethodServiceName(
