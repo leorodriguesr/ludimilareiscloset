@@ -18,7 +18,10 @@ import { canManuallyMarkCarrierAsShipped } from "@/lib/fulfillment/shipping-stat
 import { shippingTrackingUrl } from "@/lib/shipping/tracking-url";
 import type { NormalizedShippingOption } from "@/lib/shipping/types";
 import { ExchangeShipmentQueue } from "@/components/admin/ExchangeShipmentQueue";
-import { orderCustomerDisplayName } from "@/lib/admin-sale/customer-display";
+import {
+  isPendingAdminSaleCustomer,
+  orderCustomerDisplayName,
+} from "@/lib/admin-sale/customer-display";
 import {
   arrangedDeliveryLabelFromServiceName,
   isInsideDelivery,
@@ -214,6 +217,36 @@ function fmtTime(iso: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(iso));
+}
+
+const NAME_PARTICLES = new Set(["de", "da", "do", "das", "dos", "e", "del", "di"]);
+
+function shortCustomerGivenNames(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 2) return parts.join(" ");
+  if (NAME_PARTICLES.has(parts[1].toLowerCase()) && parts[2]) {
+    return `${parts[0]} ${parts[1]} ${parts[2]}`;
+  }
+  return `${parts[0]} ${parts[1]}`;
+}
+
+function packingListCustomerName(order: ShipmentOrder): string {
+  const full = orderCustomerDisplayName(order);
+  if (isPendingAdminSaleCustomer(order)) return full;
+  return shortCustomerGivenNames(full);
+}
+
+function packingListPieceDetail(
+  piece: CartPieceSelection,
+  identification: string
+): string {
+  const pieceName = piece.pieceName.trim();
+  const skipName =
+    pieceName.length > 0 &&
+    pieceName.toLowerCase() === identification.trim().toLowerCase();
+  return [skipName ? null : pieceName || null, piece.color, piece.size]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 function orderNumberLabel(order: ShipmentOrder) {
@@ -710,9 +743,22 @@ function PackingListPrint({
             inset: 0 auto auto 0 !important;
             width: 100% !important;
             margin: 0 !important;
-            padding: 12mm !important;
+            padding: 10mm !important;
             background: white !important;
             color: black !important;
+          }
+          #packing-list-print table { width: 100%; border-collapse: collapse; }
+          #packing-list-print thead { display: table-header-group; }
+          #packing-list-print tbody { break-inside: avoid; }
+          #packing-list-print .packing-products {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+          }
+          #packing-list-print .packing-product {
+            min-width: 0;
+            border: 1px solid #c8c8c8;
+            padding: 4px 6px;
           }
         }
       `}</style>
@@ -721,110 +767,125 @@ function PackingListPrint({
         className="fixed left-[-9999px] top-0 w-[210mm] bg-white p-8 text-black"
         aria-hidden
       >
-        <header className="mb-5 border-b border-black pb-3">
-          <h1 className="text-lg font-bold">Lista por embalar</h1>
-          <p className="mt-1 text-sm">
+        <header className="mb-3 flex items-baseline justify-between gap-4 border-b border-black pb-2">
+          <h1 className="text-base font-bold">Lista por embalar</h1>
+          <p className="text-xs">
             {orders.length} pedido{orders.length !== 1 ? "s" : ""} · {printedAt}
           </p>
         </header>
 
-        <ul className="space-y-0">
+        <table className="w-full border-collapse text-[11px] leading-snug">
+          <thead>
+            <tr>
+              <th className="w-[9%] border border-black px-1.5 py-1.5 text-center text-[9px] font-semibold uppercase tracking-wide">
+                Pedido
+              </th>
+              <th className="w-[16%] border border-black px-1.5 py-1.5 text-left text-[9px] font-semibold uppercase tracking-wide">
+                Cliente
+              </th>
+              <th className="w-[11%] border border-black px-1.5 py-1.5 text-left text-[9px] font-semibold uppercase tracking-wide">
+                Pagamento
+              </th>
+              <th className="w-[13%] border border-black px-1.5 py-1.5 text-left text-[9px] font-semibold uppercase tracking-wide">
+                Entrega
+              </th>
+              <th className="border border-black px-1.5 py-1.5 text-left text-[9px] font-semibold uppercase tracking-wide">
+                Produtos
+              </th>
+              <th className="w-8 border border-black px-1 py-1.5 text-center text-[9px] font-semibold uppercase tracking-wide">
+                ✓
+              </th>
+            </tr>
+          </thead>
           {orders.map((order) => {
-            const name = orderCustomerDisplayName(order);
-            const deliveryOption = shipmentFreightTypeLabel(order);
-            const saleNotes = order.internalNotes?.trim() || null;
-            const deliveryNotes = shipmentDeliveryUserNotes(order);
-            const hasNotes = Boolean(saleNotes || deliveryNotes);
             const items = order.items ?? [];
-            const hasUnpaidItems = items.some(shipmentItemIsUnpaid);
+            const saleNote = order.internalNotes?.trim() || null;
+            const deliveryNote = shipmentDeliveryUserNotes(order);
+            const noteBits = [
+              saleNote ? `Venda: ${saleNote}` : null,
+              deliveryNote ? `Entrega: ${deliveryNote}` : null,
+            ].filter(Boolean);
             return (
-              <li
-                key={order.id}
-                className="flex gap-3 border-b border-stone-300 py-3 break-inside-avoid"
-              >
-                <p className="mt-0.5 w-10 shrink-0 font-mono text-sm font-semibold">
-                  {orderNumberLabel(order)}
-                </p>
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold leading-snug">{name}</p>
-                  <p className="mt-1 inline-block rounded border border-black px-2 py-0.5 text-sm font-semibold">
-                    Entrega: {deliveryOption}
-                  </p>
-                  {hasUnpaidItems ? (
-                    <p className="mt-1.5 text-sm font-bold uppercase tracking-wide">
-                      Atenção: peça com pagamento pendente — não enviar
-                    </p>
-                  ) : null}
-                  {hasNotes ? (
-                    <div className="mt-2 rounded border-2 border-black bg-stone-100 px-2.5 py-2">
-                      <p className="text-[10px] font-bold uppercase tracking-wide">
-                        Observações
-                      </p>
-                      {saleNotes ? (
-                        <p className="mt-1 text-sm leading-snug">
-                          <span className="font-bold">Venda:</span> {saleNotes}
-                        </p>
-                      ) : null}
-                      {deliveryNotes ? (
-                        <p className="mt-1 text-sm leading-snug">
-                          <span className="font-bold">Entrega:</span> {deliveryNotes}
-                        </p>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {items.length > 0 ? (
-                    <div className="mt-2 flex flex-wrap gap-x-8 gap-y-3">
-                      {items.map((item) => {
-                        const productName = orderItemDisplayName(item);
-                        const pieces = parsePieces(item.pieceSelectionsJson);
-                        const unpaid = shipmentItemIsUnpaid(item);
-                        return (
-                          <div
-                            key={item.id}
-                            className={`min-w-[9rem] max-w-[14rem] ${
-                              unpaid ? "rounded border-2 border-black px-2 py-1.5" : ""
-                            }`}
-                          >
-                            <p className="text-sm font-semibold leading-snug">
-                              {productName}
-                              {item.quantity > 1 ? (
-                                <span className="font-normal"> × {item.quantity}</span>
-                              ) : null}
-                            </p>
-                            {unpaid ? (
-                              <p className="mt-0.5 text-xs font-bold uppercase tracking-wide">
-                                Pagamento pendente
+              <tbody key={order.id}>
+                <tr className="align-top">
+                  <td className="border border-black px-1.5 py-2 text-center font-mono text-xs font-semibold">
+                    {orderNumberLabel(order)}
+                  </td>
+                  <td className="border border-black px-1.5 py-2 font-semibold">
+                    {packingListCustomerName(order)}
+                  </td>
+                  <td className="border border-black px-1.5 py-2 tabular-nums">
+                    {order.paidAt ? fmtDate(order.paidAt) : "—"}
+                  </td>
+                  <td className="border border-black px-1.5 py-2">
+                    {shipmentFreightTypeLabel(order)}
+                  </td>
+                  <td className="border border-black px-1.5 py-2">
+                    {items.length > 0 ? (
+                      <div className="packing-products grid grid-cols-2 gap-1.5">
+                        {items.map((item) => {
+                          const identification = orderItemDisplayName(item);
+                          const pieces = parsePieces(item.pieceSelectionsJson);
+                          const unpaid = shipmentItemIsUnpaid(item);
+                          return (
+                            <div
+                              key={item.id}
+                              className="packing-product min-w-0 border border-stone-300 px-1.5 py-1"
+                            >
+                              <p className="font-semibold leading-snug">
+                                {identification}
+                                {item.quantity > 1 ? (
+                                  <span className="font-normal"> × {item.quantity}</span>
+                                ) : null}
+                                {unpaid ? (
+                                  <span className="font-normal"> (pendente)</span>
+                                ) : null}
                               </p>
-                            ) : null}
-                            {pieces.length > 0 ? (
-                              <ul className="mt-1 space-y-0.5 text-sm">
-                                {pieces.map((piece, index) => {
-                                  const details = [piece.pieceName, piece.color, piece.size]
-                                    .filter(Boolean)
-                                    .join(" · ");
-                                  if (!details) return null;
-                                  return (
-                                    <li key={`${item.id}-piece-${index}`}>{details}</li>
-                                  );
-                                })}
-                              </ul>
-                            ) : null}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <p className="mt-1.5 text-sm text-stone-500">Sem produtos</p>
-                  )}
-                </div>
-                <span
-                  className="mt-0.5 h-4 w-4 shrink-0 rounded-sm border-2 border-black"
-                  aria-hidden
-                />
-              </li>
+                              {pieces.length > 0 ? (
+                                <ul className="mt-0.5 space-y-0.5">
+                                  {pieces.map((piece, index) => {
+                                    const details = packingListPieceDetail(
+                                      piece,
+                                      identification
+                                    );
+                                    if (!details) return null;
+                                    return (
+                                      <li key={`${item.id}-piece-${index}`}>
+                                        {details}
+                                      </li>
+                                    );
+                                  })}
+                                </ul>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <span>—</span>
+                    )}
+                  </td>
+                  <td className="border border-black px-1 py-2 text-center align-middle">
+                    <span
+                      className="inline-block h-3.5 w-3.5 border-2 border-black"
+                      aria-hidden
+                    />
+                  </td>
+                </tr>
+                {noteBits.length > 0 ? (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="border border-black bg-stone-100 px-2 py-1.5 text-[10px] leading-snug"
+                    >
+                      <span className="font-semibold">Obs.:</span> {noteBits.join(" · ")}
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
             );
           })}
-        </ul>
+        </table>
       </div>
     </>,
     document.body
