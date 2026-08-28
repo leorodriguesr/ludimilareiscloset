@@ -23,6 +23,7 @@ import {
   orderCustomerDisplayName,
 } from "@/lib/admin-sale/customer-display";
 import {
+  ARRANGED_DELIVERY_LABELS,
   arrangedDeliveryLabelFromServiceName,
   isInsideDelivery,
   orderDeliveryUserNotes,
@@ -374,6 +375,12 @@ function shipmentFreightTypeLabel(order: ShipmentOrder): string {
   }
 
   return shortCarrierLabel(order.shippingServiceName) ?? "—";
+}
+
+function packingListDeliveryLabel(order: ShipmentOrder): string {
+  const label = shipmentFreightTypeLabel(order);
+  if (label === ARRANGED_DELIVERY_LABELS.store_delivery) return "Entregador";
+  return label;
 }
 
 function shipmentDeliveryUserNotes(order: ShipmentOrder): string | null {
@@ -760,6 +767,12 @@ function PackingListPrint({
             border: 1px solid #c8c8c8;
             padding: 4px 6px;
           }
+          #packing-list-print .packing-row-with-notes td {
+            border-bottom-color: #c8c8c8;
+          }
+          #packing-list-print .packing-notes td {
+            border-top-color: #c8c8c8;
+          }
         }
       `}</style>
       <div
@@ -780,16 +793,16 @@ function PackingListPrint({
               <th className="w-[9%] border border-black px-1.5 py-1.5 text-center text-[9px] font-semibold uppercase tracking-wide">
                 Pedido
               </th>
-              <th className="w-[16%] border border-black px-1.5 py-1.5 text-left text-[9px] font-semibold uppercase tracking-wide">
+              <th className="w-[16%] border border-black px-1.5 py-1.5 text-center text-[9px] font-semibold uppercase tracking-wide">
                 Cliente
               </th>
-              <th className="w-[11%] border border-black px-1.5 py-1.5 text-left text-[9px] font-semibold uppercase tracking-wide">
+              <th className="w-[11%] border border-black px-1.5 py-1.5 text-center text-[9px] font-semibold uppercase tracking-wide">
                 Pagamento
               </th>
-              <th className="w-[13%] border border-black px-1.5 py-1.5 text-left text-[9px] font-semibold uppercase tracking-wide">
+              <th className="w-[13%] border border-black px-1.5 py-1.5 text-center text-[9px] font-semibold uppercase tracking-wide">
                 Entrega
               </th>
-              <th className="border border-black px-1.5 py-1.5 text-left text-[9px] font-semibold uppercase tracking-wide">
+              <th className="border border-black px-1.5 py-1.5 text-center text-[9px] font-semibold uppercase tracking-wide">
                 Produtos
               </th>
               <th className="w-8 border border-black px-1 py-1.5 text-center text-[9px] font-semibold uppercase tracking-wide">
@@ -807,18 +820,18 @@ function PackingListPrint({
             ].filter(Boolean);
             return (
               <tbody key={order.id}>
-                <tr className="align-top">
+                <tr className={`align-top${noteBits.length > 0 ? " packing-row-with-notes" : ""}`}>
                   <td className="border border-black px-1.5 py-2 text-center font-mono text-xs font-semibold">
                     {orderNumberLabel(order)}
                   </td>
                   <td className="border border-black px-1.5 py-2 font-semibold">
                     {packingListCustomerName(order)}
                   </td>
-                  <td className="border border-black px-1.5 py-2 tabular-nums">
+                  <td className="border border-black px-1.5 py-2 text-center tabular-nums">
                     {order.paidAt ? fmtDate(order.paidAt) : "—"}
                   </td>
-                  <td className="border border-black px-1.5 py-2">
-                    {shipmentFreightTypeLabel(order)}
+                  <td className="border border-black px-1.5 py-2 text-center">
+                    {packingListDeliveryLabel(order)}
                   </td>
                   <td className="border border-black px-1.5 py-2">
                     {items.length > 0 ? (
@@ -873,10 +886,10 @@ function PackingListPrint({
                   </td>
                 </tr>
                 {noteBits.length > 0 ? (
-                  <tr>
+                  <tr className="packing-notes">
                     <td
                       colSpan={6}
-                      className="border border-black bg-stone-100 px-2 py-1.5 text-[10px] leading-snug"
+                      className="border border-black border-t-stone-300 bg-stone-100 px-2 py-1.5 text-[10px] leading-snug"
                     >
                       <span className="font-semibold">Obs.:</span> {noteBits.join(" · ")}
                     </td>
