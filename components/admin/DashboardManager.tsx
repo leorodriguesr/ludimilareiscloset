@@ -216,7 +216,7 @@ export function DashboardManager() {
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <div className="inline-flex rounded-lg border border-stone-200 bg-white p-0.5">
+          <div className="inline-flex w-fit self-start rounded-lg border border-stone-200 bg-white p-0.5">
             {(
               [
                 ["today", "Hoje"],
@@ -269,7 +269,7 @@ export function DashboardManager() {
             <button
               type="submit"
               disabled={loading}
-              className="box-border h-8 rounded-lg bg-stone-900 px-3 text-xs font-semibold text-white hover:bg-stone-800 disabled:opacity-50"
+              className="box-border h-8 rounded-lg bg-sky-100 px-3 text-xs font-semibold text-sky-900 shadow-sm ring-1 ring-sky-200/80 transition-colors hover:bg-sky-200 disabled:opacity-50"
             >
               Aplicar
             </button>
