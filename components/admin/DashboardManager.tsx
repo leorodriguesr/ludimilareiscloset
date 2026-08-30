@@ -411,6 +411,9 @@ export function DashboardManager() {
                 {metrics.salesByState.length > 0 ? (
                   <div className="flex items-center gap-2">
                     <p className="text-xs text-stone-500">
+                      {metrics.paidCount.toLocaleString("pt-BR")}{" "}
+                      {metrics.paidCount === 1 ? "venda" : "vendas"}
+                      {" · "}
                       {metrics.salesByState.length}{" "}
                       {metrics.salesByState.length === 1 ? "estado" : "estados"}
                     </p>

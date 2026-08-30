@@ -3,6 +3,7 @@ import {
   isStoreMotoboyDelivery,
 } from "@/lib/admin-sale/arranged-delivery";
 import { ORDER_STATUS } from "@/lib/orders/constants";
+import { expireOrdersBatch } from "@/lib/orders/expire-orders";
 import { prisma } from "@/lib/prisma";
 
 const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
@@ -78,21 +79,40 @@ export function parseDashboardDateRange(
   return normalizeRange(from, to);
 }
 
+function dateInRange(
+  value: Date | null | undefined,
+  bounds: { gte: Date; lte: Date }
+): boolean {
+  return Boolean(value && value >= bounds.gte && value <= bounds.lte);
+}
+
 export async function getDashboardMetrics(
   range: DashboardDateRange
 ): Promise<DashboardMetrics> {
   const bounds = rangeToUtcBounds(range);
 
+  try {
+    await expireOrdersBatch();
+  } catch (error) {
+    console.error("[dashboard-metrics] expire batch", error);
+  }
+
+  const inPeriod = { gte: bounds.gte, lte: bounds.lte };
   const orders = await prisma.order.findMany({
     where: {
-      paidAt: {
-        gte: bounds.gte,
-        lte: bounds.lte,
-      },
+      OR: [
+        { paidAt: inPeriod },
+        { createdAt: inPeriod },
+        { cancelledAt: inPeriod },
+        { expiredAt: inPeriod },
+      ],
     },
     select: {
       status: true,
       paidAt: true,
+      createdAt: true,
+      cancelledAt: true,
+      expiredAt: true,
       fulfillmentType: true,
       shippingServiceName: true,
       deliveryNotes: true,
@@ -113,16 +133,26 @@ export async function getDashboardMetrics(
   const stateCounts = new Map<string, number>();
 
   for (const order of orders) {
-    const isPaid = order.status === ORDER_STATUS.PAID || Boolean(order.paidAt);
     const isCancelled =
       order.status === ORDER_STATUS.CANCELLED ||
       order.status === ORDER_STATUS.EXPIRED;
+    const paidInPeriod = dateInRange(order.paidAt, bounds);
+    const createdInPeriod = dateInRange(order.createdAt, bounds);
+    const cancelledInPeriod =
+      dateInRange(order.cancelledAt, bounds) ||
+      dateInRange(order.expiredAt, bounds) ||
+      (!order.cancelledAt && !order.expiredAt && createdInPeriod);
 
-    if (isCancelled) cancelledCount += 1;
-    else if (isPaid) paidCount += 1;
-    else if (order.status === ORDER_STATUS.PENDING_PAYMENT) waitingCount += 1;
+    if (isCancelled && cancelledInPeriod) cancelledCount += 1;
+    else if (paidInPeriod && !isCancelled) paidCount += 1;
+    else if (
+      order.status === ORDER_STATUS.PENDING_PAYMENT &&
+      createdInPeriod
+    ) {
+      waitingCount += 1;
+    }
 
-    if (!isPaid || isCancelled) continue;
+    if (!paidInPeriod || isCancelled) continue;
 
     revenueTotal += order.total;
     productsSoldCount += order.items.reduce(
@@ -145,8 +175,7 @@ export async function getDashboardMetrics(
       outboundSalesCount += 1;
     }
 
-    const state = normalizeState(order.addressState);
-    if (!state) continue;
+    const state = normalizeState(order.addressState) ?? "Não informado";
     stateCounts.set(state, (stateCounts.get(state) ?? 0) + 1);
   }
 
