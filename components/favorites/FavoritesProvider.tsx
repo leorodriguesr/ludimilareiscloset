@@ -7,7 +7,7 @@ import {
   useEffect,
   useState,
 } from "react";
-import { usePathname } from "next/navigation";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { LoginPromptModal } from "./LoginPromptModal";
 
 interface FavoritesContextValue {
@@ -29,42 +29,35 @@ export function useFavorites() {
 }
 
 export function FavoritesProvider({ children }: { children: React.ReactNode }) {
+  const { user, loading: authLoading } = useAuth();
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
-  const pathname = usePathname();
+  const userId = user?.id ?? null;
 
-  const syncAuth = useCallback(() => {
-    fetch("/api/auth/me")
+  useEffect(() => {
+    if (authLoading) return;
+    if (!userId) {
+      setLoggedIn(false);
+      setFavorites(new Set());
+      return;
+    }
+
+    setLoggedIn(true);
+    let cancelled = false;
+    void fetch("/api/favorites")
       .then((r) => r.json())
-      .then((d: { user: unknown }) => {
-        const isLogged = !!d.user;
-        setLoggedIn(isLogged);
-        if (isLogged) {
-          return fetch("/api/favorites")
-            .then((r) => r.json())
-            .then((ids: string[]) => setFavorites(new Set(ids)));
-        } else {
-          setFavorites(new Set());
-        }
+      .then((ids: string[]) => {
+        if (!cancelled && Array.isArray(ids)) setFavorites(new Set(ids));
       })
       .catch(() => {
-        setLoggedIn(false);
-        setFavorites(new Set());
+        if (!cancelled) setFavorites(new Set());
       });
-  }, []);
 
-  // Re-verifica auth e recarrega favoritos sempre que a rota muda
-  // (cobre logout, login e navegação entre páginas)
-  useEffect(() => {
-    syncAuth();
-  }, [pathname, syncAuth]);
-
-  // Escuta login via Google One Tap (não muda pathname, só faz router.refresh)
-  useEffect(() => {
-    window.addEventListener("auth:login", syncAuth);
-    return () => window.removeEventListener("auth:login", syncAuth);
-  }, [syncAuth]);
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, userId]);
 
   const toggle = useCallback(
     async (productId: string) => {
@@ -73,7 +66,6 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Optimistic update
       setFavorites((prev) => {
         const next = new Set(prev);
         if (next.has(productId)) next.delete(productId);
@@ -88,7 +80,6 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
           body: JSON.stringify({ productId }),
         });
 
-        // Sessão expirou enquanto a página estava aberta
         if (res.status === 401) {
           setLoggedIn(false);
           setFavorites(new Set());
@@ -106,7 +97,6 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
           return next;
         });
       } catch {
-        // Reverte update otimista em caso de erro
         setFavorites((prev) => {
           const next = new Set(prev);
           if (next.has(productId)) next.delete(productId);

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { cloudinaryImageUrl } from "@/lib/images/cloudinary-url";
 import { formatPrice } from "@/lib/format";
 import { installmentValueEqualParts } from "@/lib/product-pricing";
 import { FavoriteButton } from "@/components/favorites/FavoriteButton";
@@ -34,6 +35,7 @@ interface ProductCardProps {
   colors?: Color[];
   /** Nome da primeira peça — usado para bater a foto pela cor dessa peça. */
   colorPieceName?: string | null;
+  priority?: boolean;
 }
 
 function IconCard({ className }: { className?: string }) {
@@ -65,6 +67,7 @@ export function ProductCard({
   tag,
   colors = [],
   colorPieceName = null,
+  priority = false,
 }: ProductCardProps) {
   const showPix =
     pixPrice != null && Number.isFinite(pixPrice) && pixPrice > 0;
@@ -107,8 +110,15 @@ export function ProductCard({
         <div className="relative aspect-[3/4] overflow-hidden bg-stone-100">
           {imageUrl ? (
             <img
-              src={imageUrl}
+              src={cloudinaryImageUrl(imageUrl, 720)}
+              srcSet={`${cloudinaryImageUrl(imageUrl, 360)} 360w, ${cloudinaryImageUrl(imageUrl, 720)} 720w`}
+              sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
               alt={name}
+              width={720}
+              height={960}
+              loading={priority ? "eager" : "lazy"}
+              decoding="async"
+              fetchPriority={priority ? "high" : "low"}
               className="h-full w-full object-cover object-center transition-transform duration-500 group-hover:scale-105"
             />
           ) : (

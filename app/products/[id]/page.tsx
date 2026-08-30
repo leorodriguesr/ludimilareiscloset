@@ -5,6 +5,8 @@ import { productFullInclude } from "@/lib/product-include";
 import { ProductMediaGallery } from "@/components/product/ProductMediaGallery";
 import { ProductSummaryPanel } from "@/components/product/ProductSummaryPanel";
 
+export const revalidate = 60;
+
 interface ProductPageProps {
   params: Promise<{ id: string }>;
 }

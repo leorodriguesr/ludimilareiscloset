@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { formatPrice } from "@/lib/format";
+import { cloudinaryImageUrl } from "@/lib/images/cloudinary-url";
 
 interface Product {
   id: string;
@@ -170,8 +171,12 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
                             <div className="h-14 w-14 shrink-0 overflow-hidden bg-stone-100">
                               {product.images[0] ? (
                                 <img
-                                  src={product.images[0].url}
+                                  src={cloudinaryImageUrl(product.images[0].url, 160)}
                                   alt={product.name}
+                                  width={160}
+                                  height={160}
+                                  loading="lazy"
+                                  decoding="async"
                                   className="h-full w-full object-cover"
                                 />
                               ) : (

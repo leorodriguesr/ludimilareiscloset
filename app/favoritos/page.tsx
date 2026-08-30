@@ -61,9 +61,10 @@ export default async function FavoritosPage() {
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-0.5 sm:grid-cols-3 lg:grid-cols-4">
-          {favorites.map(({ product }) => (
+          {favorites.map(({ product }, index) => (
             <ProductCard
               key={product.id}
+              priority={index < 4}
               id={product.id}
               name={product.name}
               price={product.price}

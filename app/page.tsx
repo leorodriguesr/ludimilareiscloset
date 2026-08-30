@@ -9,7 +9,7 @@ import { productListInclude } from "@/lib/product-include";
 import { publicCatalogProductWhere } from "@/lib/public-product-where";
 import { isSizeOnlyColorName } from "@/lib/piece-size-only-color";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 interface HomeProps {
   searchParams: Promise<{ c?: string }>;
@@ -113,7 +113,7 @@ export default async function Home({ searchParams }: HomeProps) {
                 <EmptyState message="Nenhum produto encontrado nesta categoria." />
               ) : (
                 <ProductGrid>
-                  <ProductCards products={filteredProducts} />
+                  <ProductCards products={filteredProducts} eagerCount={4} />
                 </ProductGrid>
               )}
             </section>
@@ -168,7 +168,10 @@ function HomeCatalog({
               </div>
             ) : null}
             <ProductGrid>
-              <ProductCards products={block.products} />
+              <ProductCards
+                products={block.products}
+                eagerCount={index === 0 ? 4 : 0}
+              />
             </ProductGrid>
           </section>
           {index === 0 ? <SellerAssistBanner /> : null}
@@ -202,14 +205,21 @@ type ProductCardData = {
   pieces: { name: string; colors: { id: string; name: string; hex: string | null }[] }[];
 };
 
-function ProductCards({ products }: { products: ProductCardData[] }) {
+function ProductCards({
+  products,
+  eagerCount = 0,
+}: {
+  products: ProductCardData[];
+  eagerCount?: number;
+}) {
   return (
     <>
-      {products.map((product) => {
+      {products.map((product, index) => {
         const { pieceName, colors } = firstPieceColors(product.pieces);
         return (
           <ProductCard
             key={product.id}
+            priority={index < eagerCount}
             id={product.id}
             name={product.name}
             price={product.price}

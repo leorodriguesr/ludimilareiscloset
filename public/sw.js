@@ -10,5 +10,13 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
+  const url = new URL(event.request.url);
+  if (
+    url.pathname.startsWith("/api/") ||
+    url.pathname.startsWith("/_next/") ||
+    url.searchParams.has("_rsc")
+  ) {
+    return;
+  }
   event.respondWith(fetch(event.request));
 });

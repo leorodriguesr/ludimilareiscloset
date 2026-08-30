@@ -9,7 +9,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { usePathname } from "next/navigation";
 import {
   hasPermission as roleHasPermission,
   isStaffRole,
@@ -46,7 +45,6 @@ function parseRole(raw: unknown): AppRole | null {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
-  const pathname = usePathname();
 
   const refresh = useCallback(async () => {
     try {
@@ -82,9 +80,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    setLoading(true);
     void refresh();
-  }, [pathname, refresh]);
+  }, [refresh]);
 
   useEffect(() => {
     const onAuth = () => {

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { findBestImageIndex } from "@/lib/image-color-bindings";
+import { cloudinaryImageUrl } from "@/lib/images/cloudinary-url";
 import { getVideoEmbedInfo } from "@/lib/video-embed";
 
 export type ProductMediaImage = { url: string; colorName?: string | null };
@@ -22,12 +23,32 @@ function buildMediaItems(
   return items;
 }
 
-function MediaSlide({ item, label }: { item: MediaItem; label: string }) {
+function MediaSlide({
+  item,
+  label,
+  load,
+  priority,
+}: {
+  item: MediaItem;
+  label: string;
+  load: boolean;
+  priority?: boolean;
+}) {
   if (item.kind === "image") {
+    if (!load) {
+      return <div className="h-full w-full bg-stone-100" aria-hidden />;
+    }
     return (
       <img
-        src={item.url}
+        src={cloudinaryImageUrl(item.url, 1200)}
+        srcSet={`${cloudinaryImageUrl(item.url, 640)} 640w, ${cloudinaryImageUrl(item.url, 1200)} 1200w`}
+        sizes="(min-width: 1024px) 38vw, 100vw"
         alt={label}
+        width={1200}
+        height={1800}
+        loading={priority ? "eager" : "lazy"}
+        fetchPriority={priority ? "high" : "low"}
+        decoding="async"
         className="h-full w-full object-cover"
         draggable={false}
       />
@@ -182,7 +203,12 @@ export function ProductMediaGallery({ images, productName, videoUrl }: ProductMe
                       transition: "transform 480ms cubic-bezier(0.4, 0, 0.2, 1)",
                     }}
                   >
-                    <MediaSlide item={item} label={`${productName} — foto ${i + 1}`} />
+                    <MediaSlide
+                      item={item}
+                      label={`${productName} — foto ${i + 1}`}
+                      load={i >= currentIndex - 1 && i <= currentIndex + 2}
+                      priority={i === currentIndex || i === currentIndex + 1}
+                    />
                   </div>
                 </div>
               </div>
@@ -202,7 +228,12 @@ export function ProductMediaGallery({ images, productName, videoUrl }: ProductMe
           >
             {mediaItems.map((item, i) => (
               <div key={i} className="aspect-[3/4] w-full flex-none overflow-hidden bg-stone-100">
-                <MediaSlide item={item} label={`${productName} — foto ${i + 1}`} />
+                <MediaSlide
+                  item={item}
+                  label={`${productName} — foto ${i + 1}`}
+                  load={Math.abs(i - currentIndex) <= 1}
+                  priority={i === currentIndex}
+                />
               </div>
             ))}
           </div>
