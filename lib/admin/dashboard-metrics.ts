@@ -21,6 +21,7 @@ export type DashboardMetrics = {
   cancelledCount: number;
   waitingCount: number;
   productsSoldCount: number;
+  revenueTotal: number;
   outboundSalesCount: number;
   inboundSalesCount: number;
   motoboyDeliveriesCount: number;
@@ -96,6 +97,7 @@ export async function getDashboardMetrics(
       shippingServiceName: true,
       deliveryNotes: true,
       addressState: true,
+      total: true,
       items: { select: { quantity: true } },
     },
   });
@@ -104,6 +106,7 @@ export async function getDashboardMetrics(
   let cancelledCount = 0;
   let waitingCount = 0;
   let productsSoldCount = 0;
+  let revenueTotal = 0;
   let outboundSalesCount = 0;
   let inboundSalesCount = 0;
   let motoboyDeliveriesCount = 0;
@@ -121,6 +124,7 @@ export async function getDashboardMetrics(
 
     if (!isPaid || isCancelled) continue;
 
+    revenueTotal += order.total;
     productsSoldCount += order.items.reduce(
       (sum, item) => sum + item.quantity,
       0
@@ -159,6 +163,7 @@ export async function getDashboardMetrics(
     cancelledCount,
     waitingCount,
     productsSoldCount,
+    revenueTotal: Math.round(revenueTotal * 100) / 100,
     outboundSalesCount,
     inboundSalesCount,
     motoboyDeliveriesCount,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { formatPrice } from "@/lib/format";
 
 type DashboardStateRow = {
   state: string;
@@ -14,6 +15,7 @@ type DashboardMetrics = {
   cancelledCount: number;
   waitingCount: number;
   productsSoldCount: number;
+  revenueTotal: number;
   outboundSalesCount: number;
   inboundSalesCount: number;
   motoboyDeliveriesCount: number;
@@ -299,22 +301,33 @@ export function DashboardManager() {
                     {metrics.paidCount.toLocaleString("pt-BR")}
                   </p>
                 </div>
-                <p className="max-w-[14rem] pb-1 text-xs leading-relaxed text-stone-500">
+                {/* <p className="max-w-[14rem] pb-1 text-xs leading-relaxed text-stone-500">
                   Pagamentos confirmados no período selecionado
-                </p>
+                </p> */}
               </div>
 
-              <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="rounded-xl bg-amber-50 px-4 py-3 ring-1 ring-amber-100">
+                  <p className="text-2xl font-semibold tabular-nums text-stone-900">
+                    {formatPrice(metrics.revenueTotal ?? 0)}
+                  </p>
+                  <p className="mt-4 text-sm font-medium text-amber-800">
+                    Faturamento
+                  </p>
+                  {/* <p className="mt-0.5 text-xs text-amber-800/70">
+                    Soma do total de cada venda paga
+                  </p> */}
+                </div>
                 <div className="rounded-xl bg-emerald-50 px-4 py-3 ring-1 ring-emerald-100">
                   <p className="text-2xl font-semibold tabular-nums text-stone-900">
                     {metrics.productsSoldCount.toLocaleString("pt-BR")}
                   </p>
-                  <p className="mt-1 text-sm font-medium text-emerald-800">
+                  <p className="mt-4 text-sm font-medium text-emerald-800">
                     Peças vendidas
                   </p>
-                  <p className="mt-0.5 text-xs text-emerald-800/70">
+                  {/* <p className="mt-0.5 text-xs text-emerald-800/70">
                     Soma das peças vendidas
-                  </p>
+                  </p> */}
                 </div>
                 <div className="rounded-xl bg-sky-50 px-4 py-3 ring-1 ring-sky-100">
                   <p className="text-2xl font-semibold tabular-nums text-stone-900">
@@ -322,12 +335,12 @@ export function DashboardManager() {
                       maximumFractionDigits: 1,
                     })}
                   </p>
-                  <p className="mt-1 text-sm font-medium text-sky-800">
+                  <p className="mt-4 text-sm font-medium text-sky-800">
                     Peças por venda
                   </p>
-                  <p className="mt-0.5 text-xs text-sky-800/70">
+                  {/* <p className="mt-0.5 text-xs text-sky-800/70">
                     Média de itens em cada venda paga
-                  </p>
+                  </p> */}
                 </div>
               </div>
             </section>
