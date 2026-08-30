@@ -12,6 +12,7 @@ import {
   type TextareaHTMLAttributes,
 } from "react";
 import { createPortal } from "react-dom";
+import { AdminListPagination } from "@/components/admin/AdminListPagination";
 import { OrderItemsEditor } from "@/components/admin/OrderItemsEditor";
 import { formatPrice } from "@/lib/format";
 import { formatDeliveryDaysLabel } from "@/lib/shipping/delivery-days-label";
@@ -128,7 +129,22 @@ type AdminOrder = {
   items: OrderItem[];
 };
 
-type ApiResponse = { orders: AdminOrder[]; total: number; page: number; limit: number };
+type SalesCounts = {
+  paid: number;
+  waiting: number;
+  to_pack: number;
+  cancelled: number;
+};
+
+type ApiResponse = {
+  orders: AdminOrder[];
+  total: number;
+  allTotal: number;
+  page: number;
+  limit: number;
+  origins?: string[];
+  counts?: SalesCounts;
+};
 type FilterKey = "paid" | "waiting" | "to_pack" | "cancelled";
 
 function normalizeSearchText(value: string): string {
@@ -152,6 +168,8 @@ function orderMatchesCustomerSearch(order: AdminOrder, query: string): boolean {
     order.email ?? "",
     order.user?.name ?? "",
     order.recipientName ?? "",
+    order.orderNumber != null ? String(order.orderNumber) : "",
+    order.orderNumber != null ? `#${order.orderNumber}` : "",
   ]
     .map(normalizeSearchText)
     .join(" ");
@@ -3466,6 +3484,20 @@ export function SalesManager() {
   const [filter, setFilter] = useState<FilterKey | null>(null);
   const [originFilter, setOriginFilter] = useState<string | null>(null);
   const [customerSearchQuery, setCustomerSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [listTotal, setListTotal] = useState(0);
+  const [listAllTotal, setListAllTotal] = useState(0);
+  const [listLimit, setListLimit] = useState(20);
+  const [filterCounts, setFilterCounts] = useState<SalesCounts>({
+    paid: 0,
+    waiting: 0,
+    to_pack: 0,
+    cancelled: 0,
+  });
+  const [originFilterOptions, setOriginFilterOptions] = useState<string[]>([
+    "checkout",
+  ]);
   const [saleDateRange, setSaleDateRange] = useState<SaleDateRange>(
     EMPTY_SALE_DATE_RANGE
   );
@@ -3495,22 +3527,41 @@ export function SalesManager() {
   }, [showWizard, products.length, fetchProducts]);
   const allRef = useRef<HTMLInputElement>(null);
 
-  const fetchOrders = useCallback(async (opts?: { silent?: boolean }) => {
-    const silent = opts?.silent === true;
-    if (!silent) {
-      setLoading(true);
-      setSelectedIds(new Set());
-    }
-    try {
-      const res = await fetch("/api/admin/orders");
-      const data = (await res.json()) as ApiResponse;
-      setOrders(data.orders ?? []);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, []);
+  const fetchOrders = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      const silent = opts?.silent === true;
+      if (!silent) {
+        setLoading(true);
+        setSelectedIds(new Set());
+      }
+      try {
+        const params = new URLSearchParams();
+        params.set("page", String(page));
+        if (filter) params.set("status", filter);
+        if (debouncedSearch) params.set("q", debouncedSearch);
+        if (originFilter) params.set("origin", originFilter);
+        const range = normalizeSaleDateRange(saleDateRange.from, saleDateRange.to);
+        if (range) {
+          params.set("from", range.from);
+          params.set("to", range.to);
+        }
+        const res = await fetch(`/api/admin/orders?${params.toString()}`);
+        const data = (await res.json()) as ApiResponse;
+        setOrders(data.orders ?? []);
+        setListTotal(data.total ?? 0);
+        setListAllTotal(data.allTotal ?? data.total ?? 0);
+        setListLimit(data.limit ?? 20);
+        if (data.counts) setFilterCounts(data.counts);
+        if (data.origins?.length) setOriginFilterOptions(data.origins);
+        if (data.page && data.page !== page) setPage(data.page);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [page, filter, debouncedSearch, originFilter, saleDateRange]
+  );
 
   const patchOrder = useCallback((id: string, patch: Partial<AdminOrder>) => {
     setOrders((prev) =>
@@ -3523,51 +3574,24 @@ export function SalesManager() {
   }, [fetchOrders]);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const next = customerSearchQuery.trim();
+      setDebouncedSearch((current) => {
+        if (current !== next) setPage(1);
+        return next;
+      });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [customerSearchQuery]);
+
+  useEffect(() => {
     void fetchOrders();
   }, [fetchOrders]);
 
-  const filterCounts = useMemo(
-    () => ({
-      paid: orders.filter(
-        (order) => !isInactiveSale(order) && order.paidAt
-      ).length,
-      waiting: orders.filter(
-        (order) => !isInactiveSale(order) && !order.paidAt
-      ).length,
-      to_pack: orders.filter(
-        (order) =>
-          !isInactiveSale(order) &&
-          order.paidAt &&
-          order.shippingStatus === "to_pack"
-      ).length,
-      cancelled: orders.filter((order) => isInactiveSale(order)).length,
-    }),
-    [orders]
-  );
-
-  const originFilterOptions = useMemo(
-    () => collectOriginFilterOptions(orders),
-    [orders]
-  );
-
-  useEffect(() => {
-    if (originFilter && !originFilterOptions.includes(originFilter)) {
-      setOriginFilter(null);
-    }
-  }, [originFilter, originFilterOptions]);
-
-  const visibleOrders = useMemo(() => {
-    const query = customerSearchQuery.trim();
-
-    return orders.filter((order) => {
-      if (!orderMatchesStatusFilter(order, filter)) return false;
-      if (!orderMatchesSaleDateRange(order, saleDateRange)) return false;
-      if (!orderMatchesOriginFilter(order, originFilter)) return false;
-      return orderMatchesCustomerSearch(order, query);
-    });
-  }, [orders, filter, customerSearchQuery, saleDateRange, originFilter]);
+  const visibleOrders = orders;
 
   function toggleFilter(key: FilterKey) {
+    setPage(1);
     setFilter((current) => (current === key ? null : key));
   }
 
@@ -3652,8 +3676,8 @@ export function SalesManager() {
           <h2 className="text-lg font-semibold text-stone-900">Vendas</h2>
           <p className="mt-0.5 text-sm text-stone-500">
             {hasListFilters
-              ? `${visibleOrders.length} de ${orders.length} pedido${orders.length !== 1 ? "s" : ""}`
-              : `${visibleOrders.length} pedido${visibleOrders.length !== 1 ? "s" : ""}`}
+              ? `${listTotal} de ${listAllTotal} pedido${listAllTotal !== 1 ? "s" : ""}`
+              : `${listAllTotal} pedido${listAllTotal !== 1 ? "s" : ""}`}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -3681,11 +3705,14 @@ export function SalesManager() {
         <StandaloneSaleWizard
           products={products}
           onClose={() => setShowWizard(false)}
-          onCreated={() => void fetchOrders()}
+          onCreated={() => {
+            setPage(1);
+            void fetchOrders();
+          }}
         />
       )}
-      <div className="flex min-w-0 w-full flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5 md:justify-between md:overflow-visible">
-        <div className="flex shrink-0 items-center gap-1.5">
+      <div className="flex min-w-0 w-full flex-col gap-1.5 md:flex-row md:items-center md:justify-between">
+        <div className="flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5">
           {FILTERS.map(({ key, label }) => (
             <button
               key={key}
@@ -3710,16 +3737,20 @@ export function SalesManager() {
 
           <SaleDatePicker
             range={saleDateRange}
-            onChange={setSaleDateRange}
+            onChange={(range) => {
+              setPage(1);
+              setSaleDateRange(range);
+            }}
           />
 
           <label className="relative shrink-0">
             <span className="sr-only">Filtrar por origem</span>
             <select
               value={originFilter ?? ""}
-              onChange={(e) =>
-                setOriginFilter(e.target.value ? e.target.value : null)
-              }
+              onChange={(e) => {
+                setPage(1);
+                setOriginFilter(e.target.value ? e.target.value : null);
+              }}
               className={`appearance-none ${SALES_TOOLBAR_SIZE} rounded-lg border pr-8 transition-colors focus:outline-none focus:ring-2 focus:ring-stone-200 ${
                 hasOriginFilter
                   ? "border-stone-900 bg-stone-900 text-white focus:ring-stone-300"
@@ -3758,8 +3789,8 @@ export function SalesManager() {
           </label>
         </div>
 
-        <label className="relative ml-1.5 min-w-0 w-full max-w-full flex-1 basis-40 md:ml-auto md:max-w-52 lg:max-w-64">
-          <span className="sr-only">Buscar por nome do cliente</span>
+        <label className="relative w-full shrink-0 md:w-52 lg:w-64">
+          <span className="sr-only">Buscar por cliente ou número do pedido</span>
           <svg
             className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-400"
             fill="none"
@@ -3779,7 +3810,7 @@ export function SalesManager() {
             inputMode="search"
             value={customerSearchQuery}
             onChange={(event) => setCustomerSearchQuery(event.target.value)}
-            placeholder="Buscar cliente…"
+            placeholder="Buscar cliente ou pedido…"
             className={`w-full rounded-lg border border-stone-200 bg-white text-stone-900 placeholder:text-stone-400 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-100 ${SALES_TOOLBAR_SIZE} pl-8 ${hasCustomerSearch ? "pr-8" : "pr-3"}`}
           />
           {hasCustomerSearch ? (
@@ -4004,6 +4035,14 @@ export function SalesManager() {
           </div>
         </div>
       )}
+
+      <AdminListPagination
+        page={page}
+        limit={listLimit}
+        total={listTotal}
+        disabled={loading}
+        onPageChange={setPage}
+      />
 
       <SaleOrderDrawer
         order={detailsOrder}

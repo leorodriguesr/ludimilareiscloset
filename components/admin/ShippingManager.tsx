@@ -11,6 +11,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
+import { AdminListPagination } from "@/components/admin/AdminListPagination";
 import { formatPrice } from "@/lib/format";
 import { formatDeliveryDaysLabel } from "@/lib/shipping/delivery-days-label";
 import { isCancelledProviderShipmentStatus } from "@/lib/shipping/service-id";
@@ -390,6 +391,32 @@ function shipmentDeliveryUserNotes(order: ShipmentOrder): string | null {
     deliveryNotes: order.deliveryNotes,
     shippingAmount: order.shippingQuotedPrice,
   });
+}
+
+function normalizeSearchText(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "");
+}
+
+function shipmentMatchesCustomerSearch(order: ShipmentOrder, query: string): boolean {
+  const normalizedQuery = normalizeSearchText(query);
+  if (!normalizedQuery) return true;
+
+  const haystack = [
+    orderCustomerDisplayName(order),
+    order.email ?? "",
+    order.recipientName ?? "",
+    orderNumberLabel(order),
+    order.orderNumber != null ? String(order.orderNumber) : "",
+    order.trackingCode ?? "",
+  ]
+    .map(normalizeSearchText)
+    .join(" ");
+
+  return haystack.includes(normalizedQuery);
 }
 
 function shipmentMatchesFilter(order: ShipmentOrder, filter: FilterKey | null): boolean {
@@ -2159,6 +2186,23 @@ export function ShippingManager() {
   const [orders, setOrders] = useState<ShipmentOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterKey | null>(null);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [listTotal, setListTotal] = useState(0);
+  const [listAllTotal, setListAllTotal] = useState(0);
+  const [listLimit, setListLimit] = useState(20);
+  const [filterCounts, setFilterCounts] = useState({
+    needs_label: 0,
+    to_pack: 0,
+    packed: 0,
+    shipped: 0,
+    delivered: 0,
+    cancelled: 0,
+  });
+  const [printPackingOrders, setPrintPackingOrders] = useState<ShipmentOrder[] | null>(
+    null
+  );
   const [wallet, setWallet] = useState<WalletInfo | null>(null);
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletError, setWalletError] = useState<string | null>(null);
@@ -2248,29 +2292,46 @@ export function ShippingManager() {
     }
   }, [fetchMelhorEnvioStatus]);
 
-  const fetchShipments = useCallback(async (opts?: { silent?: boolean }) => {
-    const silent = opts?.silent === true;
-    if (!silent) {
-      setLoading(true);
-      setSelectedIds(new Set());
-      setBulkMsg(null);
-    }
-    try {
-      const res = await fetch("/api/admin/shipments");
-      const data = (await res.json()) as {
-        orders?: ShipmentOrder[];
-        error?: string;
-      };
-      if (!res.ok) {
-        console.error(data.error);
-        if (!silent) setOrders([]);
-        return;
+  const fetchShipments = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      const silent = opts?.silent === true;
+      if (!silent) {
+        setLoading(true);
+        setSelectedIds(new Set());
+        setBulkMsg(null);
       }
-      setOrders(data.orders ?? []);
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, []);
+      try {
+        const params = new URLSearchParams();
+        params.set("page", String(page));
+        if (filter) params.set("filter", filter);
+        if (debouncedSearch) params.set("q", debouncedSearch);
+        const res = await fetch(`/api/admin/shipments?${params.toString()}`);
+        const data = (await res.json()) as {
+          orders?: ShipmentOrder[];
+          total?: number;
+          allTotal?: number;
+          page?: number;
+          limit?: number;
+          counts?: typeof filterCounts;
+          error?: string;
+        };
+        if (!res.ok) {
+          console.error(data.error);
+          if (!silent) setOrders([]);
+          return;
+        }
+        setOrders(data.orders ?? []);
+        setListTotal(data.total ?? 0);
+        setListAllTotal(data.allTotal ?? data.total ?? 0);
+        setListLimit(data.limit ?? 20);
+        if (data.counts) setFilterCounts(data.counts);
+        if (data.page && data.page !== page) setPage(data.page);
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [page, filter, debouncedSearch]
+  );
 
   const patchOrder = useCallback((id: string, patch: Partial<ShipmentOrder>) => {
     setOrders((prev) =>
@@ -2313,33 +2374,38 @@ export function ShippingManager() {
     window.history.replaceState({}, "", next);
   }, [fetchMelhorEnvioStatus]);
 
-  const filterCounts = useMemo(
-    () => ({
-      needs_label: orders.filter(
-        (order) => !order.labelUrl && order.fulfillmentType !== "ARRANGED"
-      ).length,
-      to_pack: orders.filter((order) => order.shippingStatus === "to_pack").length,
-      packed: orders.filter((order) => order.shippingStatus === "packed").length,
-      shipped: orders.filter((order) => order.shippingStatus === "shipped").length,
-      delivered: orders.filter((order) => order.shippingStatus === "delivered").length,
-      cancelled: orders.filter((order) => order.shippingStatus === "cancelled").length,
-    }),
-    [orders]
-  );
-
-  const visibleOrders = useMemo(
-    () => orders.filter((order) => shipmentMatchesFilter(order, filter)),
-    [orders, filter]
-  );
-
-  const toPackOrders = useMemo(
-    () => orders.filter((order) => order.shippingStatus === "to_pack"),
-    [orders]
-  );
+  const visibleOrders = orders;
 
   const finishPackingListPrint = useCallback(() => {
     setPrintingPackingList(false);
+    setPrintPackingOrders(null);
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const next = customerSearchQuery.trim();
+      setDebouncedSearch((current) => {
+        if (current !== next) setPage(1);
+        return next;
+      });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [customerSearchQuery]);
+
+  async function startPackingListPrint() {
+    try {
+      const res = await fetch("/api/admin/shipments?filter=to_pack&limit=200");
+      const data = (await res.json()) as { orders?: ShipmentOrder[]; error?: string };
+      if (!res.ok) {
+        alert(data.error ?? "Não foi possível montar a lista por embalar.");
+        return;
+      }
+      setPrintPackingOrders(data.orders ?? []);
+      setPrintingPackingList(true);
+    } catch {
+      alert("Erro de conexão.");
+    }
+  }
 
   useEffect(() => {
     if (!allRef.current) return;
@@ -2355,6 +2421,7 @@ export function ShippingManager() {
   };
 
   function toggleFilter(key: FilterKey) {
+    setPage(1);
     setFilter((current) => (current === key ? null : key));
   }
 
@@ -2404,7 +2471,9 @@ export function ShippingManager() {
   }
 
   const lowBalance = isAdmin && wallet != null && wallet.balance < 20;
+  const hasCustomerSearch = customerSearchQuery.trim().length > 0;
   const hasActiveFilter = filter !== null;
+  const hasListFilters = hasActiveFilter || hasCustomerSearch;
 
   return (
     <div className="space-y-5">
@@ -2412,9 +2481,9 @@ export function ShippingManager() {
         <div>
           <h2 className="text-lg font-semibold text-stone-900">Envios</h2>
           <p className="mt-0.5 text-sm text-stone-500">
-            {hasActiveFilter
-              ? `${visibleOrders.length} de ${orders.length} envio${orders.length !== 1 ? "s" : ""}`
-              : `${orders.length} envio${orders.length !== 1 ? "s" : ""}`}
+            {hasListFilters
+              ? `${listTotal} de ${listAllTotal} envio${listAllTotal !== 1 ? "s" : ""}`
+              : `${listAllTotal} envio${listAllTotal !== 1 ? "s" : ""}`}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -2613,45 +2682,95 @@ export function ShippingManager() {
       </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5">
-          {FILTERS.map(({ key, label }) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => toggleFilter(key)}
-              className={`inline-flex shrink-0 items-center gap-2 transition-colors ${SHIPPING_TOOLBAR_CONTROL} ${
-                filter === key
-                  ? "border-stone-900 bg-stone-900 text-white"
-                  : "border-stone-200 bg-white text-stone-600 hover:border-stone-300 hover:bg-stone-50"
-              }`}
-            >
-              <span>{label}</span>
-              <span
-                className={`inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-sm border px-1 text-[11px] font-semibold tabular-nums ${
+      <div className="flex min-w-0 w-full flex-col gap-1.5 md:flex-row md:items-center md:justify-between">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5">
+            {FILTERS.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => toggleFilter(key)}
+                className={`inline-flex shrink-0 items-center gap-2 transition-colors ${SHIPPING_TOOLBAR_CONTROL} ${
                   filter === key
-                    ? "border-white/25 bg-white/10 text-white"
-                    : "border-stone-200 bg-stone-100 text-stone-700"
+                    ? "border-stone-900 bg-stone-900 text-white"
+                    : "border-stone-200 bg-white text-stone-600 hover:border-stone-300 hover:bg-stone-50"
                 }`}
               >
-                {filterCounts[key]}
-              </span>
+                <span>{label}</span>
+                <span
+                  className={`inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-sm border px-1 text-[11px] font-semibold tabular-nums ${
+                    filter === key
+                      ? "border-white/25 bg-white/10 text-white"
+                      : "border-stone-200 bg-stone-100 text-stone-700"
+                  }`}
+                >
+                  {filterCounts[key]}
+                </span>
+              </button>
+            ))}
+          </div>
+          {filter === "to_pack" && filterCounts.to_pack > 0 ? (
+            <button
+              type="button"
+              onClick={() => void startPackingListPrint()}
+              className={`inline-flex shrink-0 items-center gap-1.5 border-stone-200 bg-white text-stone-600 transition-colors hover:border-stone-300 hover:bg-stone-50 ${SHIPPING_TOOLBAR_CONTROL}`}
+              title="Imprimir lista de todos os pedidos por embalar"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0 1 10.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18M6.34 18H5.25A2.25 2.25 0 0 1 3 15.75V9.456c0-1.081.768-2.015 1.837-2.163a48.042 48.042 0 0 1 1.087-.128m12.725 0c.977.148 1.837 1.082 1.837 2.163V15.75A2.25 2.25 0 0 1 18.66 18h-1.08m-12.725 0h12.725" />
+              </svg>
+              Imprimir lista
             </button>
-          ))}
+          ) : null}
         </div>
-        {filter === "to_pack" && toPackOrders.length > 0 ? (
-          <button
-            type="button"
-            onClick={() => setPrintingPackingList(true)}
-            className={`inline-flex shrink-0 items-center gap-1.5 border-stone-200 bg-white text-stone-600 transition-colors hover:border-stone-300 hover:bg-stone-50 ${SHIPPING_TOOLBAR_CONTROL}`}
-            title="Imprimir lista de todos os pedidos por embalar"
+        <label className="relative w-full shrink-0 md:w-52 lg:w-64">
+          <span className="sr-only">Buscar por cliente ou número do pedido</span>
+          <svg
+            className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-400"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.75}
+            viewBox="0 0 24 24"
+            aria-hidden
           >
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0 1 10.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18M6.34 18H5.25A2.25 2.25 0 0 1 3 15.75V9.456c0-1.081.768-2.015 1.837-2.163a48.042 48.042 0 0 1 1.087-.128m12.725 0c.977.148 1.837 1.082 1.837 2.163V15.75A2.25 2.25 0 0 1 18.66 18h-1.08m-12.725 0h12.725" />
-            </svg>
-            Imprimir lista
-          </button>
-        ) : null}
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+            />
+          </svg>
+          <input
+            type="text"
+            inputMode="search"
+            value={customerSearchQuery}
+            onChange={(event) => setCustomerSearchQuery(event.target.value)}
+            placeholder="Buscar cliente ou pedido…"
+            className={`w-full rounded-lg border border-stone-200 bg-white text-stone-900 placeholder:text-stone-400 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-100 ${SHIPPING_TOOLBAR_SIZE} pl-8 ${hasCustomerSearch ? "pr-8" : "pr-3"}`}
+          />
+          {hasCustomerSearch ? (
+            <button
+              type="button"
+              onClick={() => setCustomerSearchQuery("")}
+              aria-label="Limpar busca"
+              className="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600"
+            >
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                viewBox="0 0 24 24"
+                aria-hidden
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M6 18 18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          ) : null}
+        </label>
       </div>
 
       {selectedIds.size > 0 ? (
@@ -2684,7 +2803,11 @@ export function ShippingManager() {
       ) : visibleOrders.length === 0 ? (
         <div className="rounded-xl border border-stone-200 bg-stone-50 py-14 text-center">
           <p className="text-sm text-stone-500">
-            {hasActiveFilter ? "Nenhum envio neste filtro." : "Nenhum envio encontrado."}
+            {hasCustomerSearch
+              ? `Nenhum envio encontrado para “${customerSearchQuery.trim()}”.`
+              : hasActiveFilter
+                ? "Nenhum envio neste filtro."
+                : "Nenhum envio encontrado."}
           </p>
         </div>
       ) : (
@@ -2729,6 +2852,14 @@ export function ShippingManager() {
           </div>
         </div>
       )}
+
+      <AdminListPagination
+        page={page}
+        limit={listLimit}
+        total={listTotal}
+        disabled={loading}
+        onPageChange={setPage}
+      />
 
       {shippingModalOrder ? (
         <ChangeShippingModal
@@ -2813,7 +2944,10 @@ export function ShippingManager() {
       ) : null}
 
       {printingPackingList ? (
-        <PackingListPrint orders={toPackOrders} onDone={finishPackingListPrint} />
+        <PackingListPrint
+          orders={printPackingOrders ?? []}
+          onDone={finishPackingListPrint}
+        />
       ) : null}
     </div>
   );
