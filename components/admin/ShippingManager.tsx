@@ -2682,9 +2682,9 @@ export function ShippingManager() {
       </div>
       ) : null}
 
-      <div className="flex min-w-0 w-full flex-col gap-1.5 md:flex-row md:items-center md:justify-between">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5">
+      <div className="flex min-w-0 w-full flex-col gap-1.5">
+        <div className="flex min-w-0 w-full flex-col gap-1.5 md:flex-row md:items-center md:justify-between">
+          <div className="flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5">
             {FILTERS.map(({ key, label }) => (
               <button
                 key={key}
@@ -2709,21 +2709,7 @@ export function ShippingManager() {
               </button>
             ))}
           </div>
-          {filter === "to_pack" && filterCounts.to_pack > 0 ? (
-            <button
-              type="button"
-              onClick={() => void startPackingListPrint()}
-              className={`inline-flex shrink-0 items-center gap-1.5 border-stone-200 bg-white text-stone-600 transition-colors hover:border-stone-300 hover:bg-stone-50 ${SHIPPING_TOOLBAR_CONTROL}`}
-              title="Imprimir lista de todos os pedidos por embalar"
-            >
-              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0 1 10.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18M6.34 18H5.25A2.25 2.25 0 0 1 3 15.75V9.456c0-1.081.768-2.015 1.837-2.163a48.042 48.042 0 0 1 1.087-.128m12.725 0c.977.148 1.837 1.082 1.837 2.163V15.75A2.25 2.25 0 0 1 18.66 18h-1.08m-12.725 0h12.725" />
-              </svg>
-              Imprimir lista
-            </button>
-          ) : null}
-        </div>
-        <label className="relative w-full shrink-0 md:w-52 lg:w-64">
+          <label className="relative w-full shrink-0 md:w-52 lg:w-64">
           <span className="sr-only">Buscar por cliente ou número do pedido</span>
           <svg
             className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-400"
@@ -2770,7 +2756,23 @@ export function ShippingManager() {
               </svg>
             </button>
           ) : null}
-        </label>
+          </label>
+        </div>
+        {filter === "to_pack" && filterCounts.to_pack > 0 ? (
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => void startPackingListPrint()}
+              className={`inline-flex shrink-0 items-center gap-1.5 border-stone-200 bg-white text-stone-600 transition-colors hover:border-stone-300 hover:bg-stone-50 ${SHIPPING_TOOLBAR_CONTROL}`}
+              title="Imprimir lista de todos os pedidos por embalar"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0 1 10.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18M6.34 18H5.25A2.25 2.25 0 0 1 3 15.75V9.456c0-1.081.768-2.015 1.837-2.163a48.042 48.042 0 0 1 1.087-.128m12.725 0c.977.148 1.837 1.082 1.837 2.163V15.75A2.25 2.25 0 0 1 18.66 18h-1.08m-12.725 0h12.725" />
+              </svg>
+              Imprimir lista
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {selectedIds.size > 0 ? (
