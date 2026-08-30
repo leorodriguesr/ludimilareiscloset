@@ -59,7 +59,7 @@ function originWhere(origin: string | null): Prisma.OrderWhereInput {
   if (origin === "Avulsa") {
     return {
       orderSource: OrderSource.ADMIN_SALE,
-      OR: [{ createdBy: null }, { createdBy: { name: null } }, { createdBy: { name: "" } }],
+      OR: [{ createdByUserId: null }, { createdBy: { is: { name: "" } } }],
     };
   }
   return {
