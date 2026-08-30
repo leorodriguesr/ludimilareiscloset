@@ -1,3 +1,5 @@
+import type { Prisma } from "@/app/generated/prisma/client";
+
 export const ADMIN_LIST_PAGE_SIZE = 20;
 export const ADMIN_LIST_MAX_PAGE_SIZE = 200;
 
@@ -8,6 +10,56 @@ export function parseAdminListPage(raw: string | null): number {
 export function parseAdminListLimit(raw: string | null): number {
   const parsed = Number(raw ?? ADMIN_LIST_PAGE_SIZE) || ADMIN_LIST_PAGE_SIZE;
   return Math.min(ADMIN_LIST_MAX_PAGE_SIZE, Math.max(1, parsed));
+}
+
+/**
+ * Recorte de período da lista de vendas.
+ * Pagas / por embalar: data do pagamento.
+ * Aguardando: data de criação.
+ * Canceladas: data do cancelamento/expiração (criação se não houver).
+ * Sem filtro de status: qualquer um desses eventos no intervalo.
+ */
+export function saleListDateWhere(
+  from: string | null,
+  to: string | null,
+  statusFilter: string | null
+): Prisma.OrderWhereInput {
+  if (!from && !to) return {};
+  const start = from || to || "";
+  const end = to || from || "";
+  const range = saoPauloDayRange(start, end);
+  if (!range) return {};
+
+  if (statusFilter === "paid" || statusFilter === "to_pack") {
+    return { paidAt: range };
+  }
+  if (statusFilter === "waiting") {
+    return { createdAt: range };
+  }
+  if (statusFilter === "cancelled") {
+    return {
+      OR: [
+        { cancelledAt: range },
+        { expiredAt: range },
+        {
+          AND: [
+            { cancelledAt: null },
+            { expiredAt: null },
+            { createdAt: range },
+          ],
+        },
+      ],
+    };
+  }
+
+  return {
+    OR: [
+      { paidAt: range },
+      { createdAt: range },
+      { cancelledAt: range },
+      { expiredAt: range },
+    ],
+  };
 }
 
 /** Início/fim do dia em America/São Paulo (sem horário de verão desde 2019). */

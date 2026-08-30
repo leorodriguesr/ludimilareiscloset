@@ -123,6 +123,7 @@ type AdminOrder = {
   labelAutoGenerateError: string | null;
   cancellationReason: string | null;
   cancelledAt: string | null;
+  expiredAt?: string | null;
   createdAt: string;
   user: { name: string; email: string; phone: string } | null;
   createdBy?: { name: string | null; role?: string | null } | null;
@@ -277,16 +278,45 @@ function normalizeSaleDateRange(
   return from <= to ? { from, to } : { from: to, to: from };
 }
 
+function isoInSaleDateRange(
+  iso: string | null | undefined,
+  range: { from: string; to: string }
+): boolean {
+  if (!iso) return false;
+  const orderDate = toLocalDateKey(iso);
+  return orderDate >= range.from && orderDate <= range.to;
+}
+
 function orderMatchesSaleDateRange(
   order: AdminOrder,
-  range: SaleDateRange
+  range: SaleDateRange,
+  filter: FilterKey | null = null
 ): boolean {
   const normalized = normalizeSaleDateRange(range.from, range.to);
   if (!normalized) return true;
-  if (!order.paidAt) return false;
 
-  const orderDate = toLocalDateKey(order.paidAt);
-  return orderDate >= normalized.from && orderDate <= normalized.to;
+  if (filter === "paid" || filter === "to_pack") {
+    return isoInSaleDateRange(order.paidAt, normalized);
+  }
+  if (filter === "waiting") {
+    return isoInSaleDateRange(order.createdAt, normalized);
+  }
+  if (filter === "cancelled") {
+    return (
+      isoInSaleDateRange(order.cancelledAt, normalized) ||
+      isoInSaleDateRange(order.expiredAt, normalized) ||
+      (!order.cancelledAt &&
+        !order.expiredAt &&
+        isoInSaleDateRange(order.createdAt, normalized))
+    );
+  }
+
+  return (
+    isoInSaleDateRange(order.paidAt, normalized) ||
+    isoInSaleDateRange(order.createdAt, normalized) ||
+    isoInSaleDateRange(order.cancelledAt, normalized) ||
+    isoInSaleDateRange(order.expiredAt, normalized)
+  );
 }
 
 function orderMatchesOriginFilter(
@@ -539,7 +569,7 @@ function SaleDatePicker({
             <div
               role="dialog"
               aria-modal="true"
-              aria-label="Selecionar intervalo pela data de pagamento"
+              aria-label="Selecionar período das vendas"
               className="fixed left-1/2 top-1/2 z-[101] w-[min(calc(100vw-2rem),19rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-stone-200 bg-white p-4 shadow-2xl"
               onClick={(event) => event.stopPropagation()}
             >

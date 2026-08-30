@@ -17,7 +17,7 @@ import {
   clampAdminListPage,
   parseAdminListLimit,
   parseAdminListPage,
-  saoPauloDayRange,
+  saleListDateWhere,
   searchDigits,
 } from "@/lib/admin/list-pagination";
 
@@ -81,15 +81,6 @@ function searchWhere(query: string): Prisma.OrderWhereInput {
   return { OR: or };
 }
 
-function dateWhere(from: string | null, to: string | null): Prisma.OrderWhereInput {
-  if (!from && !to) return {};
-  const start = from || to || "";
-  const end = to || from || "";
-  const range = saoPauloDayRange(start, end);
-  if (!range) return {};
-  return { paidAt: range };
-}
-
 function andWhere(parts: Prisma.OrderWhereInput[]): Prisma.OrderWhereInput {
   const filtered = parts.filter((part) => Object.keys(part).length > 0);
   if (filtered.length === 0) return {};
@@ -130,8 +121,12 @@ export async function GET(request: NextRequest) {
   const page = parseAdminListPage(searchParams.get("page"));
   const limit = parseAdminListLimit(searchParams.get("limit"));
 
-  const shared = [searchWhere(q), dateWhere(from, to), originWhere(origin)];
-  const where = andWhere([statusWhere(statusFilter), ...shared]);
+  const shared = [searchWhere(q), originWhere(origin)];
+  const where = andWhere([
+    statusWhere(statusFilter),
+    saleListDateWhere(from, to, statusFilter),
+    ...shared,
+  ]);
 
   try {
     try {
@@ -140,7 +135,8 @@ export async function GET(request: NextRequest) {
       console.error("[GET /api/admin/orders] expire batch", expireError);
     }
 
-    const countWhere = (status: string | null) => andWhere([statusWhere(status), ...shared]);
+    const countWhere = (status: string | null) =>
+      andWhere([statusWhere(status), saleListDateWhere(from, to, status), ...shared]);
 
     const [total, allTotal, paid, waiting, toPack, cancelled, origins] = await Promise.all([
       prisma.order.count({ where }),
