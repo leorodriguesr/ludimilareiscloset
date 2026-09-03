@@ -1367,27 +1367,51 @@ export function ExchangeOutboundPlanner({
           <p className="text-xs text-stone-500">Buscando opções de frete…</p>
         ) : null}
         {quoteOptions.length > 0 && method === "CARRIER" && (
-          <ul className="space-y-1 rounded-lg border border-stone-100 p-2">
-            {quoteOptions.map((opt) => (
-              <li key={opt.id}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setServiceId(opt.serviceId);
-                    setServiceName(`${opt.carrierName} — ${opt.serviceName}`);
-                    setQuotedPrice(opt.price);
-                  }}
-                  className={`flex w-full justify-between rounded px-2 py-1.5 text-left text-xs hover:bg-stone-50 ${
-                    serviceId === opt.serviceId ? "bg-sky-50" : ""
-                  }`}
-                >
-                  <span>
-                    {opt.carrierName} — {opt.serviceName}
-                  </span>
-                  <span>{formatPrice(opt.price)}</span>
-                </button>
-              </li>
-            ))}
+          <ul className="overflow-hidden rounded-xl border border-stone-200 bg-white">
+            {quoteOptions.map((opt) => {
+              const selected = serviceId === opt.serviceId;
+              return (
+                <li key={opt.id} className="border-b border-stone-100 last:border-b-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setServiceId(opt.serviceId);
+                      setServiceName(`${opt.carrierName} — ${opt.serviceName}`);
+                      setQuotedPrice(opt.price);
+                    }}
+                    className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors ${
+                      selected
+                        ? "bg-sky-50"
+                        : "bg-white hover:bg-stone-50"
+                    }`}
+                  >
+                    <span
+                      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                        selected
+                          ? "border-sky-600 bg-sky-600"
+                          : "border-stone-300 bg-white"
+                      }`}
+                      aria-hidden
+                    >
+                      {selected ? (
+                        <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                      ) : null}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium text-stone-900">
+                        {opt.carrierName}
+                      </span>
+                      <span className="block text-xs text-stone-500">
+                        {opt.serviceName}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-sm font-semibold tabular-nums text-stone-900">
+                      {formatPrice(opt.price)}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
         {method === "CARRIER" && quotedPrice != null && !quoting ? (
@@ -1417,59 +1441,81 @@ export function ExchangeOutboundPlanner({
           </p>
         ) : null}
         {customerOwes ? (
-          <div className="space-y-2 rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-amber-800/80">
-              Pagamento da cliente
-            </p>
-            <p className="text-sm font-medium text-stone-900">
-              Cliente deve {formatPrice(preview.balanceAmount)}
-            </p>
-            <p className="text-xs text-stone-600">
-              Escolha PIX ou cartão. O envio só vai para Envios depois do
-              pagamento.
-            </p>
-            <div className="flex flex-wrap gap-1.5">
+          <div className="space-y-3 rounded-xl border border-stone-200 bg-white px-3 py-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-stone-400">
+                Pagamento da cliente
+              </p>
+              <p className="mt-1 text-sm font-semibold text-stone-900">
+                Cliente deve {formatPrice(preview.balanceAmount)}
+              </p>
+              <p className="mt-0.5 text-xs text-stone-500">
+                Escolha PIX ou cartão. O envio só vai para Envios depois do
+                pagamento.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
               {(
                 [
-                  ["pix", "PIX"],
-                  ["card", "Cartão"],
+                  ["pix", "PIX", "Código para copiar"],
+                  ["card", "Cartão", "Link de checkout"],
                 ] as const
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  disabled={busy || saving || chargeBusy}
-                  onClick={() => {
-                    setPaymentMethod(key);
+              ).map(([key, label, hint]) => {
+                const selected = paymentMethod === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    disabled={busy || saving || chargeBusy}
+                    onClick={() => {
+                      setPaymentMethod(key);
 
-                    // Se já estamos "aguardando pagamento" e trocar o método,
-                    // regeneramos o link/código imediatamente.
-                    if (
-                      customerOwes &&
-                      chargePayment &&
-                      chargePayment.type !== key
-                    ) {
-                      setChargeBusy(true);
-                      setError(null);
-                      setCopiedPayment(null);
-                      setChargePayment(null);
-                      void generateChargePayment(key).finally(() => {
-                        setChargeBusy(false);
-                      });
-                    }
-                  }}
-                  className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium disabled:opacity-60 ${
-                    paymentMethod === key
-                      ? "border-sky-300 bg-sky-100 text-sky-900"
-                      : "border-stone-200 bg-white text-stone-600"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+                      if (
+                        customerOwes &&
+                        chargePayment &&
+                        chargePayment.type !== key
+                      ) {
+                        setChargeBusy(true);
+                        setError(null);
+                        setCopiedPayment(null);
+                        setChargePayment(null);
+                        void generateChargePayment(key).finally(() => {
+                          setChargeBusy(false);
+                        });
+                      }
+                    }}
+                    className={`rounded-xl border px-3 py-2.5 text-left transition-colors disabled:opacity-60 ${
+                      selected
+                        ? "border-sky-300 bg-sky-50"
+                        : "border-stone-200 bg-white hover:bg-stone-50"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <span
+                        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                          selected
+                            ? "border-sky-600 bg-sky-600"
+                            : "border-stone-300 bg-white"
+                        }`}
+                        aria-hidden
+                      >
+                        {selected ? (
+                          <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                        ) : null}
+                      </span>
+                      <span className="text-sm font-semibold text-stone-900">
+                        {label}
+                      </span>
+                    </span>
+                    <span className="mt-1 block pl-6 text-[11px] text-stone-500">
+                      {hint}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
             {chargePayment?.type === "pix" ? (
-              <div className="space-y-2 rounded-lg border border-amber-100 bg-white p-3">
+              <div className="space-y-2 rounded-lg border border-stone-100 bg-stone-50 p-3">
                 <p className="text-sm font-medium text-stone-900">
                   PIX · {formatPrice(chargePayment.amount)}
                 </p>
@@ -1502,7 +1548,7 @@ export function ExchangeOutboundPlanner({
               </div>
             ) : null}
             {chargePayment?.type === "card" ? (
-              <div className="space-y-2 rounded-lg border border-amber-100 bg-white p-3">
+              <div className="space-y-2 rounded-lg border border-stone-100 bg-stone-50 p-3">
                 <textarea
                   readOnly
                   value={chargePayment.checkoutUrl}
