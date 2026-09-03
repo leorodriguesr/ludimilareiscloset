@@ -1,6 +1,6 @@
 import type { Prisma } from "@/app/generated/prisma/client";
 
-export const ADMIN_LIST_PAGE_SIZE = 20;
+export const ADMIN_LIST_PAGE_SIZE = 50;
 export const ADMIN_LIST_MAX_PAGE_SIZE = 200;
 
 export function parseAdminListPage(raw: string | null): number {

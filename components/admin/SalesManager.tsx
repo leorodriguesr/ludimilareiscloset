@@ -3518,7 +3518,7 @@ export function SalesManager() {
   const [page, setPage] = useState(1);
   const [listTotal, setListTotal] = useState(0);
   const [listAllTotal, setListAllTotal] = useState(0);
-  const [listLimit, setListLimit] = useState(20);
+  const [listLimit, setListLimit] = useState(50);
   const [filterCounts, setFilterCounts] = useState<SalesCounts>({
     paid: 0,
     waiting: 0,
@@ -3580,7 +3580,7 @@ export function SalesManager() {
         setOrders(data.orders ?? []);
         setListTotal(data.total ?? 0);
         setListAllTotal(data.allTotal ?? data.total ?? 0);
-        setListLimit(data.limit ?? 20);
+        setListLimit(data.limit ?? 50);
         if (data.counts) setFilterCounts(data.counts);
         if (data.origins?.length) setOriginFilterOptions(data.origins);
         if (data.page && data.page !== page) setPage(data.page);

@@ -2191,7 +2191,7 @@ export function ShippingManager() {
   const [page, setPage] = useState(1);
   const [listTotal, setListTotal] = useState(0);
   const [listAllTotal, setListAllTotal] = useState(0);
-  const [listLimit, setListLimit] = useState(20);
+  const [listLimit, setListLimit] = useState(50);
   const [filterCounts, setFilterCounts] = useState({
     needs_label: 0,
     to_pack: 0,
@@ -2323,7 +2323,7 @@ export function ShippingManager() {
         setOrders(data.orders ?? []);
         setListTotal(data.total ?? 0);
         setListAllTotal(data.allTotal ?? data.total ?? 0);
-        setListLimit(data.limit ?? 20);
+        setListLimit(data.limit ?? 50);
         if (data.counts) setFilterCounts(data.counts);
         if (data.page && data.page !== page) setPage(data.page);
       } finally {
