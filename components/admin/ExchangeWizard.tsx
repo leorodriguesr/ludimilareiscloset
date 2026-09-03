@@ -7,12 +7,15 @@ import {
   EXCHANGE_REASONS,
 } from "@/lib/exchanges/constants";
 import { computeExchangeBalance } from "@/lib/exchanges/balance";
-import { parsePieceSelections } from "@/lib/exchanges/serialize";
+import {
+  buildReturnCards,
+  unavailableReturnUnitKeys,
+} from "@/lib/exchanges/return-units";
+import type { ExchangeOrderBlockReason } from "@/lib/exchanges/eligibility";
 import {
   isSamePieceSwap,
   productIdentityKey,
 } from "@/lib/exchanges/product-diff";
-import type { CartPieceSelection } from "@/lib/cart/types";
 import {
   defaultExchangeShippingMethodForOrder,
   EXCHANGE_RETURN_METHOD_LABELS,
@@ -49,11 +52,15 @@ type PaidOrder = {
   destinationCep: string | null;
   total: number;
   paidAt: string | null;
+  deliveredAt: string | null;
   fulfillmentType?: "CARRIER" | "ARRANGED" | null;
   shippingServiceName?: string | null;
   deliveryNotes?: string | null;
   shippingAmount?: number | null;
   items: OrderItem[];
+  selectable?: boolean;
+  blockReason?: ExchangeOrderBlockReason | null;
+  unavailableReturnKeys?: string[];
 };
 
 type CatalogProduct = {
@@ -128,68 +135,26 @@ function shippingDraftForMethod(
   };
 }
 
-function formatPieceLabel(piece: CartPieceSelection): string {
-  return [piece.pieceName, piece.color, piece.size].filter(Boolean).join(" · ");
-}
-
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-type ReturnUnit = {
-  key: string;
-  orderItemId: string;
-  productId: string | null;
-  identification: string;
-  pieceLabel: string;
-  pieceSelection: CartPieceSelection | null;
-};
+function moneyInputFromNumber(n: number): string {
+  return n.toFixed(2).replace(".", ",");
+}
 
-type ReturnCard = {
-  orderItemId: string;
-  identification: string;
-  productId: string | null;
-  itemQuantity: number;
-  productTotal: number;
-  units: ReturnUnit[];
-};
-
-function buildReturnCards(items: OrderItem[]): ReturnCard[] {
-  return items.map((item) => {
-    const pieces = parsePieceSelections(item.pieceSelectionsJson);
-    const pieceRows: Array<CartPieceSelection | null> =
-      pieces.length > 0 ? pieces : [null];
-    const units: ReturnUnit[] = [];
-    for (let copy = 0; copy < item.quantity; copy++) {
-      for (let index = 0; index < pieceRows.length; index++) {
-        const piece = pieceRows[index];
-        units.push({
-          key: `${item.id}:${copy}:${index}`,
-          orderItemId: item.id,
-          productId: item.productId,
-          identification: item.productName,
-          pieceLabel: piece ? formatPieceLabel(piece) : item.productName,
-          pieceSelection: piece,
-        });
-      }
-    }
-    return {
-      orderItemId: item.id,
-      identification: item.productName,
-      productId: item.productId,
-      itemQuantity: item.quantity,
-      productTotal: roundMoney(item.price * item.quantity),
-      units,
-    };
-  });
+function parseMoneyInput(value: string): number {
+  const trimmed = value.trim().replace(",", ".");
+  if (!trimmed) return NaN;
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? n : NaN;
 }
 
 function SelectionDot({ selected }: { selected: boolean }) {
   return (
     <span
-      className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
-        selected ? "border-sky-600 bg-sky-600" : "border-stone-300 bg-white"
-      }`}
+      className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${selected ? "border-sky-600 bg-sky-600" : "border-stone-300 bg-white"
+        }`}
       aria-hidden
     >
       {selected ? <span className="h-1.5 w-1.5 rounded-full bg-white" /> : null}
@@ -227,6 +192,24 @@ function SearchIcon({ className }: { className?: string }) {
   );
 }
 
+function orderBlockReasonLabel(
+  reason: ExchangeOrderBlockReason | null | undefined,
+  selectable: boolean
+): string | null {
+  if (reason === "WINDOW_EXPIRED") {
+    return selectable
+      ? "Prazo de 7 dias encerrado"
+      : "Entrega há mais de 7 dias";
+  }
+  if (reason === "ALL_ITEMS_RETURNED") {
+    return "Todos os produtos já estão em outra troca";
+  }
+  if (reason === "HAS_EXCHANGE") {
+    return "Já tem troca ou devolução cadastrada";
+  }
+  return null;
+}
+
 function ExchangeOrderResultRow({
   order,
   selected,
@@ -239,33 +222,40 @@ function ExchangeOrderResultRow({
   const shipHint =
     order.fulfillmentType === "ARRANGED"
       ? resolveArrangedDeliveryDisplay({
-          shippingServiceName: order.shippingServiceName,
-          deliveryNotes: order.deliveryNotes,
-          shippingAmount: order.shippingAmount ?? 0,
-        }).typeLabel
+        shippingServiceName: order.shippingServiceName,
+        deliveryNotes: order.deliveryNotes,
+        shippingAmount: order.shippingAmount ?? 0,
+      }).typeLabel
       : "Transportadora";
   const itemCount = order.items.reduce((sum, item) => sum + item.quantity, 0);
   const customer =
     order.recipientName?.trim() || order.email?.trim() || "Sem nome";
-  const paidLabel = formatPaidDate(order.paidAt);
+  const selectable = order.selectable !== false;
+  const blockLabel = orderBlockReasonLabel(order.blockReason, selectable);
+  const deliveredLabel = formatPaidDate(order.deliveredAt);
 
   return (
     <tr
-      className={`cursor-pointer border-b border-stone-100 last:border-b-0 ${
-        selected ? "bg-stone-50" : "bg-white hover:bg-stone-50/80"
-      }`}
-      onClick={onSelect}
+      className={`border-b border-stone-100 last:border-b-0 ${!selectable
+          ? "cursor-not-allowed bg-stone-50/80 opacity-60"
+          : selected
+            ? "cursor-pointer bg-stone-50"
+            : "cursor-pointer bg-white hover:bg-stone-50/80"
+        }`}
+      onClick={() => {
+        if (!selectable) return;
+        onSelect();
+      }}
     >
       <td className="w-10 px-3 py-3">
         <span
-          className={`flex h-4 w-4 items-center justify-center rounded-full border ${
-            selected
+          className={`flex h-4 w-4 items-center justify-center rounded-full border ${selected && selectable
               ? "border-sky-600 bg-sky-600"
               : "border-stone-300 bg-white"
-          }`}
+            }`}
           aria-hidden
         >
-          {selected ? (
+          {selected && selectable ? (
             <span className="h-1.5 w-1.5 rounded-full bg-white" />
           ) : null}
         </span>
@@ -274,17 +264,22 @@ function ExchangeOrderResultRow({
         <p className="font-mono text-sm font-medium text-stone-900">
           #{order.orderNumber ?? order.id.slice(0, 6)}
         </p>
-        {paidLabel ? (
-          <p className="text-[11px] text-stone-400">{paidLabel}</p>
+        {deliveredLabel ? (
+          <p className="text-[11px] text-stone-400">Entregue {deliveredLabel}</p>
+        ) : (
+          <p className="text-[11px] text-stone-400">Sem data de entrega</p>
+        )}
+        {blockLabel ? (
+          <p className="mt-0.5 text-[11px] text-amber-700">{blockLabel}</p>
         ) : null}
       </td>
-      <td className="min-w-0 px-2 py-3">
+      <td className="min-w-[9rem] max-w-[14rem] px-2 py-3">
         <p className="truncate text-sm text-stone-800">{customer}</p>
         <p className="text-[11px] text-stone-400">
           {itemCount === 1 ? "1 peça" : `${itemCount} peças`}
         </p>
       </td>
-      <td className="hidden whitespace-nowrap px-2 py-3 text-xs text-stone-500 sm:table-cell">
+      <td className="whitespace-nowrap px-2 py-3 text-xs text-stone-500">
         {shipHint}
       </td>
       <td className="whitespace-nowrap px-3 py-3 text-right text-sm font-medium tabular-nums text-stone-900">
@@ -298,6 +293,7 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onCreated: (exchangeId: string) => void;
+  editExchangeId?: string | null;
 };
 
 type WizardKind = "EXCHANGE" | "RETURN";
@@ -318,7 +314,12 @@ const STEPS_RETURN = [
   "Confirmar",
 ] as const;
 
-export function ExchangeWizard({ open, onClose, onCreated }: Props) {
+export function ExchangeWizard({
+  open,
+  onClose,
+  onCreated,
+  editExchangeId = null,
+}: Props) {
   const [kind, setKind] = useState<WizardKind>("EXCHANGE");
   const [step, setStep] = useState(0);
   const steps = kind === "RETURN" ? STEPS_RETURN : STEPS_EXCHANGE;
@@ -328,6 +329,9 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
   const [selectedOrder, setSelectedOrder] = useState<PaidOrder | null>(null);
   const [selectedReturnKeys, setSelectedReturnKeys] = useState<
     Record<string, boolean>
+  >({});
+  const [returnCreditByItem, setReturnCreditByItem] = useState<
+    Record<string, string>
   >({});
   const [refundInput, setRefundInput] = useState("");
   const [outbound, setOutbound] = useState<OutboundDraft[]>([]);
@@ -349,6 +353,7 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
   const [quoting, setQuoting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reverseAlreadyCreated, setReverseAlreadyCreated] = useState(false);
 
   const reset = useCallback(() => {
     setKind("EXCHANGE");
@@ -357,6 +362,7 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
     setOrders([]);
     setSelectedOrder(null);
     setSelectedReturnKeys({});
+    setReturnCreditByItem({});
     setRefundInput("");
     setOutbound([]);
     setProductQuery("");
@@ -368,6 +374,7 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
     setOutboundShipping(shippingDraftForMethod("CARRIER"));
     setQuoteOptions([]);
     setError(null);
+    setReverseAlreadyCreated(false);
   }, []);
 
   useEffect(() => {
@@ -382,10 +389,117 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
         setProducts([]);
       }
     })();
-  }, [open, reset]);
+    if (!editExchangeId) return;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/admin/exchanges/${editExchangeId}`);
+        const data = (await res.json()) as {
+          exchange?: {
+            kind?: WizardKind;
+            reason?: ExchangeReason;
+            reasonNotes?: string | null;
+            notes?: string | null;
+            returnedItemsTotal?: number;
+            items: {
+              direction: "RETURN" | "OUTBOUND";
+              orderItemId?: string | null;
+              quantity: number;
+              lineTotal?: number;
+              pieceSelectionsJson?: string | null;
+            }[];
+            shippings: {
+              type: "RETURN" | "OUTBOUND";
+              method?: ExchangeShippingMethod | null;
+              paidBy?: "STORE" | "CUSTOMER";
+              trackingCode?: string | null;
+              labelUrl?: string | null;
+              manualConfiguredAt?: string | null;
+            }[];
+            order: PaidOrder & {
+              paidAt?: string | Date | null;
+              deliveredAt?: string | Date | null;
+            };
+          };
+          error?: string;
+        };
+        const exchange = data.exchange;
+        if (!exchange) {
+          setError(data.error ?? "Não foi possível carregar a troca.");
+          return;
+        }
+        const order: PaidOrder = {
+          ...exchange.order,
+          paidAt:
+            typeof exchange.order.paidAt === "string"
+              ? exchange.order.paidAt
+              : exchange.order.paidAt
+                ? new Date(exchange.order.paidAt).toISOString()
+                : null,
+          deliveredAt:
+            typeof exchange.order.deliveredAt === "string"
+              ? exchange.order.deliveredAt
+              : exchange.order.deliveredAt
+                ? new Date(exchange.order.deliveredAt).toISOString()
+                : null,
+          selectable: true,
+        };
+        setKind(exchange.kind === "RETURN" ? "RETURN" : "EXCHANGE");
+        setSelectedOrder(order);
+        const cards = buildReturnCards(order.items);
+        const selected = unavailableReturnUnitKeys(
+          cards,
+          exchange.items
+            .filter((item) => item.direction === "RETURN")
+            .map((item) => ({
+              orderItemId: item.orderItemId ?? null,
+              quantity: item.quantity,
+              pieceSelectionsJson: item.pieceSelectionsJson ?? null,
+            }))
+        );
+        const keys: Record<string, boolean> = {};
+        for (const key of selected) keys[key] = true;
+        setSelectedReturnKeys(keys);
+        const credits: Record<string, string> = {};
+        for (const item of exchange.items) {
+          if (item.direction !== "RETURN" || !item.orderItemId) continue;
+          const prev = Number(
+            (credits[item.orderItemId] ?? "0").replace(",", ".")
+          );
+          const next = (Number.isFinite(prev) ? prev : 0) + (item.lineTotal ?? 0);
+          credits[item.orderItemId] = next.toFixed(2).replace(".", ",");
+        }
+        setReturnCreditByItem(credits);
+        if (exchange.kind === "RETURN") {
+          setRefundInput(String(exchange.returnedItemsTotal ?? "").replace(".", ","));
+        }
+        if (exchange.reason) setReason(exchange.reason);
+        setReasonNotes(exchange.reasonNotes ?? "");
+        setNotes(exchange.notes ?? "");
+        const returnShip = exchange.shippings.find((s) => s.type === "RETURN");
+        setReverseAlreadyCreated(
+          Boolean(
+            returnShip?.trackingCode ||
+            returnShip?.labelUrl ||
+            returnShip?.manualConfiguredAt
+          )
+        );
+        if (returnShip?.method) {
+          setReturnShipping(
+            shippingDraftForMethod(
+              returnShip.method,
+              exchange.kind === "EXCHANGE" ? "STORE" : returnShip.paidBy ?? "STORE"
+            )
+          );
+        }
+        setStep(1);
+      } catch {
+        setError("Erro de rede ao carregar a troca.");
+      }
+    })();
+  }, [open, reset, editExchangeId]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || editExchangeId) return;
     const q = orderQuery.trim();
     const withoutHash = q.replace(/^#/, "").trim();
     const ready =
@@ -393,6 +507,7 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
     if (!ready) {
       setOrders([]);
       setOrdersLoading(false);
+      setError(null);
       return;
     }
 
@@ -405,13 +520,23 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
             `/api/admin/exchanges/orders?${new URLSearchParams({ q })}`,
             { signal: controller.signal }
           );
-          const data = (await res.json()) as { orders?: PaidOrder[] };
+          const data = (await res.json()) as {
+            orders?: PaidOrder[];
+            error?: string;
+          };
           if (!controller.signal.aborted) {
+            if (!res.ok) {
+              setOrders([]);
+              setError(data.error ?? "Não foi possível buscar pedidos.");
+              return;
+            }
+            setError(null);
             setOrders(Array.isArray(data.orders) ? data.orders : []);
           }
         } catch (e) {
           if ((e as { name?: string }).name === "AbortError") return;
           setOrders([]);
+          setError("Erro de rede ao buscar pedidos.");
         } finally {
           if (!controller.signal.aborted) setOrdersLoading(false);
         }
@@ -422,7 +547,12 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [open, orderQuery]);
+  }, [open, orderQuery, editExchangeId]);
+
+  const unavailableReturnKeys = useMemo(
+    () => new Set(selectedOrder?.unavailableReturnKeys ?? []),
+    [selectedOrder]
+  );
 
   const returnCards = useMemo(
     () => (selectedOrder ? buildReturnCards(selectedOrder.items) : []),
@@ -435,21 +565,31 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
   );
 
   const selectedReturnUnits = useMemo(
-    () => returnUnits.filter((unit) => selectedReturnKeys[unit.key]),
-    [returnUnits, selectedReturnKeys]
+    () =>
+      returnUnits.filter(
+        (unit) =>
+          selectedReturnKeys[unit.key] && !unavailableReturnKeys.has(unit.key)
+      ),
+    [returnUnits, selectedReturnKeys, unavailableReturnKeys]
   );
 
-  const returnLines = useMemo(
-    () =>
-      selectedReturnUnits.map((unit) => ({
+  const returnLines = useMemo(() => {
+    const credited = new Set<string>();
+    return selectedReturnUnits.map((unit) => {
+      const first = !credited.has(unit.orderItemId);
+      credited.add(unit.orderItemId);
+      const credit = parseMoneyInput(returnCreditByItem[unit.orderItemId] ?? "");
+      return {
         orderItemId: unit.orderItemId,
         quantity: 1,
         productName: unit.pieceLabel,
         productId: unit.productId,
         pieceSelections: unit.pieceSelection ? [unit.pieceSelection] : undefined,
-      })),
-    [selectedReturnUnits]
-  );
+        creditAmount:
+          first && Number.isFinite(credit) ? roundMoney(credit) : undefined,
+      };
+    });
+  }, [returnCreditByItem, selectedReturnUnits]);
 
   const refundAmount = useMemo(() => {
     const n = Number(refundInput.trim().replace(",", "."));
@@ -470,6 +610,50 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
         .filter((card) => card.selectedCount > 0),
     [returnCards, selectedReturnKeys]
   );
+
+  useEffect(() => {
+    setReturnCreditByItem((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const card of returnCards) {
+        const available = card.units.filter(
+          (unit) => !unavailableReturnKeys.has(unit.key)
+        );
+        const selected = available.filter(
+          (unit) => selectedReturnKeys[unit.key]
+        ).length;
+        const current = next[card.orderItemId]?.trim() ?? "";
+        const fullValue = moneyInputFromNumber(card.productTotal);
+        const parsed = parseMoneyInput(current);
+        const looksLikeFullTotal =
+          current === fullValue ||
+          (Number.isFinite(parsed) &&
+            Math.abs(parsed - card.productTotal) < 0.009);
+
+        if (selected === 0) {
+          if (current) {
+            delete next[card.orderItemId];
+            changed = true;
+          }
+          continue;
+        }
+
+        if (selected === available.length && available.length > 0) {
+          if (current !== fullValue) {
+            next[card.orderItemId] = fullValue;
+            changed = true;
+          }
+          continue;
+        }
+
+        if (looksLikeFullTotal) {
+          delete next[card.orderItemId];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [returnCards, selectedReturnKeys, unavailableReturnKeys]);
 
   const samePieceSwap = useMemo(() => {
     if (kind !== "EXCHANGE" || outbound.length === 0) return false;
@@ -495,14 +679,29 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
     () =>
       roundMoney(
         selectedReturnCards.reduce((sum, card) => {
-          const share =
-            card.units.length > 0
-              ? (card.selectedCount / card.units.length) * card.productTotal
-              : 0;
-          return sum + share;
+          const credit = parseMoneyInput(
+            returnCreditByItem[card.orderItemId] ?? ""
+          );
+          return sum + (Number.isFinite(credit) ? credit : 0);
         }, 0)
       ),
-    [selectedReturnCards]
+    [returnCreditByItem, selectedReturnCards]
+  );
+
+  const exchangeCreditsReady = useMemo(
+    () =>
+      kind !== "EXCHANGE" ||
+      selectedReturnCards.every((card) => {
+        const raw = returnCreditByItem[card.orderItemId] ?? "";
+        if (!raw.trim()) return false;
+        const credit = parseMoneyInput(raw);
+        return (
+          Number.isFinite(credit) &&
+          credit >= 0 &&
+          credit - card.productTotal <= 0.009
+        );
+      }),
+    [kind, returnCreditByItem, selectedReturnCards]
   );
 
   const exchangeNewTotal = useMemo(
@@ -538,11 +737,11 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
           },
           ...(outbound.length > 0
             ? [
-                {
-                  quotedPrice: outboundShipping.quotedPrice,
-                  paidBy: exchangeOutboundPaidBy,
-                },
-              ]
+              {
+                quotedPrice: outboundShipping.quotedPrice,
+                paidBy: exchangeOutboundPaidBy,
+              },
+            ]
             : []),
         ],
       }),
@@ -569,14 +768,14 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
   const orderIsArranged = selectedOrder?.fulfillmentType === "ARRANGED";
   const arrangedLabel = selectedOrder
     ? resolveArrangedDeliveryDisplay({
-        shippingServiceName: selectedOrder.shippingServiceName,
-        deliveryNotes: selectedOrder.deliveryNotes,
-        shippingAmount: selectedOrder.shippingAmount ?? 0,
-      }).typeLabel
+      shippingServiceName: selectedOrder.shippingServiceName,
+      deliveryNotes: selectedOrder.deliveryNotes,
+      shippingAmount: selectedOrder.shippingAmount ?? 0,
+    }).typeLabel
     : null;
 
   useEffect(() => {
-    if (!selectedOrder) return;
+    if (!selectedOrder || editExchangeId) return;
     const method = defaultExchangeShippingMethodForOrder(selectedOrder);
     setReturnShipping(shippingDraftForMethod(method, "STORE"));
     setOutboundShipping(
@@ -586,7 +785,7 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
       )
     );
     setQuoteOptions([]);
-  }, [selectedOrder, kind]);
+  }, [selectedOrder, kind, editExchangeId]);
 
   async function quoteFor(
     shipKind: "RETURN" | "OUTBOUND",
@@ -669,11 +868,11 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
 
   function canNext(): boolean {
     const s = logicalStep(step);
-    if (s === 0) return !!selectedOrder;
+    if (s === 0) return !!selectedOrder && selectedOrder.selectable !== false;
     if (s === 1) {
       if (returnLines.length === 0) return false;
       if (kind === "RETURN") return refundReady;
-      return true;
+      return exchangeCreditsReady;
     }
     if (s === 3) return !!reason && (reason !== "OTHER" || !!reasonNotes.trim());
     if (kind === "RETURN" && s === 5) return refundReady;
@@ -705,39 +904,45 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
         packageLengthCm?: number | null;
         packageWeightKg?: number | null;
       }[] = [
-        {
-          type: "RETURN",
-          method: returnShipping.method,
-          shippingServiceId: returnShipping.serviceId,
-          shippingServiceName: returnShipping.serviceName,
-          quotedPrice: returnShipping.quotedPrice,
-          paidBy: kind === "EXCHANGE" ? "STORE" : returnShipping.paidBy,
-          packageHeightCm: returnShipping.packageHeightCm,
-          packageWidthCm: returnShipping.packageWidthCm,
-          packageLengthCm: returnShipping.packageLengthCm,
-          packageWeightKg: returnShipping.packageWeightKg,
-        },
-      ];
+          {
+            type: "RETURN",
+            method: returnShipping.method,
+            shippingServiceId: returnShipping.serviceId,
+            shippingServiceName: returnShipping.serviceName,
+            quotedPrice: returnShipping.quotedPrice,
+            paidBy: kind === "EXCHANGE" ? "STORE" : returnShipping.paidBy,
+            packageHeightCm: returnShipping.packageHeightCm,
+            packageWidthCm: returnShipping.packageWidthCm,
+            packageLengthCm: returnShipping.packageLengthCm,
+            packageWeightKg: returnShipping.packageWeightKg,
+          },
+        ];
 
-      const res = await fetch("/api/admin/exchanges", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          orderId: selectedOrder.id,
-          kind,
-          reason,
-          reasonNotes: reasonNotes.trim() || null,
-          notes: reason === "OTHER" ? null : notes.trim() || null,
-          refundAmount: kind === "RETURN" ? refundAmount : undefined,
-          returnLines: returnLines.map((l) => ({
-            orderItemId: l.orderItemId,
-            quantity: l.quantity,
-            pieceSelections: l.pieceSelections,
-          })),
-          outboundLines: [],
-          shippings,
-        }),
-      });
+      const res = await fetch(
+        editExchangeId
+          ? `/api/admin/exchanges/${editExchangeId}`
+          : "/api/admin/exchanges",
+        {
+          method: editExchangeId ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            orderId: selectedOrder.id,
+            kind,
+            reason,
+            reasonNotes: reasonNotes.trim() || null,
+            notes: reason === "OTHER" ? null : notes.trim() || null,
+            refundAmount: kind === "RETURN" ? refundAmount : undefined,
+            returnLines: returnLines.map((l) => ({
+              orderItemId: l.orderItemId,
+              quantity: l.quantity,
+              pieceSelections: l.pieceSelections,
+              creditAmount: l.creditAmount,
+            })),
+            outboundLines: [],
+            shippings,
+          }),
+        }
+      );
       const data = (await res.json()) as {
         exchange?: { id: string };
         error?: string;
@@ -745,7 +950,9 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
       if (!res.ok || !data.exchange) {
         setError(
           data.error ??
-            (kind === "RETURN"
+          (editExchangeId
+            ? "Não foi possível salvar as alterações."
+            : kind === "RETURN"
               ? "Não foi possível criar a devolução."
               : "Não foi possível criar a troca.")
         );
@@ -755,7 +962,7 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
       onCreated(data.exchange.id);
       onClose();
     } catch {
-      setError("Erro de rede ao criar troca.");
+      setError("Erro de rede ao salvar a troca.");
     } finally {
       setSubmitting(false);
     }
@@ -771,11 +978,14 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
         <div className="flex shrink-0 items-center justify-between border-b border-stone-100 px-4 py-4 sm:px-6">
           <div className="min-w-0 pr-3">
             <h2 className="truncate text-base font-semibold text-stone-900 sm:text-lg">
-              {kind === "RETURN" ? "Nova devolução" : "Nova troca"}
+              {editExchangeId
+                ? kind === "RETURN"
+                  ? "Editar devolução"
+                  : "Editar troca"
+                : kind === "RETURN"
+                  ? "Nova devolução"
+                  : "Nova troca"}
             </h2>
-            <p className="mt-0.5 truncate text-xs text-stone-500 sm:text-sm">
-              {steps[step]} · {step + 1}/{steps.length}
-            </p>
           </div>
           <button
             type="button"
@@ -804,7 +1014,7 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
             {(
               [
                 ["EXCHANGE", "Troca"],
-                ["RETURN", "Só devolução"],
+                ["RETURN", "Devolução"],
               ] as const
             ).map(([key, label]) => (
               <button
@@ -828,27 +1038,15 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
                     )
                   );
                 }}
-                className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                  kind === key
+                className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${kind === key
                     ? "border-sky-300 bg-sky-100 text-sky-900"
                     : "border-stone-200 bg-white text-stone-600 hover:bg-stone-50"
-                }`}
+                  }`}
               >
                 {label}
               </button>
             ))}
           </div>
-          {kind === "RETURN" ? (
-            <p className="mt-2 text-xs text-stone-500">
-              Informe o valor a restituir. Depois da conferência, confirme a
-              restituição.
-            </p>
-          ) : (
-            <p className="mt-2 text-xs text-stone-500">
-              Cadastre as peças e o frete reverso (loja). O envio e a cobrança
-              da cliente ficam para depois da conferência.
-            </p>
-          )}
         </div>
 
         <div className="shrink-0 border-b border-stone-100 bg-stone-50/80 px-3 py-3 sm:px-6">
@@ -863,22 +1061,20 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
                     <div className="flex w-full items-center">
                       {i > 0 ? (
                         <span
-                          className={`h-px flex-1 ${
-                            done || active ? "bg-stone-400" : "bg-stone-200"
-                          }`}
+                          className={`h-px flex-1 ${done || active ? "bg-stone-400" : "bg-stone-200"
+                            }`}
                           aria-hidden
                         />
                       ) : (
                         <span className="flex-1" aria-hidden />
                       )}
                       <span
-                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold sm:h-8 sm:w-8 sm:text-xs ${
-                          active
+                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold sm:h-8 sm:w-8 sm:text-xs ${active
                             ? "bg-stone-900 text-white ring-4 ring-stone-900/10"
                             : done
                               ? "bg-stone-800 text-white"
                               : "border border-stone-200 bg-white text-stone-400"
-                        }`}
+                          }`}
                       >
                         {done ? (
                           <svg
@@ -901,9 +1097,8 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
                       </span>
                       {!isLast ? (
                         <span
-                          className={`h-px flex-1 ${
-                            done ? "bg-stone-400" : "bg-stone-200"
-                          }`}
+                          className={`h-px flex-1 ${done ? "bg-stone-400" : "bg-stone-200"
+                            }`}
                           aria-hidden
                         />
                       ) : (
@@ -911,13 +1106,12 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
                       )}
                     </div>
                     <span
-                      className={`max-w-full px-0.5 text-center text-[10px] font-medium leading-tight sm:text-[11px] ${
-                        active
+                      className={`max-w-full px-0.5 text-center text-[10px] font-medium leading-tight sm:text-[11px] ${active
                           ? "text-stone-900"
                           : done
                             ? "text-stone-600"
                             : "text-stone-400"
-                      }`}
+                        }`}
                     >
                       {label}
                     </span>
@@ -928,87 +1122,105 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
           </ol>
         </div>
 
-        <div
-          className={`flex min-h-0 flex-1 flex-col px-4 py-4 sm:px-6 sm:py-5 ${
-            contentStep === 0
-              ? "overflow-hidden"
-              : "overflow-y-auto overscroll-contain"
-          }`}
-        >
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5">
           {error && (
             <div className="mb-3 shrink-0 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {error}
             </div>
           )}
+          {editExchangeId && reverseAlreadyCreated ? (
+            <div className="mb-3 shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              A etiqueta já foi gerada. A cliente pode ter postado a peça.
+              Confira o rastreio e o envio antes de alterar esta troca.
+            </div>
+          ) : null}
 
           {contentStep === 0 && (
             <div className="flex min-h-0 flex-1 flex-col gap-3">
-              <div className="relative shrink-0">
-                <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-                <input
-                  value={orderQuery}
-                  onChange={(e) => setOrderQuery(e.target.value)}
-                  placeholder="Nº do pedido, nome ou e-mail"
-                  className="w-full rounded-xl border border-stone-200 bg-white py-2.5 pl-9 pr-3 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
-                />
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                {ordersLoading ? (
-                  <div className="rounded-xl border border-dashed border-stone-200 px-4 py-10 text-center text-sm text-stone-500">
-                    Buscando pedidos entregues…
-                  </div>
-                ) : !orderQuery.trim() ? (
-                  <div className="rounded-xl border border-dashed border-stone-200 px-4 py-10 text-center">
-                    <p className="text-sm font-medium text-stone-700">
-                      Busque o pedido da cliente
-                    </p>
-                    <p className="mt-1 text-xs leading-relaxed text-stone-500">
-                      Só entram pedidos pagos e já entregues.
-                    </p>
-                  </div>
-                ) : !/^\d+$/.test(orderQuery.trim().replace(/^#/, "").trim()) &&
-                  orderQuery.trim().length < 2 ? (
-                  <p className="px-1 text-sm text-stone-500">
-                    Digite pelo menos 2 caracteres para buscar por nome ou
-                    e-mail.
+              {editExchangeId && selectedOrder ? (
+                <div className="rounded-xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm">
+                  <p className="font-medium text-stone-900">
+                    Pedido #
+                    {selectedOrder.orderNumber ?? selectedOrder.id.slice(0, 6)}
                   </p>
-                ) : orders.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-stone-200 px-4 py-10 text-center text-sm text-stone-500">
-                    Nenhum pedido entregue encontrado.
-                  </div>
-                ) : (
-                  <div className="overflow-hidden rounded-xl border border-stone-200">
-                    <table className="w-full text-sm">
-                      <thead className="sticky top-0 z-[1] bg-stone-50/95 text-xs font-medium text-stone-500 backdrop-blur-sm">
-                        <tr className="border-b border-stone-200">
-                          <th className="w-10 px-3 py-2.5" />
-                          <th className="px-2 py-2.5 text-left">Pedido</th>
-                          <th className="px-2 py-2.5 text-left">Cliente</th>
-                          <th className="hidden px-2 py-2.5 text-left sm:table-cell">
-                            Entrega
-                          </th>
-                          <th className="px-3 py-2.5 text-right">Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {orders.map((o) => (
-                          <ExchangeOrderResultRow
-                            key={o.id}
-                            order={o}
-                            selected={selectedOrder?.id === o.id}
-                            onSelect={() => {
-                              setSelectedOrder(o);
-                              setSelectedReturnKeys({});
-                              setRefundInput("");
-                              setOutbound([]);
-                            }}
-                          />
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+                  <p className="mt-0.5 text-xs text-stone-500">
+                    {selectedOrder.recipientName ||
+                      selectedOrder.email ||
+                      "Cliente"}
+                    . O pedido desta troca não pode ser trocado.
+                  </p>
+                </div>
+              ) : (
+                <div className="relative shrink-0">
+                  <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+                  <input
+                    value={orderQuery}
+                    onChange={(e) => setOrderQuery(e.target.value)}
+                    placeholder="Nº do pedido, nome ou e-mail"
+                    className="w-full rounded-xl border border-stone-200 bg-white py-2.5 pl-9 pr-3 text-sm text-stone-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-200"
+                  />
+                </div>
+              )}
+              {editExchangeId ? null : (
+                <div className="min-h-0 min-w-0 flex-1">
+                  {ordersLoading ? (
+                    <div className="rounded-xl border border-dashed border-stone-200 px-4 py-10 text-center text-sm text-stone-500">
+                      Buscando pedidos entregues…
+                    </div>
+                  ) : !orderQuery.trim() ? (
+                    <div className="rounded-xl border border-dashed border-stone-200 px-4 py-10 text-center">
+                      <p className="text-sm font-medium text-stone-700">
+                        Busque o pedido da cliente
+                      </p>
+                      <p className="mt-1 text-xs leading-relaxed text-stone-500">
+                        Só entram pedidos pagos e já entregues. O prazo de 7 dias
+                        conta a partir da data de entrega.
+                      </p>
+                    </div>
+                  ) : !/^\d+$/.test(orderQuery.trim().replace(/^#/, "").trim()) &&
+                    orderQuery.trim().length < 2 ? (
+                    <p className="px-1 text-sm text-stone-500">
+                      Digite pelo menos 2 caracteres para buscar por nome ou
+                      e-mail.
+                    </p>
+                  ) : orders.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-stone-200 px-4 py-10 text-center text-sm text-stone-500">
+                      Nenhum pedido entregue encontrado.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto overscroll-x-contain rounded-xl border border-stone-200 [-webkit-overflow-scrolling:touch] [touch-action:pan-x_pan-y]">
+                      <table className="w-max min-w-full text-sm">
+                        <thead className="sticky top-0 z-[1] bg-stone-50/95 text-xs font-medium text-stone-500 backdrop-blur-sm">
+                          <tr className="border-b border-stone-200">
+                            <th className="w-10 px-3 py-2.5" />
+                            <th className="px-2 py-2.5 text-left">Pedido</th>
+                            <th className="px-2 py-2.5 text-left">Cliente</th>
+                            <th className="px-2 py-2.5 text-left">
+                              Entrega
+                            </th>
+                            <th className="px-3 py-2.5 text-right">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {orders.map((o) => (
+                            <ExchangeOrderResultRow
+                              key={o.id}
+                              order={o}
+                              selected={selectedOrder?.id === o.id}
+                              onSelect={() => {
+                                setSelectedOrder(o);
+                                setSelectedReturnKeys({});
+                                setRefundInput("");
+                                setOutbound([]);
+                              }}
+                            />
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -1017,51 +1229,76 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
               <p className="text-sm text-stone-600">
                 {kind === "RETURN"
                   ? "Marque as peças e informe o valor a reembolsar desta venda."
-                  : "Marque as peças que voltam. Na troca, o saldo considera só o frete."}
+                  : "Marque as peças que voltam e informe o crédito de cada item."}
+                {unavailableReturnKeys.size > 0 ? (
+                  <span className="mt-1 block text-xs text-stone-500">
+                    Peças já cadastradas em outra troca não podem ser
+                    selecionadas.
+                  </span>
+                ) : null}
               </p>
               <div className="space-y-3">
                 {returnCards.map((card) => {
-                  const selectedCount = card.units.filter(
+                  const availableUnits = card.units.filter(
+                    (unit) => !unavailableReturnKeys.has(unit.key)
+                  );
+                  const cardLocked = availableUnits.length === 0;
+                  const selectedCount = availableUnits.filter(
                     (unit) => selectedReturnKeys[unit.key]
                   ).length;
                   const allSelected =
-                    card.units.length > 0 &&
-                    selectedCount === card.units.length;
+                    availableUnits.length > 0 &&
+                    selectedCount === availableUnits.length;
+                  const creditRaw = returnCreditByItem[card.orderItemId] ?? "";
+                  const creditParsed = parseMoneyInput(creditRaw);
+                  const creditValid =
+                    creditRaw.trim() !== "" &&
+                    Number.isFinite(creditParsed) &&
+                    creditParsed >= 0 &&
+                    creditParsed - card.productTotal <= 0.009;
                   return (
                     <div
                       key={card.orderItemId}
-                      className="overflow-hidden rounded-xl border border-stone-200"
+                      className={`overflow-hidden rounded-xl border ${cardLocked
+                          ? "border-stone-200 bg-stone-50/80 opacity-70"
+                          : "border-stone-200"
+                        }`}
                     >
                       <button
                         type="button"
+                        disabled={cardLocked}
                         onClick={() => {
+                          if (cardLocked) return;
                           setSelectedReturnKeys((prev) => {
                             const next = { ...prev };
-                            for (const unit of card.units) {
+                            for (const unit of availableUnits) {
                               next[unit.key] = !allSelected;
                             }
                             return next;
                           });
                         }}
-                        className={`flex w-full items-start gap-3 px-3 py-3 text-left ${
-                          allSelected ? "bg-stone-50" : "bg-white"
-                        }`}
+                        className={`flex w-full items-start gap-3 px-3 py-3 text-left disabled:cursor-not-allowed ${allSelected ? "bg-stone-50" : "bg-white"
+                          }`}
                       >
-                        <SelectionDot selected={allSelected} />
+                        <SelectionDot selected={allSelected && !cardLocked} />
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-semibold text-stone-900">
                             {card.identification}
                           </p>
                           <p className="mt-0.5 text-[11px] text-stone-400">
-                            {card.units.length === 1
-                              ? "1 peça"
-                              : `${card.units.length} peças`}
-                            {selectedCount > 0 && selectedCount < card.units.length
+                            {cardLocked
+                              ? "Já incluído em outra troca"
+                              : card.units.length === 1
+                                ? "1 peça"
+                                : `${card.units.length} peças`}
+                            {!cardLocked &&
+                              selectedCount > 0 &&
+                              selectedCount < availableUnits.length
                               ? ` · ${selectedCount} selecionada(s)`
                               : ""}
                           </p>
                         </div>
-                        {kind === "RETURN" ? (
+                        {kind === "RETURN" && !cardLocked ? (
                           <span className="shrink-0 text-sm font-medium tabular-nums text-stone-900">
                             {formatPrice(card.productTotal)}
                           </span>
@@ -1069,32 +1306,84 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
                       </button>
                       <ul className="border-t border-stone-100">
                         {card.units.map((unit) => {
-                          const selected = Boolean(selectedReturnKeys[unit.key]);
+                          const locked = unavailableReturnKeys.has(unit.key);
+                          const selected =
+                            !locked && Boolean(selectedReturnKeys[unit.key]);
                           return (
                             <li key={unit.key}>
                               <button
                                 type="button"
-                                onClick={() =>
+                                disabled={locked}
+                                onClick={() => {
+                                  if (locked) return;
                                   setSelectedReturnKeys((prev) => ({
                                     ...prev,
                                     [unit.key]: !prev[unit.key],
-                                  }))
-                                }
-                                className={`flex w-full items-center gap-3 px-3 py-2.5 pl-6 text-left ${
-                                  selected
-                                    ? "bg-stone-50"
-                                    : "bg-white hover:bg-stone-50/80"
-                                }`}
+                                  }));
+                                }}
+                                className={`flex w-full items-center gap-3 px-3 py-2.5 pl-6 text-left disabled:cursor-not-allowed ${locked
+                                    ? "bg-stone-50 text-stone-400"
+                                    : selected
+                                      ? "bg-stone-50"
+                                      : "bg-white hover:bg-stone-50/80"
+                                  }`}
                               >
                                 <SelectionDot selected={selected} />
                                 <p className="min-w-0 truncate text-sm text-stone-700">
                                   {unit.pieceLabel}
+                                  {locked ? (
+                                    <span className="ml-1 text-[11px] text-stone-400">
+                                      · outra troca
+                                    </span>
+                                  ) : null}
                                 </p>
                               </button>
                             </li>
                           );
                         })}
                       </ul>
+                      {kind === "EXCHANGE" && selectedCount > 0 && !cardLocked ? (
+                        <label className="block space-y-1.5 border-t border-stone-100 px-3 py-3">
+                          <span className="text-xs font-medium text-stone-700">
+                            Crédito da{selectedCount === 1 ? " peça" : "s peças"}{" "}
+                            devolvida{selectedCount === 1 ? "" : "s"}
+                          </span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            required
+                            value={creditRaw}
+                            onChange={(e) =>
+                              setReturnCreditByItem((prev) => ({
+                                ...prev,
+                                [card.orderItemId]: e.target.value,
+                              }))
+                            }
+                            placeholder="Obrigatório"
+                            className={`box-border h-10 w-full rounded-lg border bg-white px-3 text-sm font-medium tabular-nums text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 ${
+                              creditValid
+                                ? "border-stone-200 focus:border-stone-400 focus:ring-stone-200"
+                                : "border-red-300 focus:border-red-400 focus:ring-red-100"
+                            }`}
+                          />
+                          <span
+                            className={`block text-[11px] ${
+                              creditValid ? "text-stone-400" : "text-red-600"
+                            }`}
+                          >
+                            {!creditRaw.trim()
+                              ? "Informe o crédito deste conjunto."
+                              : !Number.isFinite(creditParsed) ||
+                                  creditParsed < 0
+                                ? "Valor inválido."
+                                : creditParsed - card.productTotal > 0.009
+                                  ? `Não pode passar de ${formatPrice(card.productTotal)}.`
+                                  : allSelected
+                                    ? `Valor pago neste item: ${formatPrice(card.productTotal)}.`
+                                    : `Devolução parcial. Máximo ${formatPrice(card.productTotal)}.`}
+                          </span>
+                        </label>
+                      ) : null}
                     </div>
                   );
                 })}
@@ -1186,11 +1475,10 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
                 <button
                   type="button"
                   onClick={() => setShowCustomSets((v) => !v)}
-                  className={`inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
-                    showCustomSets
+                  className={`inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${showCustomSets
                       ? "border-sky-300 bg-sky-100 text-sky-900"
                       : "border-stone-200 bg-white text-stone-700 hover:border-stone-300 hover:bg-stone-50"
-                  }`}
+                    }`}
                 >
                   <svg
                     className="h-3.5 w-3.5"
@@ -1248,11 +1536,10 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
                       className="flex items-center gap-3 rounded-xl border border-stone-200 px-3 py-3"
                     >
                       <div
-                        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-[10px] font-semibold uppercase tracking-wide ${
-                          line.kind === "custom"
+                        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-[10px] font-semibold uppercase tracking-wide ${line.kind === "custom"
                             ? "bg-stone-100 text-stone-400"
                             : "bg-sky-50 text-sky-700"
-                        }`}
+                          }`}
                       >
                         {line.kind === "custom" ? "Conj." : "Cat."}
                       </div>
@@ -1278,12 +1565,12 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
                             prev.map((x) =>
                               x.key === line.key
                                 ? {
-                                    ...x,
-                                    quantity: Math.max(
-                                      1,
-                                      Math.floor(Number(e.target.value) || 1)
-                                    ),
-                                  }
+                                  ...x,
+                                  quantity: Math.max(
+                                    1,
+                                    Math.floor(Number(e.target.value) || 1)
+                                  ),
+                                }
                                 : x
                             )
                           )
@@ -1365,11 +1652,10 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
                       if (r === "OTHER") setNotes("");
                       else setReasonNotes("");
                     }}
-                    className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                      reason === r
+                    className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${reason === r
                         ? "border-sky-300 bg-sky-100 text-sky-900"
                         : "border-stone-200 bg-white text-stone-600 hover:border-stone-300 hover:bg-stone-50"
-                    }`}
+                      }`}
                   >
                     {EXCHANGE_REASON_LABELS[r]}
                   </button>
@@ -1398,18 +1684,6 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
 
           {contentStep === 4 && (
             <div className="space-y-4">
-              {orderIsArranged && arrangedLabel ? (
-                <p className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-600">
-                  Envio original deste pedido: {arrangedLabel}. O retorno já
-                  veio pré-selecionado; você pode alterar.
-                </p>
-              ) : selectedOrder?.fulfillmentType === "CARRIER" ? (
-                <p className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-600">
-                  Envio original: transportadora. O retorno já veio
-                  pré-selecionado; você pode alterar.
-                </p>
-              ) : null}
-
               <div className="rounded-xl border border-stone-200 p-3">
                 <h3 className="mb-2 text-sm font-medium text-stone-900">
                   Como a peça volta
@@ -1430,18 +1704,12 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
                 />
                 <p className="mt-3 text-xs text-stone-500">
                   {returnShipping.method === "CARRIER"
-                    ? "Na criação cotamos o retorno (cliente → loja). Se PAC ou SEDEX dos Correios for o mais barato, geramos o código de postagem; senão, realizamos manualmente."
+                    ? "Por enquanto só cadastramos a troca. A etiqueta reversa não é gerada agora."
                     : returnShipping.method === "LOCAL_COURIER"
                       ? "Moto boy da loja busca a peça."
-                      : "A cliente devolve a peça."}
+                      : "A cliente leva a peça para a loja."}
                 </p>
               </div>
-
-              <p className="text-xs text-stone-500">
-                {kind === "EXCHANGE"
-                  ? "O envio da peça nova e a cobrança da cliente são definidos depois da conferência."
-                  : "O valor a restituir é confirmado depois que a peça chegar e for conferida."}
-              </p>
             </div>
           )}
 
@@ -1463,6 +1731,16 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
                 label="Motivo"
                 value={reason ? EXCHANGE_REASON_LABELS[reason] : "—"}
               />
+
+              <SummaryRow
+                label="Frete de retorno"
+                value={
+                  kind === "EXCHANGE"
+                    ? `${EXCHANGE_RETURN_METHOD_LABELS[returnShipping.method]}`
+                    : EXCHANGE_RETURN_METHOD_LABELS[returnShipping.method]
+                }
+              />
+
               <div>
                 <p className="text-xs font-medium text-stone-500">
                   Peças a devolver
@@ -1495,20 +1773,6 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
                   })}
                 </ul>
               </div>
-              <SummaryRow
-                label="Frete de retorno"
-                value={
-                  kind === "EXCHANGE"
-                    ? `${EXCHANGE_RETURN_METHOD_LABELS[returnShipping.method]} · loja`
-                    : EXCHANGE_RETURN_METHOD_LABELS[returnShipping.method]
-                }
-              />
-              {returnShipping.method === "CARRIER" ? (
-                <p className="text-xs text-stone-500">
-                  Se Correios (PAC/SEDEX) for o mais barato no sentido cliente →
-                  loja, geramos a reversa; senão, realizamos manualmente.
-                </p>
-              ) : null}
               {kind === "RETURN" ? (
                 <div className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-3">
                   <p className="text-xs font-medium text-stone-500">
@@ -1549,10 +1813,14 @@ export function ExchangeWizard({ open, onClose, onCreated }: Props) {
               className="ml-auto rounded-lg bg-sky-100 px-4 py-2 text-sm font-semibold text-sky-900 ring-1 ring-sky-200/80 transition-colors hover:bg-sky-200 disabled:opacity-40"
             >
               {submitting
-                ? "Criando…"
-                : kind === "RETURN"
-                  ? "Criar devolução"
-                  : "Criar troca"}
+                ? editExchangeId
+                  ? "Salvando…"
+                  : "Criando…"
+                : editExchangeId
+                  ? "Salvar alterações"
+                  : kind === "RETURN"
+                    ? "Criar devolução"
+                    : "Criar troca"}
             </button>
           )}
         </div>
@@ -1579,11 +1847,10 @@ function MethodToggle({
           key={key}
           type="button"
           onClick={() => onChange(key)}
-          className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
-            value === key
+          className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${value === key
               ? "border-sky-300 bg-sky-100 text-sky-900"
               : "border-stone-200 bg-white text-stone-600 hover:border-stone-300 hover:bg-stone-50"
-          }`}
+            }`}
         >
           {labels[key]}
         </button>
@@ -1611,11 +1878,10 @@ function PaidByToggle({
           key={key}
           type="button"
           onClick={() => onChange(key)}
-          className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
-            value === key
+          className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${value === key
               ? "border-sky-300 bg-sky-100 text-sky-900"
               : "border-stone-200 bg-white text-stone-600 hover:border-stone-300 hover:bg-stone-50"
-          }`}
+            }`}
         >
           {label}
         </button>

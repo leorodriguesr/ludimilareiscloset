@@ -686,6 +686,10 @@ async function confirmExchangeBalanceInTransaction(input: {
         data: {
           balanceStatus: ExchangeBalanceStatus.PAID,
           balancePaidAt: paidAt,
+          additionalSaleRecognizedAt:
+            exchange.additionalSaleItemCount > 0
+              ? (exchange.additionalSaleRecognizedAt ?? paidAt)
+              : null,
         },
       });
 

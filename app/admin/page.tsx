@@ -42,7 +42,7 @@ const ADMIN_NAV_GROUPS: {
       { id: "products", label: "Produtos" },
       { id: "sales", label: "Vendas" },
       { id: "shipping", label: "Envios" },
-      // { id: "exchanges", label: "Trocas" },
+      { id: "exchanges", label: "Trocas" }, 
     ],
   },
   {
@@ -231,7 +231,12 @@ export default function AdminPage() {
 
   const navGroups = useMemo(() => {
     if (isAdmin) return ADMIN_NAV_GROUPS;
-    return ADMIN_NAV_GROUPS.filter((group) => group.title === "Operação");
+    return ADMIN_NAV_GROUPS.filter((group) => group.title === "Operação").map(
+      (group) => ({
+        ...group,
+        items: group.items.filter((item) => item.id !== "exchanges"),
+      })
+    );
   }, [isAdmin]);
 
   const allowedSections = useMemo(
@@ -465,7 +470,7 @@ export default function AdminPage() {
           </section>
         )}
 
-        {activeSection === "exchanges" && (
+        {activeSection === "exchanges" && isAdmin && (
           <section>
             <ExchangeManager />
           </section>

@@ -14,10 +14,17 @@ import {
   productIdentityKey,
   roundMoney,
 } from "@/lib/exchanges/product-diff";
+import {
+  additionalSaleRecognitionDate,
+  additionalSaleSnapshot,
+} from "@/lib/exchanges/additional-sale";
+import { returnUnitCount } from "@/lib/exchanges/return-units";
+import { parsePieceSelections } from "@/lib/exchanges/serialize";
 import { maybeReleaseOutboundShipping } from "@/lib/exchanges/release-outbound";
 import {
   exchangeShippingMethodServiceName,
   isLocalExchangeShippingMethod,
+  LOCAL_COURIER_CUSTOMER_FEE,
 } from "@/lib/exchanges/shipping-method";
 import { debitCommittedStock } from "@/lib/orders/stock/restore";
 import { prisma } from "@/lib/prisma";
@@ -78,10 +85,17 @@ export async function addExchangeOutbound(input: {
     exchange.orderId
   );
 
-  const returnedByItem = new Map<string, true>();
+  const returnedByItem = new Map<string, number>();
   for (const item of exchange.items) {
     if (item.direction !== "RETURN" || !item.orderItemId) continue;
-    returnedByItem.set(item.orderItemId, true);
+    const selectedUnits = returnUnitCount(
+      item.quantity,
+      parsePieceSelections(item.pieceSelectionsJson)
+    );
+    returnedByItem.set(
+      item.orderItemId,
+      (returnedByItem.get(item.orderItemId) ?? 0) + selectedUnits
+    );
   }
 
   const returnedProductKeys = [...returnedByItem.keys()].map((itemId) => {
@@ -94,15 +108,32 @@ export async function addExchangeOutbound(input: {
       quantity: orderItem?.quantity ?? 1,
     };
   });
-  const outboundProductKeys = outboundRows.map((row) => ({
+  const allReturnItemsFullySelected =
+    returnedByItem.size > 0 &&
+    [...returnedByItem].every(([itemId, selectedUnits]) => {
+      const orderItem = exchange.order.items.find((item) => item.id === itemId);
+      if (!orderItem) return false;
+      const maxUnits = returnUnitCount(
+        orderItem.quantity,
+        parsePieceSelections(orderItem.pieceSelectionsJson)
+      );
+      return selectedUnits === maxUnits && maxUnits > 0;
+    });
+  const replacementRows = outboundRows.filter(
+    (row) => row.lineRole !== "ADDITIONAL_SALE"
+  );
+  const outboundProductKeys = replacementRows.map((row) => ({
     key: productIdentityKey(row.productId, row.productName),
     quantity: row.quantity,
   }));
-  const samePieceSwap = isSamePieceSwap({
-    returned: returnedProductKeys,
-    outbound: outboundProductKeys,
-    allReturnItemsFullySelected: true,
-  });
+  const samePieceSwap =
+    replacementRows.length > 0 &&
+    isSamePieceSwap({
+      returned: returnedProductKeys,
+      outbound: outboundProductKeys,
+      allReturnItemsFullySelected,
+    });
+  const extraSale = additionalSaleSnapshot(outboundRows);
 
   const method =
     input.shipping.method === "STORE_PICKUP" ||
@@ -111,6 +142,22 @@ export async function addExchangeOutbound(input: {
       ? input.shipping.method
       : "CARRIER";
   const local = isLocalExchangeShippingMethod(method);
+  const paidBy =
+    method === "STORE_PICKUP"
+      ? ("STORE" as const)
+      : input.shipping.paidBy === "STORE" || input.shipping.paidBy === "CUSTOMER"
+        ? input.shipping.paidBy
+        : ("STORE" as const);
+  let quotedPrice =
+    local
+      ? (input.shipping.quotedPrice ?? 0)
+      : (input.shipping.quotedPrice ?? null);
+  if (method === "LOCAL_COURIER") {
+    quotedPrice = paidBy === "CUSTOMER" ? LOCAL_COURIER_CUSTOMER_FEE : 0;
+  }
+  if (method === "STORE_PICKUP") {
+    quotedPrice = 0;
+  }
   const outboundShipping = {
     type: "OUTBOUND" as const,
     method,
@@ -118,8 +165,8 @@ export async function addExchangeOutbound(input: {
     shippingServiceName: local
       ? exchangeShippingMethodServiceName(method)
       : (input.shipping.shippingServiceName ?? null),
-    quotedPrice: local ? (input.shipping.quotedPrice ?? 0) : (input.shipping.quotedPrice ?? null),
-    paidBy: "CUSTOMER" as const,
+    quotedPrice,
+    paidBy,
     packageHeightCm: local ? null : (input.shipping.packageHeightCm ?? null),
     packageWidthCm: local ? null : (input.shipping.packageWidthCm ?? null),
     packageLengthCm: local ? null : (input.shipping.packageLengthCm ?? null),
@@ -136,17 +183,12 @@ export async function addExchangeOutbound(input: {
     outboundRows.reduce((a, r) => a + r.lineTotal, 0)
   );
   const adjustmentAmount = roundMoney(input.adjustmentAmount ?? 0);
-  if (Math.abs(adjustmentAmount) > 0.009 && !input.adjustmentReason?.trim()) {
-    throw new ExchangeError(
-      "ADJUSTMENT_REASON_REQUIRED",
-      "Informe o motivo do ajuste de saldo."
-    );
-  }
 
   const balance = computeExchangeBalance({
     returnedItemsTotal,
     newItemsTotal,
     samePieceSwap,
+    additionalItemsTotal: extraSale.additionalSaleItemsTotal,
     adjustmentAmount,
     shippings: [
       ...existingShippings,
@@ -172,6 +214,7 @@ export async function addExchangeOutbound(input: {
         lineTotal: r.lineTotal,
         pieceSelectionsJson: r.pieceSelectionsJson,
         pieceVariantId: r.pieceVariantId,
+        lineRole: r.lineRole,
       })),
     });
 
@@ -228,6 +271,12 @@ export async function addExchangeOutbound(input: {
         balanceAdjustmentReason: input.adjustmentReason?.trim() || null,
         balanceAmount: balance.balanceAmount,
         balanceStatus: balance.balanceStatus,
+        additionalSaleItemsTotal: extraSale.additionalSaleItemsTotal,
+        additionalSaleItemCount: extraSale.additionalSaleItemCount,
+        additionalSaleRecognizedAt: additionalSaleRecognitionDate({
+          additionalSaleItemCount: extraSale.additionalSaleItemCount,
+          balanceStatus: balance.balanceStatus,
+        }),
         status: customerOwes
           ? ExchangeStatus.RECEIVED
           : ExchangeStatus.READY_OUTBOUND,
@@ -242,6 +291,7 @@ export async function addExchangeOutbound(input: {
         samePieceSwap,
         balanceAmount: balance.balanceAmount,
         outboundCount: outboundRows.length,
+        additionalSaleItemCount: extraSale.additionalSaleItemCount,
         adjustmentAmount,
       },
     });

@@ -10,6 +10,7 @@ import {
   providerShipmentStatusFromPayload,
 } from "@/lib/shipping/service-id";
 import { SHIPPING_PROVIDERS } from "@/lib/shipping/providers";
+import { deliveredAtOnStatusChange } from "@/lib/orders/delivered-at";
 
 type MeWebhookPayload = {
   event?: string;
@@ -52,7 +53,7 @@ async function resolveOrder(data: NonNullable<MeWebhookPayload["data"]>) {
   if (shipmentId) {
     const byShipment = await prisma.order.findFirst({
       where: { superfreteShipmentId: shipmentId },
-      select: { id: true, shippingStatus: true },
+      select: { id: true, shippingStatus: true, deliveredAt: true },
     });
     if (byShipment) return byShipment;
   }
@@ -62,7 +63,7 @@ async function resolveOrder(data: NonNullable<MeWebhookPayload["data"]>) {
     if (!tag) continue;
     const byTag = await prisma.order.findUnique({
       where: { id: tag },
-      select: { id: true, shippingStatus: true },
+      select: { id: true, shippingStatus: true, deliveredAt: true },
     });
     if (byTag) return byTag;
   }
@@ -175,6 +176,10 @@ export async function POST(request: NextRequest) {
           superfreteStatus: meStatus || undefined,
           ...(tracking ? { trackingCode: tracking } : {}),
           ...(nextShippingStatus ? { shippingStatus: nextShippingStatus } : {}),
+          ...deliveredAtOnStatusChange({
+            currentDeliveredAt: order.deliveredAt,
+            nextShippingStatus,
+          }),
         };
     if (!labelCancelled && data.id) updates.superfreteShipmentId = data.id;
     if (

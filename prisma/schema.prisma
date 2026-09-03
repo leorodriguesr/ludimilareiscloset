@@ -99,6 +99,12 @@ enum ExchangeItemDirection {
   OUTBOUND
 }
 
+/** Papel da linha de saída na troca. */
+enum ExchangeItemRole {
+  REPLACEMENT
+  ADDITIONAL_SALE
+}
+
 /** Destino da peça devolvida após conferência. */
 enum ExchangeItemDisposition {
   RESELLABLE
@@ -264,6 +270,8 @@ model Order {
   mercadoPagoPaymentId      String?
   /** Status de envio: to_pack (por embalar) | packed (por enviar) | shipped | delivered | cancelled */
   shippingStatus            String    @default("to_pack")
+  /** Quando o pedido foi marcado como entregue à cliente (webhook, admin ou retirada). */
+  deliveredAt               DateTime?
   /** Código do serviço do provedor (ex.: 1=PAC, 2=SEDEX, 3=Jadlog, 17=Mini, 31=Loggi). */
   shippingServiceId         Int?
   /** Status bruto do provedor (pending, released, generated, posted, delivered, cancelled). */
@@ -344,6 +352,11 @@ model Exchange {
   balancePaidAt        DateTime?
   balancePaidByUserId  String?
   balanceNotes         String?
+  /** Valor e peças das linhas marcadas como nova venda. */
+  additionalSaleItemsTotal Float @default(0)
+  additionalSaleItemCount  Int   @default(0)
+  /** Quando a venda adicional entra no relatório. */
+  additionalSaleRecognizedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -375,6 +388,8 @@ model ExchangeItem {
   lineTotal           Float
   pieceSelectionsJson String?
   pieceVariantId      String?
+  /** Só OUTBOUND: peça da troca ou produto extra. */
+  lineRole            ExchangeItemRole @default(REPLACEMENT)
   /** Preenchido na conferência (só RETURN). */
   disposition         ExchangeItemDisposition?
   stockRestored       Boolean               @default(false)
@@ -400,6 +415,8 @@ model ExchangeShipping {
   trackingCode          String?
   postingLocationName   String?
   postingLocationAddress String?
+  /** Link do Google Maps do ponto de postagem da cliente. */
+  postingLocationMapsUrl String?
   manualConfiguredAt    DateTime?
   superfreteShipmentId  String?
   superfreteStatus      String?

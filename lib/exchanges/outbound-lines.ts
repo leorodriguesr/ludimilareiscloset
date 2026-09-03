@@ -15,6 +15,7 @@ export type CreateExchangeOutboundCatalogLine = {
   productId: string;
   quantity: number;
   unitPrice?: number;
+  lineRole?: "REPLACEMENT" | "ADDITIONAL_SALE";
   pieceSelections?: CartPieceSelection[];
 };
 
@@ -23,6 +24,7 @@ export type CreateExchangeOutboundCustomLine = {
   description: string;
   quantity: number;
   unitPrice: number;
+  lineRole?: "REPLACEMENT" | "ADDITIONAL_SALE";
   pieces?: { name: string; size: string; color: string }[];
 };
 
@@ -39,6 +41,7 @@ export type OutboundRow = {
   lineTotal: number;
   pieceSelectionsJson: string | null;
   pieceVariantId: string | null;
+  lineRole: "REPLACEMENT" | "ADDITIONAL_SALE";
 };
 
 export async function resolveOutboundRows(
@@ -84,6 +87,8 @@ export async function resolveOutboundRows(
         lineTotal: roundMoney(unitPrice * line.quantity),
         pieceSelectionsJson: serializePieceSelections(pieceSelections),
         pieceVariantId: null,
+        lineRole:
+          line.lineRole === "ADDITIONAL_SALE" ? "ADDITIONAL_SALE" : "REPLACEMENT",
       });
       continue;
     }
@@ -124,6 +129,8 @@ export async function resolveOutboundRows(
       lineTotal: roundMoney(unitPrice * line.quantity),
       pieceSelectionsJson: serializePieceSelections(line.pieceSelections),
       pieceVariantId: null,
+      lineRole:
+        line.lineRole === "ADDITIONAL_SALE" ? "ADDITIONAL_SALE" : "REPLACEMENT",
     });
   }
 

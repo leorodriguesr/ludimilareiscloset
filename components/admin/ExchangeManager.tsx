@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import { formatPrice } from "@/lib/format";
 import {
@@ -14,12 +21,13 @@ import {
 import {
   EXCHANGE_RETURN_METHOD_LABELS,
   EXCHANGE_SHIPPING_METHOD_LABELS,
+  defaultExchangeShippingMethodForOrder,
   isLocalExchangeShippingMethod,
 } from "@/lib/exchanges/shipping-method";
 import { ExchangeWizard } from "@/components/admin/ExchangeWizard";
 import { ExchangeOutboundPlanner } from "@/components/admin/ExchangeOutboundPlanner";
 import { ExchangeInspectModal } from "@/components/admin/ExchangeInspectModal";
-import { ExchangeManualReturnModal } from "@/components/admin/ExchangeManualReturnModal";
+import { ExchangeReverseModal } from "@/components/admin/ExchangeReverseModal";
 import { ExchangeRefundModal } from "@/components/admin/ExchangeRefundModal";
 import { ExchangeChargeModal } from "@/components/admin/ExchangeChargeModal";
 import type {
@@ -35,6 +43,7 @@ type ExchangeItemRow = {
   productName: string;
   productImageUrl?: string | null;
   pieceSelectionsJson?: string | null;
+  orderItemId?: string | null;
   productId?: string | null;
   quantity: number;
   unitPrice: number;
@@ -56,6 +65,7 @@ type ExchangeShippingRow = {
   trackingCode: string | null;
   postingLocationName?: string | null;
   postingLocationAddress?: string | null;
+  postingLocationMapsUrl?: string | null;
   manualConfiguredAt?: string | null;
   labelUrl: string | null;
   shippingStatus: string;
@@ -79,6 +89,16 @@ type ExchangeListItem = {
     recipientName: string | null;
     email: string | null;
     destinationCep?: string | null;
+    fulfillmentType?: string | null;
+    shippingServiceName?: string | null;
+    deliveryNotes?: string | null;
+    items?: {
+      id: string;
+      productName: string;
+      productImageUrl?: string | null;
+      pieceSelectionsJson?: string | null;
+      quantity?: number;
+    }[];
   };
   items: ExchangeItemRow[];
   shippings: ExchangeShippingRow[];
@@ -112,12 +132,26 @@ type PaymentResult =
     }
   | { type: "card"; checkoutUrl: string; amount: number };
 
+function outboundInitialMethod(
+  exchange: ExchangeListItem
+): ExchangeShippingMethod {
+  const returnShip = exchange.shippings.find((s) => s.type === "RETURN");
+  if (
+    returnShip?.method === "STORE_PICKUP" ||
+    returnShip?.method === "LOCAL_COURIER" ||
+    returnShip?.method === "CARRIER"
+  ) {
+    return returnShip.method;
+  }
+  return defaultExchangeShippingMethodForOrder(exchange.order);
+}
+
 const EVENT_LABELS: Record<string, string> = {
   CREATED: "Criada",
   REVERSE_LABEL_GENERATED: "Etiqueta reversa",
   RETURN_MANUAL_REGISTERED: "Reversa manual",
   RETURN_POSTED: "Cliente postou",
-  RECEIVED: "Recebido",
+  RECEIVED: "Peça conferida",
   INSPECTED: "Conferência",
   STOCK_RESTORED: "Estoque restaurado",
   STOCK_DEBITED: "Estoque debitado",
@@ -137,7 +171,7 @@ type FilterKey = ExchangeStatus;
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "AWAITING_RETURN", label: "Aguardando" },
   { key: "RETURN_IN_TRANSIT", label: "Trânsito" },
-  { key: "RECEIVED", label: "Recebidas" },
+  { key: "RECEIVED", label: "Peça conferida" },
   { key: "READY_OUTBOUND", label: "Reenvio" },
   { key: "OUTBOUND", label: "Reenvio andamento" },
   { key: "COMPLETED", label: "Concluídas" },
@@ -170,8 +204,51 @@ function trackingUrl(code: string) {
   return `https://rastreamento.superfrete.com/#${encodeURIComponent(code)}`;
 }
 
-function returnShippingOf(ex: ExchangeListItem): ExchangeShippingRow | null {
+function returnShippingOf(ex: {
+  shippings: ExchangeShippingRow[];
+}): ExchangeShippingRow | null {
   return ex.shippings.find((s) => s.type === "RETURN") ?? null;
+}
+
+function hasManualReverse(ship: ExchangeShippingRow | null): boolean {
+  if (!ship) return false;
+  return Boolean(
+    ship.trackingCode ||
+      ship.postingLocationAddress ||
+      ship.labelUrl ||
+      ship.manualConfiguredAt
+  );
+}
+
+function isLocalReturn(ship: ExchangeShippingRow | null): boolean {
+  return isLocalExchangeShippingMethod(ship?.method);
+}
+
+function returnMethodLabel(ship: ExchangeShippingRow | null): string {
+  if (!ship?.method) return "—";
+  return EXCHANGE_RETURN_METHOD_LABELS[ship.method];
+}
+
+function exchangeStatusLabel(ex: {
+  status: ExchangeStatus;
+  balanceStatus?: string;
+  items?: { direction: string }[];
+  shippings: ExchangeShippingRow[];
+}): string {
+  if (
+    ex.status === "RECEIVED" &&
+    ex.balanceStatus === "PENDING" &&
+    (ex.items ?? []).some((item) => item.direction === "OUTBOUND")
+  ) {
+    return "Aguardando pagamento";
+  }
+  if (ex.status === "AWAITING_RETURN") {
+    const ship = returnShippingOf(ex);
+    if (!isLocalReturn(ship) && !hasManualReverse(ship)) {
+      return "Aguardando reverso";
+    }
+  }
+  return EXCHANGE_STATUS_LABELS[ex.status];
 }
 
 const LIST_BTN =
@@ -185,6 +262,7 @@ export function ExchangeManager() {
   const [exchanges, setExchanges] = useState<ExchangeListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardEditId, setWizardEditId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ExchangeDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -198,6 +276,8 @@ export function ExchangeManager() {
   const [paymentResult, setPaymentResult] = useState<PaymentResult | null>(
     null
   );
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [cancelId, setCancelId] = useState<string | null>(null);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -215,7 +295,6 @@ export function ExchangeManager() {
   const loadDetail = useCallback(async (id: string) => {
     setDetailLoading(true);
     setActionError(null);
-    setPaymentResult(null);
     try {
       const res = await fetch(`/api/admin/exchanges/${id}`);
       const data = (await res.json()) as { exchange?: ExchangeDetail };
@@ -261,6 +340,39 @@ export function ExchangeManager() {
     return () => window.clearInterval(timer);
   }, [chargeId, paymentResult, loadList, loadDetail, selectedId]);
 
+  useEffect(() => {
+    if (!chargeId) return;
+    let cancelled = false;
+    setPaymentLoading(true);
+    setActionError(null);
+    void (async () => {
+      try {
+        const res = await fetch(`/api/admin/exchanges/${chargeId}/payment`);
+        const data = (await res.json()) as {
+          payment?: PaymentResult | null;
+          error?: string;
+        };
+        if (cancelled) return;
+        if (!res.ok) {
+          setActionError(
+            data.error ?? "Não foi possível consultar o pagamento."
+          );
+          return;
+        }
+        setPaymentResult(data.payment ?? null);
+      } catch {
+        if (!cancelled) {
+          setActionError("Erro de rede ao consultar pagamento.");
+        }
+      } finally {
+        if (!cancelled) setPaymentLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [chargeId]);
+
   async function runAction(
     path: string,
     body?: Record<string, unknown>,
@@ -285,9 +397,8 @@ export function ExchangeManager() {
         if (exchangeId) window.alert(data.error ?? "Falha na ação.");
         return false;
       }
-      if (data.exchange && (selectedId === id || !selectedId)) {
+      if (data.exchange && selectedId === id) {
         setDetail(data.exchange);
-        setSelectedId(id);
       }
       await loadList();
       return true;
@@ -305,7 +416,6 @@ export function ExchangeManager() {
     if (!id) return;
     setBusy(true);
     setActionError(null);
-    setPaymentResult(null);
     try {
       const res = await fetch(`/api/admin/exchanges/${id}/payment`, {
         method: "POST",
@@ -399,7 +509,10 @@ export function ExchangeManager() {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => setWizardOpen(true)}
+            onClick={() => {
+              setWizardEditId(null);
+              setWizardOpen(true);
+            }}
             className={`inline-flex items-center gap-1.5 rounded-lg bg-sky-100 px-3 text-xs font-semibold text-sky-900 shadow-sm ring-1 ring-sky-200/80 transition-colors hover:bg-sky-200 ${EXCHANGE_TOOLBAR_SIZE}`}
           >
             Nova troca / devolução
@@ -452,28 +565,127 @@ export function ExchangeManager() {
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[880px] text-sm">
+            <table className="w-full min-w-[960px] text-sm">
               <thead>
                 <tr className="border-b border-stone-200 bg-stone-50/80 text-xs font-medium text-stone-500">
-                  <th className="px-4 py-3 text-left">Registro</th>
+                  <th className="px-4 py-3 text-left">Nº</th>
+                  <th className="px-4 py-3 text-left">Tipo</th>
                   <th className="px-4 py-3 text-left">Cliente</th>
+                  <th className="px-4 py-3 text-left">Reembolso</th>
+                  <th className="px-4 py-3 text-left">Devolução</th>
                   <th className="px-4 py-3 text-left">Status</th>
-                  <th className="px-4 py-3 text-left">Saldo</th>
-                  <th className="px-4 py-3 text-left">Etiqueta</th>
-                  <th className="px-4 py-3 text-right">Ações</th>
+                  <th className="px-3 py-3 text-right">Ações</th>
                 </tr>
               </thead>
               <tbody>
                 {visibleExchanges.map((ex) => {
                   const retShip = returnShippingOf(ex);
+                  const localReturn = isLocalReturn(retShip);
+                  const hasReverse = hasManualReverse(retShip);
+                  const canCreateReverse =
+                    !localReturn &&
+                    !hasReverse &&
+                    ex.status !== "CANCELLED" &&
+                    ex.status !== "COMPLETED";
                   const canInspect =
+                    (hasReverse || localReturn) &&
+                    !ex.inspectedAt &&
+                    ex.status !== "CANCELLED" &&
+                    ex.status !== "COMPLETED";
+                  const canEdit =
+                    ex.status !== "CANCELLED" &&
+                    ex.status !== "COMPLETED" &&
+                    !ex.inspectedAt;
+                  const canCancel =
                     !ex.inspectedAt &&
                     ex.status !== "CANCELLED" &&
                     ex.status !== "COMPLETED";
                   const canRefund =
                     !!ex.inspectedAt &&
                     ex.balanceStatus === "CREDIT_PENDING";
-                  const canCharge = ex.balanceStatus === "PENDING";
+                  const canCharge =
+                    !!ex.inspectedAt && ex.balanceStatus === "PENDING";
+                  const canDefineOutbound =
+                    ex.kind === "EXCHANGE" &&
+                    !!ex.inspectedAt &&
+                    !ex.items.some((i) => i.direction === "OUTBOUND") &&
+                    ex.status !== "CANCELLED" &&
+                    ex.status !== "COMPLETED";
+                  const primaryAction = canCreateReverse
+                    ? {
+                        label: "Criar reverso",
+                        className: LIST_BTN_PRIMARY,
+                        onClick: () => setManualReturnId(ex.id),
+                      }
+                    : canInspect
+                      ? {
+                          label: "Conferir peça",
+                          className: LIST_BTN_OK,
+                          disabled: busy,
+                          onClick: () => setInspectId(ex.id),
+                        }
+                      : canDefineOutbound
+                        ? {
+                            label: "Definir novo envio",
+                            className: LIST_BTN_PRIMARY,
+                            onClick: () => setOutboundId(ex.id),
+                          }
+                        : canRefund
+                          ? {
+                              label: "Devolver dinheiro",
+                              className: LIST_BTN_PRIMARY,
+                              disabled: busy,
+                              onClick: () => setRefundId(ex.id),
+                            }
+                          : canCharge
+                            ? {
+                                label: "Cobrar cliente",
+                                className: LIST_BTN_PRIMARY,
+                                disabled: busy,
+                                onClick: () => {
+                                  setChargeId(ex.id);
+                                  setPaymentResult(null);
+                                },
+                              }
+                            : null;
+                  const menuItems: ExchangeMenuItem[] = [
+                    ...(canEdit
+                      ? [
+                          {
+                            id: "edit",
+                            label: "Editar",
+                            icon: ICONS.edit,
+                            onClick: () => {
+                              setWizardEditId(ex.id);
+                              setWizardOpen(true);
+                            },
+                          },
+                        ]
+                      : []),
+                    ...(canDefineOutbound && canRefund
+                      ? [
+                          {
+                            id: "refund",
+                            label: "Devolver dinheiro",
+                            icon: ICONS.refund,
+                            disabled: busy,
+                            onClick: () => setRefundId(ex.id),
+                          },
+                        ]
+                      : []),
+                    ...(canCancel
+                      ? [
+                          {
+                            id: "cancel",
+                            label: "Cancelar",
+                            icon: ICONS.cancel,
+                            danger: true,
+                            separatorBefore: canEdit || canCharge || canRefund,
+                            onClick: () => setCancelId(ex.id),
+                          },
+                        ]
+                      : []),
+                  ];
                   const open = () => setSelectedId(ex.id);
 
                   return (
@@ -486,20 +698,27 @@ export function ExchangeManager() {
                       }`}
                     >
                       <td
-                        className="cursor-pointer px-4 py-3"
+                        className="cursor-pointer whitespace-nowrap px-4 py-3"
                         onClick={open}
                       >
-                        <p className="font-medium text-stone-900">
-                          {EXCHANGE_KIND_LABELS[ex.kind ?? "EXCHANGE"]}{" "}
+                        <p className="font-mono font-medium text-stone-900">
                           {ex.exchangeNumber != null
                             ? `#${ex.exchangeNumber}`
                             : ex.id.slice(0, 6)}
                         </p>
-                        <p className="text-xs text-stone-500">
+                        <p className="whitespace-nowrap text-xs text-stone-500">
                           Pedido{" "}
                           {ex.order.orderNumber != null
                             ? `#${ex.order.orderNumber}`
                             : "—"}
+                        </p>
+                      </td>
+                      <td
+                        className="cursor-pointer px-4 py-3"
+                        onClick={open}
+                      >
+                        <p className="font-medium text-stone-900">
+                          {EXCHANGE_KIND_LABELS[ex.kind ?? "EXCHANGE"]}
                         </p>
                       </td>
                       <td
@@ -512,162 +731,75 @@ export function ExchangeManager() {
                             "Cliente"}
                         </p>
                       </td>
+                      
                       <td
                         className="cursor-pointer px-4 py-3"
                         onClick={open}
                       >
                         <p className="text-stone-800">
-                          {EXCHANGE_STATUS_LABELS[ex.status]}
+                          {ex.kind === "RETURN" &&
+                          Math.abs(ex.balanceAmount) > 0.009
+                            ? formatPrice(Math.abs(ex.balanceAmount))
+                            : "—"}
                         </p>
-                        {ex.inspectedAt ? (
+                      </td>
+                      <td className="px-4 py-3">
+                        {localReturn ? (
+                          <p className="text-sm text-stone-800">
+                            {returnMethodLabel(retShip)}
+                          </p>
+                        ) : hasManualReverse(retShip) ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setManualReturnId(ex.id);
+                            }}
+                            className={LIST_BTN_SOFT}
+                          >
+                            {retShip?.trackingCode || "Ver etiqueta"}
+                          </button>
+                        ) : (
+                          <span className="text-[11px] text-stone-400">
+                            Transportadora
+                          </span>
+                        )}
+                      </td>
+                      <td
+                        className="cursor-pointer whitespace-nowrap px-4 py-3"
+                        onClick={open}
+                      >
+                        <p className="whitespace-nowrap text-stone-800">
+                          {exchangeStatusLabel(ex)}
+                        </p>
+                        {ex.inspectedAt && ex.status !== "RECEIVED" ? (
                           <p className="text-[11px] text-emerald-700">
                             Conferido
                           </p>
                         ) : null}
                       </td>
                       <td
-                        className="cursor-pointer px-4 py-3"
-                        onClick={open}
-                      >
-                        <p className="text-stone-800">
-                          {balanceLabel(ex.balanceAmount)}
-                        </p>
-                        <p className="text-[11px] text-stone-400">
-                          {EXCHANGE_BALANCE_STATUS_LABELS[ex.balanceStatus]}
-                        </p>
-                      </td>
-                      <td
-                        className="px-4 py-3"
+                        className="px-3 py-3"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {retShip &&
-                          isLocalExchangeShippingMethod(retShip.method) ? (
-                            <span className="text-xs text-stone-600">
-                              {EXCHANGE_RETURN_METHOD_LABELS[
-                                retShip.method ?? "STORE_PICKUP"
-                              ]}
-                            </span>
+                        <div className="flex items-center justify-end gap-2">
+                          {primaryAction ? (
+                            <button
+                              type="button"
+                              disabled={primaryAction.disabled}
+                              onClick={primaryAction.onClick}
+                              className={`${primaryAction.className} inline-flex min-w-[10.75rem] justify-center whitespace-nowrap`}
+                            >
+                              {primaryAction.label}
+                            </button>
                           ) : (
-                            <>
-                              {retShip?.trackingCode ? (
-                                <a
-                                  href={trackingUrl(retShip.trackingCode)}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className={`${LIST_BTN_SOFT} font-mono`}
-                                  title="Acompanhar rastreio"
-                                >
-                                  {retShip.trackingCode}
-                                </a>
-                              ) : null}
-                              {retShip?.labelUrl ? (
-                                <a
-                                  href={retShip.labelUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className={LIST_BTN_SOFT}
-                                >
-                                  PDF
-                                </a>
-                              ) : null}
-                              {!retShip?.superfreteShipmentId &&
-                                !retShip?.manualConfiguredAt &&
-                                (ex.status === "AWAITING_RETURN" ||
-                                  ex.status === "RETURN_IN_TRANSIT") && (
-                                  <span className="text-[11px] text-amber-800">
-                                    Realizar manualmente
-                                  </span>
-                                )}
-                              {!retShip?.trackingCode &&
-                                !retShip?.labelUrl &&
-                                retShip?.superfreteShipmentId && (
-                                  <span className="text-[11px] text-stone-400">
-                                    Etiqueta gerada
-                                  </span>
-                                )}
-                            </>
+                            <span className="inline-flex min-w-[10.75rem]" />
                           )}
-                          {!retShip && (
-                            <span className="text-[11px] text-stone-400">—</span>
-                          )}
-                        </div>
-                      </td>
-                      <td
-                        className="px-4 py-3"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <div className="flex flex-wrap items-center justify-end gap-1.5">
-                          {canInspect && (
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => setInspectId(ex.id)}
-                              className={LIST_BTN_OK}
-                            >
-                              Conferir peça
-                            </button>
-                          )}
-                          {!ex.inspectedAt &&
-                            retShip?.method === "CARRIER" &&
-                            !retShip.superfreteShipmentId &&
-                            !retShip.manualConfiguredAt && (
-                              <button
-                                type="button"
-                                onClick={() => setManualReturnId(ex.id)}
-                                className={LIST_BTN_SOFT}
-                              >
-                                Configurar reversa
-                              </button>
-                            )}
-                          {ex.kind === "EXCHANGE" &&
-                            !!ex.inspectedAt &&
-                            !ex.items.some((i) => i.direction === "OUTBOUND") &&
-                            ex.status !== "CANCELLED" && (
-                              <button
-                                type="button"
-                                onClick={() => setOutboundId(ex.id)}
-                                className={LIST_BTN_PRIMARY}
-                              >
-                                Definir novo envio
-                              </button>
-                            )}
-                          {canCharge && (
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => {
-                                setChargeId(ex.id);
-                                setPaymentResult(null);
-                              }}
-                              className={LIST_BTN_PRIMARY}
-                            >
-                              Cobrar cliente
-                            </button>
-                          )}
-                          {canRefund && (
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => setRefundId(ex.id)}
-                              className={LIST_BTN_PRIMARY}
-                            >
-                              Devolver dinheiro
-                            </button>
-                          )}
-                          {ex.balanceStatus === "CREDIT_PENDING" &&
-                            !ex.inspectedAt && (
-                              <span className="text-[11px] text-stone-400">
-                                Confira antes do reembolso
-                              </span>
-                            )}
-                          <button
-                            type="button"
-                            onClick={open}
-                            className={LIST_BTN_SOFT}
-                          >
-                            Detalhes
-                          </button>
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center">
+                            {menuItems.length > 0 ? (
+                              <ExchangeRowMenu items={menuItems} />
+                            ) : null}
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -698,6 +830,7 @@ export function ExchangeManager() {
         }}
         onRefund={() => selectedId && setRefundId(selectedId)}
         onManualReturn={() => selectedId && setManualReturnId(selectedId)}
+        onCancel={() => selectedId && setCancelId(selectedId)}
       />
 
       {inspectTarget ? (
@@ -717,49 +850,51 @@ export function ExchangeManager() {
       ) : null}
 
       {manualReturnId ? (
-        <ExchangeManualReturnModal
+        <ExchangeReverseModal
           exchangeId={manualReturnId}
           busy={busy}
           error={actionError}
           onClose={() => setManualReturnId(null)}
-          onSaved={(body) => {
-            void (async () => {
-              setBusy(true);
-              setActionError(null);
-              try {
-                const res = await fetch(
-                  `/api/admin/exchanges/${manualReturnId}/return-shipping`,
-                  {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(body),
-                  }
-                );
-                const data = (await res.json()) as { error?: string };
-                if (!res.ok) {
-                  setActionError(data.error ?? "Falha ao salvar reversa.");
-                  return;
+          onSaved={async (body) => {
+            setBusy(true);
+            setActionError(null);
+            try {
+              const res = await fetch(
+                `/api/admin/exchanges/${manualReturnId}/return-shipping`,
+                {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(body),
                 }
-                setManualReturnId(null);
-                await loadList();
-                if (selectedId) await loadDetail(selectedId);
-              } catch {
-                setActionError("Erro de rede.");
-              } finally {
-                setBusy(false);
+              );
+              const data = (await res.json()) as { error?: string };
+              if (!res.ok) {
+                setActionError(data.error ?? "Falha ao salvar reversa.");
+                return false;
               }
-            })();
+              await loadList();
+              if (selectedId) await loadDetail(selectedId);
+              return true;
+            } catch {
+              setActionError("Erro de rede.");
+              return false;
+            } finally {
+              setBusy(false);
+            }
           }}
         />
       ) : null}
 
       {outboundTarget ? (
         <ExchangeOutboundPlanner
+          key={outboundTarget.id}
           exchangeId={outboundTarget.id}
           destinationCep={outboundTarget.order.destinationCep ?? null}
+          initialMethod={outboundInitialMethod(outboundTarget)}
           returnedItems={outboundTarget.items.filter(
             (i) => i.direction === "RETURN"
           )}
+          orderItems={outboundTarget.order.items ?? []}
           returnedCredit={
             (outboundTarget as ExchangeDetail).returnedItemsTotal ??
             outboundTarget.items
@@ -795,10 +930,30 @@ export function ExchangeManager() {
         />
       ) : null}
 
+      {cancelId ? (
+        <ExchangeCancelModal
+          busy={busy}
+          error={actionError}
+          onClose={() => {
+            setCancelId(null);
+            setActionError(null);
+          }}
+          onConfirm={(reason) => {
+            void (async () => {
+              const ok = await runAction("/cancel", { reason }, cancelId);
+              if (ok) {
+                setCancelId(null);
+                if (selectedId === cancelId) setSelectedId(null);
+              }
+            })();
+          }}
+        />
+      ) : null}
+
       {chargeTarget ? (
         <ExchangeChargeModal
           amount={chargeTarget.balanceAmount}
-          busy={busy}
+          busy={busy || paymentLoading}
           error={actionError}
           paymentResult={paymentResult}
           onClose={() => {
@@ -811,7 +966,11 @@ export function ExchangeManager() {
 
       <ExchangeWizard
         open={wizardOpen}
-        onClose={() => setWizardOpen(false)}
+        editExchangeId={wizardEditId}
+        onClose={() => {
+          setWizardOpen(false);
+          setWizardEditId(null);
+        }}
         onCreated={() => {
           void loadList();
         }}
@@ -835,6 +994,7 @@ function ExchangeDetailDrawer({
   onCharge,
   onRefund,
   onManualReturn,
+  onCancel,
 }: {
   open: boolean;
   detail: ExchangeDetail | null;
@@ -854,6 +1014,7 @@ function ExchangeDetailDrawer({
   onCharge: () => void;
   onRefund: () => void;
   onManualReturn: () => void;
+  onCancel: () => void;
 }) {
   const [mounted, setMounted] = useState(false);
   const [entered, setEntered] = useState(false);
@@ -960,7 +1121,7 @@ function ExchangeDetailDrawer({
             </h2>
             {d && (
               <p className="mt-0.5 truncate text-xs text-stone-500">
-                {EXCHANGE_STATUS_LABELS[d.status]} · Pedido #
+                {exchangeStatusLabel(d)} · Pedido #
                 {d.order.orderNumber ?? "—"}
               </p>
             )}
@@ -1087,22 +1248,20 @@ function ExchangeDetailDrawer({
                           s.postingLocationName &&
                           !s.superfreteShipmentId && (
                             <p className="mt-1 text-xs text-stone-500">
-                              {s.postingLocationName}
-                              {s.postingLocationAddress
-                                ? ` · ${s.postingLocationAddress}`
-                                : ""}
+                              {s.postingLocationAddress || s.postingLocationName}
                             </p>
                           )}
                         {s.type === "RETURN" &&
-                          s.method === "CARRIER" &&
-                          !s.superfreteShipmentId &&
-                          !s.manualConfiguredAt && (
+                          !local &&
+                          d.status !== "CANCELLED" && (
                             <button
                               type="button"
                               onClick={onManualReturn}
                               className="mt-2 rounded-md bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-700"
                             >
-                              Configurar reversa
+                              {hasManualReverse(s)
+                                ? "Ver etiqueta"
+                                : "Criar reverso"}
                             </button>
                           )}
                         {!local && (
@@ -1166,7 +1325,9 @@ function ExchangeDetailDrawer({
                 </ul>
                 {!d.inspectedAt &&
                   d.status !== "CANCELLED" &&
-                  d.status !== "COMPLETED" && (
+                  d.status !== "COMPLETED" &&
+                  (hasManualReverse(returnShippingOf(d)) ||
+                    isLocalReturn(returnShippingOf(d))) && (
                     <button
                       type="button"
                       disabled={busy}
@@ -1267,13 +1428,7 @@ function ExchangeDetailDrawer({
                     <button
                       type="button"
                       disabled={busy}
-                      onClick={() => {
-                        const reason = window.prompt(
-                          "Motivo do cancelamento (opcional):"
-                        );
-                        if (reason === null) return;
-                        void onRunAction("/cancel", { reason });
-                      }}
+                      onClick={onCancel}
                       className="rounded-lg px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-40"
                     >
                       Cancelar
@@ -1324,11 +1479,238 @@ function ExchangeDetailDrawer({
   );
 }
 
+const ACTION_MENU_WIDTH = 236;
+
+const ICONS = {
+  edit: (
+    <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
+    </svg>
+  ),
+  charge: (
+    <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z" />
+    </svg>
+  ),
+  refund: (
+    <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0 1 15.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 0 1 3 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 0 0-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 0 1-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 0 0 3 15h-.75M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm3 0h.008v.008H18V10.5Zm-12 0h.008v.008H6V10.5Z" />
+    </svg>
+  ),
+  cancel: (
+    <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636" />
+    </svg>
+  ),
+};
+
+function ActionMenuIcon({ children }: { children: ReactNode }) {
+  return (
+    <span className="flex h-5 w-5 shrink-0 items-center justify-center text-stone-500">
+      {children}
+    </span>
+  );
+}
+
+type ExchangeMenuItem = {
+  id: string;
+  label: string;
+  icon: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  separatorBefore?: boolean;
+};
+
+function ExchangeRowMenu({ items }: { items: ExchangeMenuItem[] }) {
+  const [open, setOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(
+    null
+  );
+  const [mounted, setMounted] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (!open) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    function onScroll() {
+      setOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [open]);
+
+  function closeMenu() {
+    setOpen(false);
+  }
+
+  function toggleMenu() {
+    if (open) {
+      closeMenu();
+      return;
+    }
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const left = Math.max(
+      8,
+      Math.min(
+        rect.right - ACTION_MENU_WIDTH,
+        window.innerWidth - ACTION_MENU_WIDTH - 8
+      )
+    );
+    setMenuPos({ top: rect.bottom + 6, left });
+    setOpen(true);
+  }
+
+  return (
+    <div className="flex justify-center">
+      <button
+        ref={btnRef}
+        type="button"
+        aria-label="Ações da troca"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={toggleMenu}
+        disabled={items.length === 0}
+        className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-30 ${
+          open
+            ? "bg-blue-50 text-blue-600"
+            : "text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+        }`}
+      >
+        <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+          <circle cx="12" cy="5" r="1.75" />
+          <circle cx="12" cy="12" r="1.75" />
+          <circle cx="12" cy="19" r="1.75" />
+        </svg>
+      </button>
+
+      {mounted && open && menuPos
+        ? createPortal(
+            <>
+              <button
+                type="button"
+                aria-label="Fechar menu de ações"
+                className="fixed inset-0 z-[90]"
+                onClick={closeMenu}
+              />
+              <div
+                role="menu"
+                aria-label="Ações da troca"
+                className="fixed z-[91] overflow-hidden rounded-xl border border-stone-200 bg-white py-1.5 shadow-lg"
+                style={{
+                  top: menuPos.top,
+                  left: menuPos.left,
+                  width: ACTION_MENU_WIDTH,
+                }}
+              >
+                {items.map((item) => (
+                  <div key={item.id}>
+                    {item.separatorBefore ? (
+                      <div
+                        className="my-1 border-t border-stone-100"
+                        role="separator"
+                      />
+                    ) : null}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={item.disabled}
+                      onClick={() => {
+                        if (item.disabled) return;
+                        item.onClick();
+                        closeMenu();
+                      }}
+                      className={`flex w-full items-center gap-3 px-3.5 py-2.5 text-left text-sm transition-colors disabled:opacity-50 ${
+                        item.danger
+                          ? "text-red-600 hover:bg-red-50"
+                          : "text-stone-700 hover:bg-stone-50"
+                      }`}
+                    >
+                      <ActionMenuIcon>{item.icon}</ActionMenuIcon>
+                      <span>{item.label}</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>,
+            document.body
+          )
+        : null}
+    </div>
+  );
+}
+
 function Mini({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg bg-stone-50 px-3 py-2">
       <p className="text-[11px] text-stone-400">{label}</p>
       <p className="truncate font-medium text-stone-900">{value}</p>
+    </div>
+  );
+}
+
+function ExchangeCancelModal({
+  busy,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  busy: boolean;
+  error: string | null;
+  onClose: () => void;
+  onConfirm: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+  const trimmed = reason.trim();
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/50 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
+        <h3 className="text-base font-semibold text-stone-900">
+          Cancelar troca
+        </h3>
+        <p className="mt-1 text-sm text-stone-500">
+          Informe o motivo do cancelamento.
+        </p>
+        <textarea
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          rows={3}
+          autoFocus
+          placeholder="Motivo"
+          className="mt-3 w-full rounded-xl border border-stone-200 px-3 py-2 text-sm text-stone-800 outline-none focus:border-stone-400"
+        />
+        {error ? (
+          <p className="mt-2 text-xs text-red-600">{error}</p>
+        ) : null}
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onClose}
+            className="rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-50 disabled:opacity-40"
+          >
+            Voltar
+          </button>
+          <button
+            type="button"
+            disabled={busy || !trimmed}
+            onClick={() => onConfirm(trimmed)}
+            className="rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-40"
+          >
+            {busy ? "Cancelando…" : "Confirmar"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

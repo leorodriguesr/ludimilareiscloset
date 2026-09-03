@@ -7,6 +7,7 @@ import {
   canManuallyMarkCarrierAsShipped,
   isCarrierShippingStatusLocked,
 } from "@/lib/fulfillment/shipping-status-policy";
+import { deliveredAtOnStatusChange } from "@/lib/orders/delivered-at";
 import { prisma } from "@/lib/prisma";
 import { requireAdminApi } from "@/lib/require-admin-api";
 import { cpfValidationError } from "@/lib/validation/cpf";
@@ -61,7 +62,12 @@ export async function PATCH(
 
     const order = await prisma.order.findUnique({
       where: { id },
-      select: { fulfillmentType: true, shippingStatus: true, trackingCode: true },
+      select: {
+        fulfillmentType: true,
+        shippingStatus: true,
+        trackingCode: true,
+        deliveredAt: true,
+      },
     });
     if (!order) {
       return NextResponse.json({ error: "Pedido não encontrado." }, { status: 404 });
@@ -102,7 +108,15 @@ export async function PATCH(
       }
     }
 
-    updates.shippingStatus = s;
+    const shippingStatus = s as (typeof VALID_SHIPPING_STATUSES)[number];
+    updates.shippingStatus = shippingStatus;
+    Object.assign(
+      updates,
+      deliveredAtOnStatusChange({
+        currentDeliveredAt: order.deliveredAt,
+        nextShippingStatus: shippingStatus,
+      })
+    );
   }
 
   if ("labelUrl" in b && typeof b.labelUrl === "string") {

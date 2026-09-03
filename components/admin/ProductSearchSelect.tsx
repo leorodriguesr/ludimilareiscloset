@@ -52,7 +52,7 @@ export function ProductSearchSelect({
       </button>
 
       {open && (
-        <div className="absolute left-0 right-0 z-20 mt-1.5 overflow-hidden rounded-lg border border-stone-200 bg-white shadow-lg">
+        <div className="absolute left-0 right-0 z-40 mt-1.5 overflow-hidden rounded-lg border border-stone-200 bg-white shadow-lg">
           <div className="border-b border-stone-100 p-2">
             <input
               autoFocus

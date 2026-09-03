@@ -41,6 +41,10 @@ export async function POST(request: NextRequest, { params }: Params) {
               description: String(r.description ?? ""),
               quantity,
               unitPrice: Number(r.unitPrice ?? 0),
+              lineRole:
+                r.lineRole === "ADDITIONAL_SALE"
+                  ? ("ADDITIONAL_SALE" as const)
+                  : ("REPLACEMENT" as const),
               pieces: Array.isArray(r.pieces)
                 ? (r.pieces as {
                     name: string;
@@ -55,6 +59,10 @@ export async function POST(request: NextRequest, { params }: Params) {
             productId: String(r.productId ?? ""),
             quantity,
             unitPrice: r.unitPrice != null ? Number(r.unitPrice) : undefined,
+            lineRole:
+              r.lineRole === "ADDITIONAL_SALE"
+                ? ("ADDITIONAL_SALE" as const)
+                : ("REPLACEMENT" as const),
             pieceSelections: Array.isArray(r.pieceSelections)
               ? (r.pieceSelections as {
                   pieceName: string;
@@ -96,7 +104,7 @@ export async function POST(request: NextRequest, { params }: Params) {
             ? s.shippingServiceName
             : null,
         quotedPrice: s.quotedPrice != null ? Number(s.quotedPrice) : null,
-        paidBy: (s.paidBy as ExchangeShippingPaidBy) ?? "CUSTOMER",
+        paidBy: (s.paidBy as ExchangeShippingPaidBy) ?? "STORE",
         packageHeightCm:
           s.packageHeightCm != null ? Number(s.packageHeightCm) : null,
         packageWidthCm:

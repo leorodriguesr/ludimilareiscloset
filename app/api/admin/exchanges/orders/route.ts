@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Prisma } from "@/app/generated/prisma/client";
+import { ExchangeStatus, Prisma } from "@/app/generated/prisma/client";
 import { PERMISSION } from "@/lib/auth/permissions";
 import { requirePermission } from "@/lib/auth/require-permission";
+import { summarizeOrderExchangeEligibility, canBypassExchangeWindow } from "@/lib/exchanges/eligibility";
 import { prisma } from "@/lib/prisma";
 
 const LIST_LIMIT = 30;
@@ -79,6 +80,7 @@ export async function GET(request: NextRequest) {
         destinationCep: true,
         total: true,
         paidAt: true,
+        deliveredAt: true,
         fulfillmentType: true,
         shippingServiceName: true,
         deliveryNotes: true,
@@ -94,14 +96,47 @@ export async function GET(request: NextRequest) {
             pieceSelectionsJson: true,
           },
         },
+        exchanges: {
+          where: { status: { not: ExchangeStatus.CANCELLED } },
+          select: {
+            items: {
+              where: { direction: "RETURN" },
+              select: {
+                orderItemId: true,
+                quantity: true,
+                pieceSelectionsJson: true,
+              },
+            },
+          },
+        },
       },
     });
 
     return NextResponse.json({
-      orders: orders.map((order) => ({
-        ...order,
-        paidAt: order.paidAt?.toISOString() ?? null,
-      })),
+      orders: orders.map((order) => {
+        const { exchanges, ...rest } = order;
+        const eligibility = summarizeOrderExchangeEligibility({
+          deliveredAt: order.deliveredAt,
+          items: order.items,
+          existingReturnLines: exchanges.flatMap((ex) =>
+            ex.items.map((item) => ({
+              orderItemId: item.orderItemId,
+              quantity: item.quantity,
+              pieceSelectionsJson: item.pieceSelectionsJson,
+            }))
+          ),
+          hasActiveExchange: exchanges.length > 0,
+          bypassWindow: canBypassExchangeWindow(gate.role),
+        });
+        return {
+          ...rest,
+          paidAt: order.paidAt?.toISOString() ?? null,
+          deliveredAt: order.deliveredAt?.toISOString() ?? null,
+          selectable: eligibility.selectable,
+          blockReason: eligibility.blockReason,
+          unavailableReturnKeys: eligibility.unavailableReturnKeys,
+        };
+      }),
     });
   } catch (e) {
     console.error("[GET /api/admin/exchanges/orders]", e);

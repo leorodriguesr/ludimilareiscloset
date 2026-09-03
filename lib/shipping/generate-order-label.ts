@@ -33,6 +33,7 @@ import {
   SHIPPING_PROVIDERS,
   type ShippingProvider,
 } from "@/lib/shipping/providers";
+import { deliveredAtOnStatusChange } from "@/lib/orders/delivered-at";
 import {
   updateOrderDeliveryDaysFromSuperfrete,
   updateOrderSuperfreteShippingPrice,
@@ -546,6 +547,7 @@ export async function syncOrderShipmentFromSuperfrete(
       shippingStatus: true,
       shippingProvider: true,
       trackingCode: true,
+      deliveredAt: true,
     },
   });
   if (!order?.superfreteShipmentId) {
@@ -673,6 +675,10 @@ export async function syncOrderShipmentFromSuperfrete(
       ...trackingUpdate,
       ...(labelUrl ? { labelUrl } : {}),
       ...(nextShippingStatus ? { shippingStatus: nextShippingStatus } : {}),
+      ...deliveredAtOnStatusChange({
+        currentDeliveredAt: order.deliveredAt,
+        nextShippingStatus,
+      }),
     },
   });
 

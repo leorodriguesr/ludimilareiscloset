@@ -37,6 +37,7 @@ import {
   type PaymentMethod,
 } from "@/lib/orders/constants";
 import { reserveStockForOrderLines } from "@/lib/orders/stock/reservation";
+import { deliveredAtOnStatusChange } from "@/lib/orders/delivered-at";
 import { prisma } from "@/lib/prisma";
 import { checkFreeShipping } from "@/lib/shipping/free-shipping";
 import {
@@ -631,6 +632,7 @@ export async function markArrangedOrderShipped(input: {
       fulfillmentType: true,
       status: true,
       paidAt: true,
+      deliveredAt: true,
     },
   });
 
@@ -651,6 +653,10 @@ export async function markArrangedOrderShipped(input: {
       shippingStatus: "delivered",
       arrangedShippedAt: new Date(),
       arrangedShippedByUserId: input.shippedByUserId,
+      ...deliveredAtOnStatusChange({
+        currentDeliveredAt: order.deliveredAt,
+        nextShippingStatus: "delivered",
+      }),
     },
   });
 

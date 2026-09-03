@@ -54,6 +54,33 @@ export function ExchangeInspectModal({
       title="Conferir peça"
       subtitle="Informe o destino de cada peça recebida."
       onClose={onClose}
+      footer={
+        <>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onClose}
+            className="rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-100 disabled:opacity-40"
+          >
+            Fechar
+          </button>
+          <button
+            type="button"
+            disabled={busy || rows.length === 0}
+            onClick={() =>
+              onConfirm(
+                rows.map((piece) => ({
+                  exchangeItemId: piece.id,
+                  disposition: dispositions[piece.id] ?? "RESELLABLE",
+                }))
+              )
+            }
+            className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+          >
+            {busy ? "Salvando…" : "Confirmar conferência"}
+          </button>
+        </>
+      }
     >
       <ul className="space-y-2">
         {rows.map((piece) => (
@@ -99,30 +126,6 @@ export function ExchangeInspectModal({
         ))}
       </ul>
       {error ? <p className="mt-3 text-xs text-red-600">{error}</p> : null}
-      <div className="mt-4 flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-lg px-3 py-2 text-sm text-stone-600 hover:bg-stone-100"
-        >
-          Cancelar
-        </button>
-        <button
-          type="button"
-          disabled={busy || rows.length === 0}
-          onClick={() =>
-            onConfirm(
-              rows.map((piece) => ({
-                exchangeItemId: piece.id,
-                disposition: dispositions[piece.id] ?? "RESELLABLE",
-              }))
-            )
-          }
-          className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
-        >
-          {busy ? "Salvando…" : "Confirmar conferência"}
-        </button>
-      </div>
     </AdminModal>
   );
 }

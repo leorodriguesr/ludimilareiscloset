@@ -4,8 +4,10 @@ import { prisma } from "@/lib/prisma";
 import {
   isCancelledProviderShipmentStatus,
   mapSuperfreteStatusToShippingStatus,
+  mergeShippingStatusFromProvider,
   normalizeProviderShipmentStatus,
 } from "@/lib/shipping/service-id";
+import { deliveredAtOnStatusChange } from "@/lib/orders/delivered-at";
 
 type SuperfreteWebhookPayload = {
   event?: string;
@@ -46,9 +48,9 @@ async function resolveOrderIdFromWebhook(data: NonNullable<SuperfreteWebhookPayl
   if (shipmentId) {
     const byShipment = await prisma.order.findFirst({
       where: { superfreteShipmentId: shipmentId },
-      select: { id: true },
+      select: { id: true, shippingStatus: true, deliveredAt: true },
     });
-    if (byShipment) return byShipment.id;
+    if (byShipment) return byShipment;
   }
 
   for (const t of data.tags ?? []) {
@@ -56,9 +58,9 @@ async function resolveOrderIdFromWebhook(data: NonNullable<SuperfreteWebhookPayl
     if (!tag) continue;
     const byTag = await prisma.order.findUnique({
       where: { id: tag },
-      select: { id: true },
+      select: { id: true, shippingStatus: true, deliveredAt: true },
     });
-    if (byTag) return byTag.id;
+    if (byTag) return byTag;
   }
 
   return null;
@@ -86,8 +88,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "missing data" }, { status: 200 });
   }
 
-  const orderId = await resolveOrderIdFromWebhook(data);
-  if (!orderId) {
+  const order = await resolveOrderIdFromWebhook(data);
+  if (!order) {
     if (process.env.NODE_ENV === "development") {
       console.info("[webhook superfrete] pedido não encontrado", { event, id: data.id });
     }
@@ -100,6 +102,9 @@ export async function POST(request: NextRequest) {
   const mappedStatus = mapSuperfreteStatusToShippingStatus(sfStatus);
   const tracking = data.tracking?.trim() || undefined;
   const labelCancelled = isCancelledProviderShipmentStatus(sfStatus);
+  const nextShippingStatus = labelCancelled
+    ? "cancelled"
+    : mergeShippingStatusFromProvider(order.shippingStatus, mappedStatus);
 
   const updates: Record<string, unknown> = labelCancelled
     ? {
@@ -113,7 +118,11 @@ export async function POST(request: NextRequest) {
     : {
         superfreteStatus: sfStatus || undefined,
         ...(tracking ? { trackingCode: tracking } : {}),
-        ...(mappedStatus ? { shippingStatus: mappedStatus } : {}),
+        ...(nextShippingStatus ? { shippingStatus: nextShippingStatus } : {}),
+        ...deliveredAtOnStatusChange({
+          currentDeliveredAt: order.deliveredAt,
+          nextShippingStatus,
+        }),
       };
 
   if (!labelCancelled && data.id) {
@@ -128,15 +137,20 @@ export async function POST(request: NextRequest) {
 
   try {
     await prisma.order.update({
-      where: { id: orderId },
+      where: { id: order.id },
       data: updates,
     });
 
     if (process.env.NODE_ENV === "development") {
-      console.info("[webhook superfrete]", { event, orderId, sfStatus, tracking });
+      console.info("[webhook superfrete]", {
+        event,
+        orderId: order.id,
+        sfStatus,
+        tracking,
+      });
     }
 
-    return NextResponse.json({ ok: true, matched: true, orderId });
+    return NextResponse.json({ ok: true, matched: true, orderId: order.id });
   } catch (e) {
     console.error("[webhook superfrete]", e);
     return NextResponse.json({ error: "server" }, { status: 500 });

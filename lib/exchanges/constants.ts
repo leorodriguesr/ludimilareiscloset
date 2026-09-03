@@ -15,7 +15,7 @@ export const EXCHANGE_KIND_LABELS: Record<ExchangeKind, string> = {
 export const EXCHANGE_STATUS_LABELS: Record<ExchangeStatus, string> = {
   AWAITING_RETURN: "Aguardando retorno",
   RETURN_IN_TRANSIT: "Retorno em trânsito",
-  RECEIVED: "Recebido",
+  RECEIVED: "Peça conferida",
   READY_OUTBOUND: "Pronto para reenvio",
   OUTBOUND: "Reenvio em andamento",
   COMPLETED: "Concluída",

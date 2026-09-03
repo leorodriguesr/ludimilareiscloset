@@ -20,6 +20,9 @@ export const EXCHANGE_RETURN_METHOD_LABELS: Record<
   STORE_PICKUP: "Será devolvida pela cliente",
 };
 
+/** Frete do moto boy quando a cliente paga o reenvio. */
+export const LOCAL_COURIER_CUSTOMER_FEE = 18;
+
 export function isLocalExchangeShippingMethod(
   method: ExchangeShippingMethod | string | null | undefined
 ): boolean {

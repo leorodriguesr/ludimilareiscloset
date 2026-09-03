@@ -7,6 +7,7 @@ import {
 import { appendCashLedgerEntry } from "@/lib/cash/ledger";
 import { ExchangeError } from "@/lib/exchanges/constants";
 import { appendExchangeEvent } from "@/lib/exchanges/events";
+import { additionalSaleRecognitionDate } from "@/lib/exchanges/additional-sale";
 import { maybeReleaseOutboundShipping } from "@/lib/exchanges/release-outbound";
 import { prisma } from "@/lib/prisma";
 
@@ -83,6 +84,11 @@ export async function settleExchangeBalance(input: {
         balancePaidAt: now,
         balancePaidByUserId: input.actorUserId,
         balanceNotes: input.notes?.trim() || exchange.balanceNotes,
+        additionalSaleRecognizedAt: additionalSaleRecognitionDate({
+          additionalSaleItemCount: exchange.additionalSaleItemCount,
+          balanceStatus,
+          existing: exchange.additionalSaleRecognizedAt,
+        }),
       },
     });
 
@@ -272,6 +278,13 @@ export async function cancelExchange(input: {
     throw new ExchangeError(
       "ALREADY_INSPECTED",
       "Troca já conferida não pode ser cancelada por este fluxo."
+    );
+  }
+
+  if (!input.reason?.trim()) {
+    throw new ExchangeError(
+      "CANCEL_REASON_REQUIRED",
+      "Informe o motivo do cancelamento."
     );
   }
 

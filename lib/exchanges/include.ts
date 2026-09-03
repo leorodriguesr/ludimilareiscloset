@@ -20,6 +20,7 @@ export const exchangeDetailInclude = {
       addressState: true,
       cpf: true,
       paidAt: true,
+      deliveredAt: true,
       shippingStatus: true,
       fulfillmentType: true,
       shippingServiceName: true,

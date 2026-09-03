@@ -16,8 +16,8 @@ import {
   EXCHANGE_REASONS,
   ExchangeError,
 } from "@/lib/exchanges/constants";
+import { isWithinExchangeWindow } from "@/lib/exchanges/eligibility";
 import { appendExchangeEvent } from "@/lib/exchanges/events";
-import { maybeGenerateReturnReverse } from "@/lib/exchanges/maybe-generate-return-reverse";
 import type { CreateExchangeOutboundLine } from "@/lib/exchanges/outbound-lines";
 import { resolveOutboundRows } from "@/lib/exchanges/outbound-lines";
 import {
@@ -25,6 +25,13 @@ import {
   productIdentityKey,
   roundMoney,
 } from "@/lib/exchanges/product-diff";
+import {
+  formatPieceLabel,
+  maxPieceUnitsForOrderItem,
+  pieceIdentity,
+  pieceReturnKey,
+  returnUnitCount,
+} from "@/lib/exchanges/return-units";
 import {
   parsePieceSelections,
   serializePieceSelections,
@@ -37,6 +44,8 @@ export type CreateExchangeReturnLine = {
   orderItemId: string;
   quantity: number;
   pieceSelections?: CartPieceSelection[];
+  /** Crédito informado no cadastro (troca). */
+  creditAmount?: number | null;
 };
 
 export type {
@@ -70,22 +79,11 @@ export type CreateExchangeInput = {
   shippings: CreateExchangeShippingInput[];
   /** Só devolução: valor informado no admin (não é a soma das peças). */
   refundAmount?: number | null;
+  /** Admin pode cadastrar troca depois dos 7 dias. */
+  bypassExchangeWindow?: boolean;
+  /** Edita o registro existente (só antes da etiqueta reversa). */
+  replaceExchangeId?: string;
 };
-
-function formatPieceLabel(piece: CartPieceSelection): string {
-  return [piece.pieceName, piece.color, piece.size].filter(Boolean).join(" · ");
-}
-
-function pieceIdentity(piece: CartPieceSelection): string {
-  return `${piece.pieceName}\0${piece.size ?? ""}\0${piece.color ?? ""}`;
-}
-
-function returnUnitCount(
-  quantity: number,
-  pieces: CartPieceSelection[]
-): number {
-  return quantity * Math.max(pieces.length, 1);
-}
 
 export async function createExchange(input: CreateExchangeInput) {
   const kind: ExchangeKind = input.kind === "RETURN" ? "RETURN" : "EXCHANGE";
@@ -156,8 +154,58 @@ export async function createExchange(input: CreateExchangeInput) {
     );
   }
 
+  if (
+    !input.bypassExchangeWindow &&
+    !isWithinExchangeWindow(order.deliveredAt)
+  ) {
+    throw new ExchangeError(
+      "EXCHANGE_WINDOW",
+      "Só é possível abrir troca até 7 dias após a entrega à cliente."
+    );
+  }
+
+  const existing =
+    input.replaceExchangeId != null
+      ? await prisma.exchange.findUnique({
+          where: { id: input.replaceExchangeId },
+          include: { shippings: true },
+        })
+      : null;
+
+  if (input.replaceExchangeId) {
+    if (!existing || existing.orderId !== order.id) {
+      throw new ExchangeError("NOT_FOUND", "Troca não encontrada.");
+    }
+    if (
+      existing.status === ExchangeStatus.CANCELLED ||
+      existing.status === ExchangeStatus.COMPLETED
+    ) {
+      throw new ExchangeError(
+        "NOT_EDITABLE",
+        "Esta troca não pode mais ser editada."
+      );
+    }
+    if (existing.inspectedAt) {
+      throw new ExchangeError(
+        "NOT_EDITABLE",
+        "Esta troca já foi conferida e não pode ser editada."
+      );
+    }
+  }
+
+  const otherExchanges = order.exchanges.filter(
+    (ex) => ex.id !== input.replaceExchangeId
+  );
+  if (otherExchanges.length > 0) {
+    throw new ExchangeError(
+      "HAS_EXCHANGE",
+      "Este pedido já tem troca ou devolução cadastrada."
+    );
+  }
+
   const alreadyReturnedUnitsByItem = new Map<string, number>();
-  for (const ex of order.exchanges) {
+  const alreadyReturnedByPiece = new Map<string, number>();
+  for (const ex of otherExchanges) {
     for (const item of ex.items) {
       if (!item.orderItemId) continue;
       alreadyReturnedUnitsByItem.set(
@@ -168,6 +216,18 @@ export async function createExchange(input: CreateExchangeInput) {
             parsePieceSelections(item.pieceSelectionsJson)
           )
       );
+      const pieces = parsePieceSelections(item.pieceSelectionsJson);
+      const rows: Array<CartPieceSelection | null> =
+        pieces.length > 0 ? pieces : [null];
+      for (let q = 0; q < item.quantity; q++) {
+        for (const piece of rows) {
+          const key = pieceReturnKey(item.orderItemId, piece);
+          alreadyReturnedByPiece.set(
+            key,
+            (alreadyReturnedByPiece.get(key) ?? 0) + 1
+          );
+        }
+      }
     }
   }
 
@@ -184,6 +244,7 @@ export async function createExchange(input: CreateExchangeInput) {
   }[] = [];
 
   const runningReturnedUnits = new Map(alreadyReturnedUnitsByItem);
+  const runningReturnedByPiece = new Map(alreadyReturnedByPiece);
 
   for (const line of input.returnLines) {
     const orderItem = order.items.find((i) => i.id === line.orderItemId);
@@ -231,14 +292,28 @@ export async function createExchange(input: CreateExchangeInput) {
 
     runningReturnedUnits.set(orderItem.id, already + lineUnits);
 
+    const maxByPiece = maxPieceUnitsForOrderItem(orderItem);
+    const selectedRows: Array<CartPieceSelection | null> =
+      selectedPieces.length > 0 ? selectedPieces : [null];
+    for (let q = 0; q < line.quantity; q++) {
+      for (const piece of selectedRows) {
+        const key = pieceReturnKey(orderItem.id, piece);
+        const max = maxByPiece.get(key) ?? 0;
+        const used = runningReturnedByPiece.get(key) ?? 0;
+        if (used + 1 > max) {
+          throw new ExchangeError(
+            "ALREADY_RETURNED",
+            `Esta peça de ${orderItem.productName} já está em outra troca.`
+          );
+        }
+        runningReturnedByPiece.set(key, used + 1);
+      }
+    }
+
     const productName =
       selectedPieces.length > 0
         ? selectedPieces.map(formatPieceLabel).join(" + ")
         : orderItem.productName;
-
-    const pieceCount = Math.max(orderPieces.length, 1);
-    const unitShare = roundMoney(orderItem.price / pieceCount);
-    const unitPrice = kind === "EXCHANGE" ? unitShare : 0;
 
     returnRows.push({
       orderItemId: orderItem.id,
@@ -246,13 +321,76 @@ export async function createExchange(input: CreateExchangeInput) {
       productName,
       productImageUrl: orderItem.productImageUrl,
       quantity: line.quantity,
-      unitPrice,
-      lineTotal: roundMoney(unitPrice * line.quantity),
+      unitPrice: 0,
+      lineTotal: 0,
       pieceSelectionsJson: serializePieceSelections(
         selectedPieces.length > 0 ? selectedPieces : undefined
       ),
       pieceVariantId: null,
     });
+  }
+
+  if (kind === "EXCHANGE") {
+    const creditByItem = new Map<string, number>();
+    for (const line of input.returnLines) {
+      if (line.creditAmount == null || !Number.isFinite(line.creditAmount)) {
+        continue;
+      }
+      creditByItem.set(
+        line.orderItemId,
+        roundMoney((creditByItem.get(line.orderItemId) ?? 0) + line.creditAmount)
+      );
+    }
+
+    const rowsByItem = new Map<string, typeof returnRows>();
+    for (const row of returnRows) {
+      const list = rowsByItem.get(row.orderItemId) ?? [];
+      list.push(row);
+      rowsByItem.set(row.orderItemId, list);
+    }
+
+    for (const [itemId, rows] of rowsByItem) {
+      const orderItem = order.items.find((i) => i.id === itemId);
+      if (!orderItem) continue;
+      const maxUnits = returnUnitCount(
+        orderItem.quantity,
+        parsePieceSelections(orderItem.pieceSelectionsJson)
+      );
+      const selectedUnits = rows.reduce((acc, row) => acc + row.quantity, 0);
+      const isFull = selectedUnits === maxUnits && maxUnits > 0;
+      let credit = creditByItem.get(itemId);
+      if (credit == null) {
+        if (isFull) {
+          credit = roundMoney(orderItem.price);
+        } else {
+          throw new ExchangeError(
+            "CREDIT_REQUIRED",
+            `Informe o crédito de ${orderItem.productName}.`
+          );
+        }
+      }
+      if (credit < 0) {
+        throw new ExchangeError(
+          "INVALID_CREDIT",
+          `Crédito inválido para ${orderItem.productName}.`
+        );
+      }
+      if (credit - orderItem.price > 0.009) {
+        throw new ExchangeError(
+          "CREDIT_EXCEEDS",
+          `O crédito de ${orderItem.productName} não pode passar do valor pago.`
+        );
+      }
+      const share = rows.length > 0 ? roundMoney(credit / rows.length) : 0;
+      let assigned = 0;
+      rows.forEach((row, index) => {
+        const lineTotal =
+          index === rows.length - 1 ? roundMoney(credit - assigned) : share;
+        assigned = roundMoney(assigned + lineTotal);
+        row.lineTotal = lineTotal;
+        row.unitPrice = row.quantity > 0 ? roundMoney(lineTotal / row.quantity) : 0;
+      });
+    }
   }
 
   const outboundRows = await resolveOutboundRows(
@@ -430,7 +568,118 @@ export async function createExchange(input: CreateExchangeInput) {
         samePieceSwap,
       });
 
+  const itemCreates = [
+    ...returnRows.map((r) => ({
+      direction: "RETURN" as const,
+      orderItemId: r.orderItemId,
+      productId: r.productId,
+      productName: r.productName,
+      productImageUrl: r.productImageUrl,
+      quantity: r.quantity,
+      unitPrice: r.unitPrice,
+      lineTotal: r.lineTotal,
+      pieceSelectionsJson: r.pieceSelectionsJson,
+      pieceVariantId: r.pieceVariantId,
+    })),
+    ...outboundRows.map((r) => ({
+      direction: "OUTBOUND" as const,
+      productId: r.productId,
+      productName: r.productName,
+      productImageUrl: r.productImageUrl,
+      quantity: r.quantity,
+      unitPrice: r.unitPrice,
+      lineTotal: r.lineTotal,
+      pieceSelectionsJson: r.pieceSelectionsJson,
+      pieceVariantId: r.pieceVariantId,
+      lineRole: r.lineRole,
+    })),
+  ];
+
+  const shippingCreates = shippings.map((s) => ({
+    type: s.type,
+    method: s.method,
+    shippingServiceId: s.shippingServiceId,
+    shippingServiceName: s.shippingServiceName,
+    quotedPrice: s.quotedPrice,
+    paidBy: s.paidBy,
+    packageHeightCm: s.packageHeightCm,
+    packageWidthCm: s.packageWidthCm,
+    packageLengthCm: s.packageLengthCm,
+    packageWeightKg: s.packageWeightKg,
+  }));
+
   const created = await prisma.$transaction(async (tx) => {
+    if (existing) {
+      await tx.exchangeItem.deleteMany({ where: { exchangeId: existing.id } });
+      await tx.exchangeShipping.deleteMany({
+        where: { exchangeId: existing.id, type: "OUTBOUND" },
+      });
+
+      const returnDraft = shippingCreates.find((s) => s.type === "RETURN");
+      const currentReturn = existing.shippings.find((s) => s.type === "RETURN");
+      if (returnDraft && currentReturn) {
+        await tx.exchangeShipping.update({
+          where: { id: currentReturn.id },
+          data: returnDraft,
+        });
+      } else if (returnDraft && !currentReturn) {
+        await tx.exchangeShipping.create({
+          data: { exchangeId: existing.id, ...returnDraft },
+        });
+      }
+
+      for (const outboundDraft of shippingCreates.filter(
+        (s) => s.type === "OUTBOUND"
+      )) {
+        await tx.exchangeShipping.create({
+          data: { exchangeId: existing.id, ...outboundDraft },
+        });
+      }
+
+      const exchange = await tx.exchange.update({
+        where: { id: existing.id },
+        data: {
+          kind,
+          reason: input.reason,
+          reasonNotes: input.reasonNotes?.trim() || null,
+          notes: input.notes?.trim() || null,
+          returnedItemsTotal: balance.returnedItemsTotal,
+          newItemsTotal: balance.newItemsTotal,
+          productsDelta: balance.productsDelta,
+          shippingCustomerTotal: balance.shippingCustomerTotal,
+          balanceAmount: balance.balanceAmount,
+          balanceStatus: balance.balanceStatus,
+          items: { create: itemCreates },
+        },
+        include: {
+          items: true,
+          shippings: true,
+          order: {
+            select: {
+              id: true,
+              orderNumber: true,
+              recipientName: true,
+              email: true,
+            },
+          },
+        },
+      });
+
+      await appendExchangeEvent(tx, {
+        exchangeId: exchange.id,
+        type: "NOTE_ADDED",
+        actorUserId: input.openedByUserId,
+        payload: {
+          kind: "exchange_updated",
+          reason: input.reason,
+          returnCount: returnRows.length,
+          balanceAmount: balance.balanceAmount,
+        },
+      });
+
+      return exchange;
+    }
+
     const maxRow = await tx.$queryRawUnsafe<[{ max: number | null }]>(
       `SELECT MAX("exchangeNumber") as max FROM "Exchange"`
     );
@@ -452,47 +701,8 @@ export async function createExchange(input: CreateExchangeInput) {
         shippingCustomerTotal: balance.shippingCustomerTotal,
         balanceAmount: balance.balanceAmount,
         balanceStatus: balance.balanceStatus,
-        items: {
-          create: [
-            ...returnRows.map((r) => ({
-              direction: "RETURN" as const,
-              orderItemId: r.orderItemId,
-              productId: r.productId,
-              productName: r.productName,
-              productImageUrl: r.productImageUrl,
-              quantity: r.quantity,
-              unitPrice: r.unitPrice,
-              lineTotal: r.lineTotal,
-              pieceSelectionsJson: r.pieceSelectionsJson,
-              pieceVariantId: r.pieceVariantId,
-            })),
-            ...outboundRows.map((r) => ({
-              direction: "OUTBOUND" as const,
-              productId: r.productId,
-              productName: r.productName,
-              productImageUrl: r.productImageUrl,
-              quantity: r.quantity,
-              unitPrice: r.unitPrice,
-              lineTotal: r.lineTotal,
-              pieceSelectionsJson: r.pieceSelectionsJson,
-              pieceVariantId: r.pieceVariantId,
-            })),
-          ],
-        },
-        shippings: {
-          create: shippings.map((s) => ({
-            type: s.type,
-            method: s.method,
-            shippingServiceId: s.shippingServiceId,
-            shippingServiceName: s.shippingServiceName,
-            quotedPrice: s.quotedPrice,
-            paidBy: s.paidBy,
-            packageHeightCm: s.packageHeightCm,
-            packageWidthCm: s.packageWidthCm,
-            packageLengthCm: s.packageLengthCm,
-            packageWeightKg: s.packageWeightKg,
-          })),
-        },
+        items: { create: itemCreates },
+        shippings: { create: shippingCreates },
       },
       include: {
         items: true,
@@ -523,11 +733,6 @@ export async function createExchange(input: CreateExchangeInput) {
     });
 
     return exchange;
-  });
-
-  await maybeGenerateReturnReverse({
-    exchangeId: created.id,
-    actorUserId: input.openedByUserId,
   });
 
   const reloaded = await prisma.exchange.findUnique({

@@ -2,6 +2,7 @@ import {
   isInsideDelivery,
   isStoreMotoboyDelivery,
 } from "@/lib/admin-sale/arranged-delivery";
+import { ExchangeStatus } from "@/app/generated/prisma/client";
 import { ORDER_STATUS } from "@/lib/orders/constants";
 import { expireOrdersBatch } from "@/lib/orders/expire-orders";
 import { prisma } from "@/lib/prisma";
@@ -19,6 +20,7 @@ export type DashboardMetrics = {
   from: string;
   to: string;
   paidCount: number;
+  totalSalesCount: number;
   cancelledCount: number;
   waitingCount: number;
   productsSoldCount: number;
@@ -27,6 +29,9 @@ export type DashboardMetrics = {
   inboundSalesCount: number;
   motoboyDeliveriesCount: number;
   salesByState: DashboardStateRow[];
+  exchangeAdditionalSaleCount: number;
+  exchangeAdditionalItemsCount: number;
+  exchangeAdditionalRevenue: number;
 };
 
 function todayKeyInSaoPaulo(now = new Date()): string {
@@ -179,6 +184,29 @@ export async function getDashboardMetrics(
     stateCounts.set(state, (stateCounts.get(state) ?? 0) + 1);
   }
 
+  const extraSales = await prisma.exchange.findMany({
+    where: {
+      additionalSaleRecognizedAt: inPeriod,
+      additionalSaleItemCount: { gt: 0 },
+      status: { not: ExchangeStatus.CANCELLED },
+    },
+    select: {
+      additionalSaleItemCount: true,
+      additionalSaleItemsTotal: true,
+    },
+  });
+  const exchangeAdditionalSaleCount = extraSales.length;
+  const exchangeAdditionalItemsCount = extraSales.reduce(
+    (sum, row) => sum + row.additionalSaleItemCount,
+    0
+  );
+  const exchangeAdditionalRevenue = Math.round(
+    extraSales.reduce((sum, row) => sum + row.additionalSaleItemsTotal, 0) * 100
+  ) / 100;
+  productsSoldCount += exchangeAdditionalItemsCount;
+  revenueTotal += exchangeAdditionalRevenue;
+  const totalSalesCount = paidCount + exchangeAdditionalSaleCount;
+
   const salesByState = [...stateCounts.entries()]
     .map(([state, count]) => ({ state, count }))
     .sort(
@@ -189,6 +217,7 @@ export async function getDashboardMetrics(
     from: range.from,
     to: range.to,
     paidCount,
+    totalSalesCount,
     cancelledCount,
     waitingCount,
     productsSoldCount,
@@ -197,5 +226,8 @@ export async function getDashboardMetrics(
     inboundSalesCount,
     motoboyDeliveriesCount,
     salesByState,
+    exchangeAdditionalSaleCount,
+    exchangeAdditionalItemsCount,
+    exchangeAdditionalRevenue,
   };
 }

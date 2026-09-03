@@ -13,9 +13,13 @@ import {
   failPaymentAttempt,
   gatewayForMethod,
 } from "@/lib/orders/payment-attempt-lifecycle";
-import { createPixPayment } from "@/lib/payments/create-pix-payment";
+import {
+  createPixPayment,
+  getMpOrderPixDetails,
+} from "@/lib/payments/create-pix-payment";
 import {
   createInfinitePayCheckoutLink,
+  infinitePayCheckoutUrlFromSlug,
   infinitePayOrderRedirectUrl,
   infinitePayWebhookUrl,
 } from "@/lib/payments/infinitepay";
@@ -43,6 +47,61 @@ export type InitiateExchangeBalancePaymentResult =
       amount: number;
     }
   | { ok: false; error: string };
+
+export async function getCurrentExchangeBalancePayment(
+  exchangeId: string
+): Promise<InitiateExchangeBalancePaymentResult | null> {
+  const attempt = await prisma.paymentAttempt.findFirst({
+    where: {
+      exchangeId,
+      purpose: EXCHANGE_BALANCE_PURPOSE,
+      status: {
+        in: [
+          PAYMENT_ATTEMPT_STATUS.ACTIVE,
+          PAYMENT_ATTEMPT_STATUS.CREATED,
+        ],
+      },
+    },
+    orderBy: { attemptNumber: "desc" },
+    select: {
+      paymentMethod: true,
+      gatewayReference: true,
+      expiresAt: true,
+      amount: true,
+    },
+  });
+
+  if (!attempt?.gatewayReference) return null;
+
+  if (attempt.paymentMethod === PAYMENT_METHOD.CARD) {
+    return {
+      ok: true,
+      type: "card",
+      exchangeId,
+      checkoutUrl: infinitePayCheckoutUrlFromSlug(attempt.gatewayReference),
+      amount: attempt.amount,
+    };
+  }
+
+  if (attempt.paymentMethod === PAYMENT_METHOD.PIX) {
+    const pix = await getMpOrderPixDetails(attempt.gatewayReference);
+    if (!pix.pixCode) return null;
+    return {
+      ok: true,
+      type: "pix",
+      exchangeId,
+      pixCode: pix.pixCode,
+      pixQrBase64: pix.pixQrBase64,
+      expiresAt:
+        pix.expiresAt ??
+        attempt.expiresAt?.toISOString() ??
+        new Date().toISOString(),
+      amount: attempt.amount,
+    };
+  }
+
+  return null;
+}
 
 function paymentGatewayEmail(email: string | null | undefined): string {
   const trimmed = email?.trim();

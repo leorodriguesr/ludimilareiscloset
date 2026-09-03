@@ -12,6 +12,7 @@ type DashboardMetrics = {
   from: string;
   to: string;
   paidCount: number;
+  totalSalesCount: number;
   cancelledCount: number;
   waitingCount: number;
   productsSoldCount: number;
@@ -20,6 +21,9 @@ type DashboardMetrics = {
   inboundSalesCount: number;
   motoboyDeliveriesCount: number;
   salesByState: DashboardStateRow[];
+  exchangeAdditionalSaleCount: number;
+  exchangeAdditionalItemsCount: number;
+  exchangeAdditionalRevenue: number;
 };
 
 type DatePreset = "today" | "7d" | "month" | "custom";
@@ -185,8 +189,8 @@ export function DashboardManager() {
     1
   );
   const piecesPerSale =
-    metrics && metrics.paidCount > 0
-      ? metrics.productsSoldCount / metrics.paidCount
+    metrics && (metrics.totalSalesCount ?? metrics.paidCount) > 0
+      ? metrics.productsSoldCount / (metrics.totalSalesCount ?? metrics.paidCount)
       : 0;
 
   async function copySalesByState() {
@@ -298,8 +302,25 @@ export function DashboardManager() {
                     Vendas
                   </p>
                   <p className="mt-2 text-5xl font-semibold tabular-nums tracking-tight text-stone-900">
-                    {metrics.paidCount.toLocaleString("pt-BR")}
+                    {(
+                      metrics.totalSalesCount ?? metrics.paidCount
+                    ).toLocaleString("pt-BR")}
                   </p>
+                  {metrics.exchangeAdditionalSaleCount > 0 ? (
+                    <p className="mt-1 text-xs text-stone-500">
+                      Inclui {metrics.exchangeAdditionalSaleCount.toLocaleString("pt-BR")}{" "}
+                      {metrics.exchangeAdditionalSaleCount === 1
+                        ? "venda de troca"
+                        : "vendas de troca"}
+                      {metrics.exchangeAdditionalItemsCount > 0
+                        ? ` · ${metrics.exchangeAdditionalItemsCount.toLocaleString("pt-BR")} ${
+                            metrics.exchangeAdditionalItemsCount === 1
+                              ? "peça"
+                              : "peças"
+                          }`
+                        : ""}
+                    </p>
+                  ) : null}
                 </div>
                 {/* <p className="max-w-[14rem] pb-1 text-xs leading-relaxed text-stone-500">
                   Pagamentos confirmados no período selecionado

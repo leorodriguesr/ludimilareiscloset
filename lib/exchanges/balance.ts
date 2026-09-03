@@ -28,13 +28,18 @@ export function computeExchangeBalance(input: {
   shippings: BalanceShippingInput[];
   samePieceSwap?: boolean;
   adjustmentAmount?: number;
+  additionalItemsTotal?: number;
 }): ComputedExchangeBalance {
+  const additionalItemsTotal = roundMoney(input.additionalItemsTotal ?? 0);
   const { returnedItemsTotal, newItemsTotal, productsDelta } =
     computeExchangeProductTotals({
       returnedItemsTotal: input.returnedItemsTotal,
       newItemsTotal: input.newItemsTotal,
       samePieceSwap: Boolean(input.samePieceSwap),
     });
+  const adjustedDelta = input.samePieceSwap
+    ? additionalItemsTotal
+    : productsDelta;
 
   const shippingCustomerTotal = roundMoney(
     input.shippings.reduce((acc, s) => {
@@ -45,7 +50,7 @@ export function computeExchangeBalance(input: {
   );
 
   const balanceAmount = roundMoney(
-    productsDelta + shippingCustomerTotal + (input.adjustmentAmount ?? 0)
+    adjustedDelta + shippingCustomerTotal + (input.adjustmentAmount ?? 0)
   );
 
   let balanceStatus: ExchangeBalanceStatus = "NONE";
@@ -55,7 +60,7 @@ export function computeExchangeBalance(input: {
   return {
     returnedItemsTotal,
     newItemsTotal,
-    productsDelta,
+    productsDelta: adjustedDelta,
     shippingCustomerTotal,
     balanceAmount,
     balanceStatus,
