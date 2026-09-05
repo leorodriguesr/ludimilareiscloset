@@ -24,6 +24,14 @@ type DashboardMetrics = {
   exchangeAdditionalSaleCount: number;
   exchangeAdditionalItemsCount: number;
   exchangeAdditionalRevenue: number;
+  orderRevenueTotal: number;
+  exchangeBalanceReceived: number;
+  exchangeRefundTotal: number;
+  storeShippingCost: number;
+  cashInTotal: number;
+  cashOutTotal: number;
+  cashNet: number;
+  operatingNet: number;
 };
 
 type DatePreset = "today" | "7d" | "month" | "custom";
@@ -125,7 +133,11 @@ function describeState(value: string): { uf: string; name: string } {
   return { uf: trimmed.slice(0, 2).toUpperCase(), name: trimmed };
 }
 
-export function DashboardManager() {
+export function DashboardManager({
+  canViewCash = false,
+}: {
+  canViewCash?: boolean;
+}) {
   const defaults = useMemo(() => currentMonthRange(), []);
   const [preset, setPreset] = useState<DatePreset>("month");
   const [from, setFrom] = useState(defaults.from);
@@ -294,7 +306,9 @@ export function DashboardManager() {
         </div>
       ) : metrics ? (
         <div className={`space-y-4 ${loading ? "opacity-60" : ""}`}>
-          <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
+          <div
+            className={`grid gap-4 ${canViewCash ? "xl:grid-cols-[1.4fr_1fr]" : ""}`}
+          >
             <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
               <div className="flex flex-wrap items-end justify-between gap-4">
                 <div>
@@ -333,7 +347,7 @@ export function DashboardManager() {
                     {formatPrice(metrics.revenueTotal ?? 0)}
                   </p>
                   <p className="mt-4 text-sm font-medium text-amber-800">
-                    Faturamento
+                    Receita bruta
                   </p>
                   {/* <p className="mt-0.5 text-xs text-amber-800/70">
                     Soma do total de cada venda paga
@@ -366,6 +380,64 @@ export function DashboardManager() {
               </div>
             </section>
 
+            {canViewCash ? (
+            <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+              <div className="flex items-baseline justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-semibold text-stone-900">
+                    Caixa líquido do período
+                  </h3>
+                  <p className="mt-0.5 text-xs text-stone-500">
+                    Entradas − saídas registradas no caixa
+                  </p>
+                </div>
+                <p className="text-xl font-semibold tabular-nums text-stone-900">
+                  {formatPrice(metrics.cashNet ?? 0)}
+                </p>
+              </div>
+              <dl className="mt-4 grid gap-2 sm:grid-cols-2">
+                <div className="rounded-xl bg-stone-50 px-3 py-2.5">
+                  <dt className="text-xs text-stone-500">Entradas</dt>
+                  <dd className="mt-0.5 text-sm font-semibold tabular-nums text-stone-900">
+                    {formatPrice(metrics.cashInTotal ?? 0)}
+                  </dd>
+                </div>
+                <div className="rounded-xl bg-stone-50 px-3 py-2.5">
+                  <dt className="text-xs text-stone-500">Saídas</dt>
+                  <dd className="mt-0.5 text-sm font-semibold tabular-nums text-stone-900">
+                    {formatPrice(metrics.cashOutTotal ?? 0)}
+                  </dd>
+                </div>
+                <div className="rounded-xl bg-stone-50 px-3 py-2.5">
+                  <dt className="text-xs text-stone-500">Diferenças recebidas</dt>
+                  <dd className="mt-0.5 text-sm font-semibold tabular-nums text-stone-900">
+                    {formatPrice(metrics.exchangeBalanceReceived ?? 0)}
+                  </dd>
+                </div>
+                <div className="rounded-xl bg-stone-50 px-3 py-2.5">
+                  <dt className="text-xs text-stone-500">Reembolsos de troca</dt>
+                  <dd className="mt-0.5 text-sm font-semibold tabular-nums text-stone-900">
+                    {formatPrice(metrics.exchangeRefundTotal ?? 0)}
+                  </dd>
+                </div>
+                <div className="rounded-xl bg-stone-50 px-3 py-2.5">
+                  <dt className="text-xs text-stone-500">Frete pago pela loja</dt>
+                  <dd className="mt-0.5 text-sm font-semibold tabular-nums text-stone-900">
+                    {formatPrice(metrics.storeShippingCost ?? 0)}
+                  </dd>
+                </div>
+                <div className="rounded-xl bg-stone-50 px-3 py-2.5">
+                  <dt className="text-xs text-stone-500">Resultado após frete</dt>
+                  <dd className="mt-0.5 text-sm font-semibold tabular-nums text-stone-900">
+                    {formatPrice(metrics.operatingNet ?? metrics.cashNet ?? 0)}
+                  </dd>
+                </div>
+              </dl>
+            </section>
+            ) : null}
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr] xl:items-start">
             <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
               <div className="flex items-baseline justify-between gap-2">
                 <h3 className="flex items-center gap-2 text-sm font-semibold text-stone-900">

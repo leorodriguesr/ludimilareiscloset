@@ -26,6 +26,7 @@ import {
   isInfinitePayLencToken,
   parseInfinitePayOrderNsu,
 } from "@/lib/payments/infinitepay";
+import { cashLedgerIdempotencyKey } from "@/lib/cash/idempotency";
 import { appendCashLedgerEntry } from "@/lib/cash/ledger";
 import { EXCHANGE_BALANCE_PURPOSE } from "@/lib/exchanges/initiate-balance-payment";
 import { appendExchangeEvent } from "@/lib/exchanges/events";
@@ -454,6 +455,7 @@ async function confirmAttemptInTransaction(input: {
         description: `Venda · pedido ${lockedAttempt.orderId.slice(0, 8)}`,
         orderId: lockedAttempt.orderId,
         paymentAttemptId: lockedAttempt.id,
+        idempotencyKey: cashLedgerIdempotencyKey("sale", lockedAttempt.id),
       });
     });
   } catch (e) {
@@ -562,6 +564,7 @@ async function confirmChargeInTransaction(input: {
         description: `Acréscimo · pedido ${lockedAttempt.orderId.slice(0, 8)}`,
         orderId: lockedAttempt.orderId,
         paymentAttemptId: lockedAttempt.id,
+        idempotencyKey: cashLedgerIdempotencyKey("sale", lockedAttempt.id),
       });
     });
   } catch (e) {
@@ -711,6 +714,10 @@ async function confirmExchangeBalanceInTransaction(input: {
         orderId: exchange.orderId,
         exchangeId: exchange.id,
         paymentAttemptId: lockedAttempt.id,
+        idempotencyKey: cashLedgerIdempotencyKey(
+          "exchange-balance",
+          exchange.id
+        ),
       });
 
       await maybeReleaseOutboundShipping(tx, exchange.id);

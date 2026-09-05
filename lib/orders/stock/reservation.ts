@@ -3,6 +3,7 @@ import type { CartPieceSelection } from "@/lib/cart/types";
 import { OrderCreateError } from "@/lib/orders/create-order";
 import { getAvailableStock } from "@/lib/orders/stock/availability";
 import { buildStockDemands } from "@/lib/orders/stock/build-demands";
+import { orderStockReservationWhere } from "@/lib/orders/stock/reservation-scope";
 import { prisma } from "@/lib/prisma";
 
 type ReservationTx = Pick<
@@ -24,7 +25,9 @@ export async function releaseStockReservations(
   tx: Pick<typeof prisma, "stockReservation">,
   orderId: string
 ): Promise<void> {
-  await tx.stockReservation.deleteMany({ where: { orderId } });
+  await tx.stockReservation.deleteMany({
+    where: orderStockReservationWhere(orderId),
+  });
 }
 
 export async function reserveStockForOrderLines(
@@ -68,7 +71,7 @@ export async function commitStockReservations(
   orderId: string
 ): Promise<void> {
   const reservations = await tx.stockReservation.findMany({
-    where: { orderId },
+    where: orderStockReservationWhere(orderId),
     select: {
       productId: true,
       pieceVariantId: true,
@@ -106,7 +109,9 @@ export async function commitStockReservations(
     await syncProductStockQuantityFromVariants(tx, productId);
   }
 
-  await tx.stockReservation.deleteMany({ where: { orderId } });
+  await tx.stockReservation.deleteMany({
+    where: orderStockReservationWhere(orderId),
+  });
 }
 
 /** Baixa estoque das linhas informadas sem mexer nas reservas do pedido. */

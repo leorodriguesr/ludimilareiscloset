@@ -66,6 +66,18 @@ async function resolveOrderIdFromWebhook(data: NonNullable<SuperfreteWebhookPayl
   return null;
 }
 
+async function resolveExchangeShippingId(
+  data: NonNullable<SuperfreteWebhookPayload["data"]>
+) {
+  const shipmentId = data.id?.trim();
+  if (!shipmentId) return null;
+  const row = await prisma.exchangeShipping.findFirst({
+    where: { superfreteShipmentId: shipmentId },
+    select: { id: true },
+  });
+  return row?.id ?? null;
+}
+
 export async function POST(request: NextRequest) {
   const rawBody = await request.text();
   const signature = request.headers.get("x-me-signature");
@@ -90,6 +102,54 @@ export async function POST(request: NextRequest) {
 
   const order = await resolveOrderIdFromWebhook(data);
   if (!order) {
+    const exchangeShippingId = await resolveExchangeShippingId(data);
+    if (exchangeShippingId) {
+      const sfStatus = normalizeProviderShipmentStatus(
+        data.status ?? event.replace(/^order\./, "")
+      );
+      const mappedStatus = mapSuperfreteStatusToShippingStatus(sfStatus);
+      const tracking = data.tracking?.trim() || undefined;
+      const labelCancelled = isCancelledProviderShipmentStatus(sfStatus);
+      const shippingStatus =
+        mappedStatus === "shipped" || mappedStatus === "delivered"
+          ? mappedStatus
+          : labelCancelled
+            ? "cancelled"
+            : "labeled";
+      const tagUrl = data.tags?.find((t) => t.url?.trim())?.url?.trim();
+
+      try {
+        await prisma.exchangeShipping.update({
+          where: { id: exchangeShippingId },
+          data: labelCancelled
+            ? {
+                superfreteStatus: "cancelled",
+                shippingStatus: "cancelled",
+                superfreteShipmentId: null,
+                labelUrl: null,
+                trackingCode: null,
+                labelGeneratedAt: null,
+              }
+            : {
+                superfreteStatus: sfStatus || undefined,
+                ...(tracking ? { trackingCode: tracking } : {}),
+                shippingStatus,
+                ...(tagUrl
+                  ? { labelUrl: tagUrl, labelGeneratedAt: new Date() }
+                  : {}),
+              },
+        });
+        return NextResponse.json({
+          ok: true,
+          matched: true,
+          exchangeShippingId,
+        });
+      } catch (e) {
+        console.error("[webhook superfrete] exchange", e);
+        return NextResponse.json({ error: "server" }, { status: 500 });
+      }
+    }
+
     if (process.env.NODE_ENV === "development") {
       console.info("[webhook superfrete] pedido não encontrado", { event, id: data.id });
     }

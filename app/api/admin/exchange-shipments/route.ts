@@ -6,6 +6,9 @@ import { listExchangeOutboundShipments } from "@/lib/exchanges/list-outbound-shi
 export async function GET() {
   const gate = await requirePermission(PERMISSION.EXCHANGES_MANAGE);
   if (gate instanceof NextResponse) return gate;
+  if (gate.role !== "ADMIN") {
+    return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
+  }
 
   try {
     const shipments = await listExchangeOutboundShipments();

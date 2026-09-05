@@ -2,7 +2,16 @@ import {
   isInsideDelivery,
   isStoreMotoboyDelivery,
 } from "@/lib/admin-sale/arranged-delivery";
-import { ExchangeStatus } from "@/app/generated/prisma/client";
+import {
+  computeDashboardCashNet,
+  computeDashboardOperatingNet,
+  omitDashboardCashFields,
+} from "@/lib/admin/dashboard-cash";
+import {
+  CashLedgerKind,
+  ExchangeShippingPaidBy,
+  ExchangeStatus,
+} from "@/app/generated/prisma/client";
 import { ORDER_STATUS } from "@/lib/orders/constants";
 import { expireOrdersBatch } from "@/lib/orders/expire-orders";
 import { prisma } from "@/lib/prisma";
@@ -32,7 +41,32 @@ export type DashboardMetrics = {
   exchangeAdditionalSaleCount: number;
   exchangeAdditionalItemsCount: number;
   exchangeAdditionalRevenue: number;
+  /** Soma dos pedidos pagos no período, sem trocas. */
+  orderRevenueTotal: number;
+  /** Diferenças de troca recebidas no período. */
+  exchangeBalanceReceived: number;
+  /** Reembolsos de troca confirmados no período. */
+  exchangeRefundTotal: number;
+  /** Custo de frete pago pela loja (trocas) no período. */
+  storeShippingCost: number;
+  /** Todas as entradas registradas no ledger. */
+  cashInTotal: number;
+  /** Todas as saídas registradas no ledger. */
+  cashOutTotal: number;
+  /** Entradas − saídas registradas no ledger. */
+  cashNet: number;
+  /** Caixa líquido − custos de frete de troca pagos pela loja. */
+  operatingNet: number;
 };
+
+/** Gestor vê operação; números de caixa ficam só com o admin. */
+export function dashboardMetricsForRole(
+  metrics: DashboardMetrics,
+  role: string
+) {
+  if (role === "ADMIN") return metrics;
+  return omitDashboardCashFields(metrics);
+}
 
 function todayKeyInSaoPaulo(now = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -184,17 +218,42 @@ export async function getDashboardMetrics(
     stateCounts.set(state, (stateCounts.get(state) ?? 0) + 1);
   }
 
-  const extraSales = await prisma.exchange.findMany({
-    where: {
-      additionalSaleRecognizedAt: inPeriod,
-      additionalSaleItemCount: { gt: 0 },
-      status: { not: ExchangeStatus.CANCELLED },
-    },
-    select: {
-      additionalSaleItemCount: true,
-      additionalSaleItemsTotal: true,
-    },
-  });
+  const [extraSales, ledgerRows, storeShippings] = await Promise.all([
+    prisma.exchange.findMany({
+      where: {
+        additionalSaleRecognizedAt: inPeriod,
+        additionalSaleItemCount: { gt: 0 },
+        status: { not: ExchangeStatus.CANCELLED },
+      },
+      select: {
+        additionalSaleItemCount: true,
+        additionalSaleItemsTotal: true,
+      },
+    }),
+    prisma.cashLedgerEntry.findMany({
+      where: {
+        createdAt: inPeriod,
+      },
+      select: { kind: true, direction: true, amount: true },
+    }),
+    prisma.exchangeShipping.findMany({
+      where: {
+        paidBy: ExchangeShippingPaidBy.STORE,
+        cost: { gt: 0 },
+        OR: [
+          { labelGeneratedAt: inPeriod },
+          {
+            AND: [
+              { labelGeneratedAt: null },
+              { createdAt: inPeriod },
+              { exchange: { status: { not: ExchangeStatus.CANCELLED } } },
+            ],
+          },
+        ],
+      },
+      select: { cost: true },
+    }),
+  ]);
   const exchangeAdditionalSaleCount = extraSales.length;
   const exchangeAdditionalItemsCount = extraSales.reduce(
     (sum, row) => sum + row.additionalSaleItemCount,
@@ -204,7 +263,39 @@ export async function getDashboardMetrics(
     extraSales.reduce((sum, row) => sum + row.additionalSaleItemsTotal, 0) * 100
   ) / 100;
   productsSoldCount += exchangeAdditionalItemsCount;
+  const orderRevenueTotal = Math.round(revenueTotal * 100) / 100;
   revenueTotal += exchangeAdditionalRevenue;
+  const exchangeBalanceReceived = Math.round(
+    ledgerRows
+      .filter((row) => row.kind === CashLedgerKind.EXCHANGE_BALANCE)
+      .reduce((sum, row) => sum + row.amount, 0) * 100
+  ) / 100;
+  const exchangeRefundTotal = Math.round(
+    ledgerRows
+      .filter((row) => row.kind === CashLedgerKind.EXCHANGE_REFUND)
+      .reduce((sum, row) => sum + row.amount, 0) * 100
+  ) / 100;
+  const storeShippingCost = Math.round(
+    storeShippings.reduce((sum, row) => sum + (row.cost ?? 0), 0) * 100
+  ) / 100;
+  const cashInTotal = Math.round(
+    ledgerRows
+      .filter((row) => row.direction === "IN")
+      .reduce((sum, row) => sum + row.amount, 0) * 100
+  ) / 100;
+  const cashOutTotal = Math.round(
+    ledgerRows
+      .filter((row) => row.direction === "OUT")
+      .reduce((sum, row) => sum + row.amount, 0) * 100
+  ) / 100;
+  const cashNet = computeDashboardCashNet({
+    cashInTotal,
+    cashOutTotal,
+  });
+  const operatingNet = computeDashboardOperatingNet({
+    cashNet,
+    storeShippingCost,
+  });
   const totalSalesCount = paidCount + exchangeAdditionalSaleCount;
 
   const salesByState = [...stateCounts.entries()]
@@ -229,5 +320,13 @@ export async function getDashboardMetrics(
     exchangeAdditionalSaleCount,
     exchangeAdditionalItemsCount,
     exchangeAdditionalRevenue,
+    orderRevenueTotal,
+    exchangeBalanceReceived,
+    exchangeRefundTotal,
+    storeShippingCost,
+    cashInTotal,
+    cashOutTotal,
+    cashNet,
+    operatingNet,
   };
 }

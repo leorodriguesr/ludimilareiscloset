@@ -18,6 +18,7 @@ import {
   EXCHANGE_REASON_LABELS,
   EXCHANGE_STATUS_LABELS,
 } from "@/lib/exchanges/constants";
+import { canCompleteExchangeWithOutbound } from "@/lib/exchanges/outbound-complete";
 import {
   EXCHANGE_RETURN_METHOD_LABELS,
   EXCHANGE_SHIPPING_METHOD_LABELS,
@@ -154,6 +155,7 @@ const EVENT_LABELS: Record<string, string> = {
   RECEIVED: "Peça conferida",
   INSPECTED: "Conferência",
   STOCK_RESTORED: "Estoque restaurado",
+  STOCK_RESERVED: "Estoque reservado",
   STOCK_DEBITED: "Estoque debitado",
   OUTBOUND_LABEL_GENERATED: "Etiqueta de reenvio",
   BALANCE_UPDATED: "Saldo atualizado",
@@ -1095,7 +1097,11 @@ function ExchangeDetailDrawer({
       (d.status === "RECEIVED" &&
         outboundItems.length === 0 &&
         kind !== "EXCHANGE" &&
-        !balanceOpen));
+        !balanceOpen)) &&
+    canCompleteExchangeWithOutbound({
+      hasOutboundItems: outboundItems.length > 0,
+      outboundShippings: d.shippings.filter((s) => s.type === "OUTBOUND"),
+    });
 
   return createPortal(
     <div className="fixed inset-0 z-[100]">
@@ -1409,6 +1415,16 @@ function ExchangeDetailDrawer({
                   Cobrar cliente · {formatPrice(d.balanceAmount)}
                 </button>
               )}
+
+              {outboundItems.length > 0 &&
+              !canComplete &&
+              (d.status === "READY_OUTBOUND" || d.status === "OUTBOUND") &&
+              !balanceOpen ? (
+                <p className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-600">
+                  Conclua depois de postar o reenvio ou finalizar a entrega
+                  local.
+                </p>
+              ) : null}
 
               <section className="flex flex-wrap gap-2">
                 {canComplete && (

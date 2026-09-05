@@ -4,6 +4,7 @@ import {
   type Prisma,
 } from "@/app/generated/prisma/client";
 import { appendExchangeEvent } from "@/lib/exchanges/events";
+import { commitExchangeOutboundStock } from "@/lib/exchanges/outbound-stock";
 
 /** Libera reenvio depois da conferência, se a cliente não tiver valor pendente. */
 export async function maybeReleaseOutboundShipping(
@@ -31,17 +32,23 @@ export async function maybeReleaseOutboundShipping(
 
   const hasOutbound = exchange.items.some((item) => item.direction === "OUTBOUND");
   if (!hasOutbound) return;
-  if (exchange.status === ExchangeStatus.READY_OUTBOUND) return;
 
-  await tx.exchange.update({
-    where: { id: exchangeId },
-    data: { status: ExchangeStatus.READY_OUTBOUND },
-  });
+  if (exchange.status !== ExchangeStatus.READY_OUTBOUND) {
+    await tx.exchange.update({
+      where: { id: exchangeId },
+      data: { status: ExchangeStatus.READY_OUTBOUND },
+    });
 
-  await appendExchangeEvent(tx, {
+    await appendExchangeEvent(tx, {
+      exchangeId,
+      type: "BALANCE_UPDATED",
+      actorUserId: actorUserId ?? undefined,
+      payload: { releasedOutbound: true },
+    });
+  }
+
+  await commitExchangeOutboundStock(tx, {
     exchangeId,
-    type: "BALANCE_UPDATED",
-    actorUserId: actorUserId ?? undefined,
-    payload: { releasedOutbound: true },
+    actorUserId,
   });
 }

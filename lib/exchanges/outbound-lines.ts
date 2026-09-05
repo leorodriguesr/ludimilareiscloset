@@ -46,7 +46,8 @@ export type OutboundRow = {
 
 export async function resolveOutboundRows(
   lines: CreateExchangeOutboundLine[],
-  excludeOrderId: string
+  excludeOrderId: string,
+  excludeExchangeId?: string | null
 ): Promise<OutboundRow[]> {
   const outboundRows: OutboundRow[] = [];
 
@@ -154,7 +155,8 @@ export async function resolveOutboundRows(
       const available = await getAvailableStock(prisma, {
         productId: demand.productId,
         pieceVariantId: demand.pieceVariantId,
-        excludeOrderId,
+        excludeOrderId: excludeExchangeId ? null : excludeOrderId,
+        excludeExchangeId,
         now,
       });
       if (available < demand.quantity) {

@@ -26,7 +26,10 @@ import {
   isLocalExchangeShippingMethod,
   LOCAL_COURIER_CUSTOMER_FEE,
 } from "@/lib/exchanges/shipping-method";
-import { debitCommittedStock } from "@/lib/orders/stock/restore";
+import {
+  commitExchangeOutboundStock,
+  reserveExchangeOutboundStock,
+} from "@/lib/exchanges/outbound-stock";
 import { prisma } from "@/lib/prisma";
 
 export async function addExchangeOutbound(input: {
@@ -82,7 +85,8 @@ export async function addExchangeOutbound(input: {
 
   const outboundRows = await resolveOutboundRows(
     input.outboundLines,
-    exchange.orderId
+    exchange.orderId,
+    exchange.id
   );
 
   const returnedByItem = new Map<string, number>();
@@ -202,6 +206,24 @@ export async function addExchangeOutbound(input: {
   const customerOwes = balance.balanceStatus === ExchangeBalanceStatus.PENDING;
 
   await prisma.$transaction(async (tx) => {
+    const claimed = await tx.exchange.updateMany({
+      where: {
+        id: exchange.id,
+        outboundDefinedAt: null,
+        inspectedAt: { not: null },
+        status: {
+          notIn: [ExchangeStatus.CANCELLED, ExchangeStatus.COMPLETED],
+        },
+      },
+      data: { outboundDefinedAt: new Date() },
+    });
+    if (claimed.count !== 1) {
+      throw new ExchangeError(
+        "OUTBOUND_EXISTS",
+        "O envio desta troca já foi definido."
+      );
+    }
+
     await tx.exchangeItem.createMany({
       data: outboundRows.map((r) => ({
         exchangeId: exchange.id,
@@ -234,7 +256,7 @@ export async function addExchangeOutbound(input: {
       },
     });
 
-    const debitLines = outboundRows
+    const stockLines = outboundRows
       .filter((row) => row.productId)
       .map((row) => ({
         productId: row.productId!,
@@ -242,22 +264,20 @@ export async function addExchangeOutbound(input: {
         quantity: row.quantity,
       }));
 
-    if (debitLines.length > 0) {
-      await debitCommittedStock(tx, debitLines);
-      const created = await tx.exchangeItem.findMany({
-        where: { exchangeId: exchange.id, direction: "OUTBOUND" },
-        select: { id: true },
-      });
-      await tx.exchangeItem.updateMany({
-        where: { id: { in: created.map((row) => row.id) } },
-        data: { stockDebited: true },
-      });
-      await appendExchangeEvent(tx, {
-        exchangeId: exchange.id,
-        type: "STOCK_DEBITED",
-        actorUserId: input.actorUserId,
-        payload: { lines: debitLines.length },
-      });
+    if (stockLines.length > 0) {
+      if (customerOwes) {
+        await reserveExchangeOutboundStock(tx, {
+          exchangeId: exchange.id,
+          orderId: exchange.orderId,
+          actorUserId: input.actorUserId,
+          lines: stockLines,
+        });
+      } else {
+        await commitExchangeOutboundStock(tx, {
+          exchangeId: exchange.id,
+          actorUserId: input.actorUserId,
+        });
+      }
     }
 
     await tx.exchange.update({

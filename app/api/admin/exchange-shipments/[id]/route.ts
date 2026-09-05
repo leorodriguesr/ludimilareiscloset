@@ -8,6 +8,9 @@ type Params = { params: Promise<{ id: string }> };
 export async function PATCH(request: NextRequest, { params }: Params) {
   const gate = await requirePermission(PERMISSION.EXCHANGES_MANAGE);
   if (gate instanceof NextResponse) return gate;
+  if (gate.role !== "ADMIN") {
+    return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
+  }
 
   const { id } = await params;
   let body: unknown;

@@ -4,6 +4,10 @@ import {
   OrderSource,
   PaymentChannel,
 } from "@/app/generated/prisma/client";
+import {
+  cashLedgerIdempotencyKey,
+  orderReactivationLedgerKey,
+} from "@/lib/cash/idempotency";
 import { appendCashLedgerEntry } from "@/lib/cash/ledger";
 import { parsePieceSelections } from "@/lib/exchanges/serialize";
 import { onOrderPaymentConfirmed } from "@/lib/fulfillment/fulfillment-service";
@@ -23,6 +27,13 @@ import {
   reserveStockForOrderLines,
 } from "@/lib/orders/stock/reservation";
 import { prisma } from "@/lib/prisma";
+
+class OrderAlreadySettledError extends Error {
+  constructor() {
+    super("Pedido já estava pago.");
+    this.name = "OrderAlreadySettledError";
+  }
+}
 
 function resolvePaymentMethod(
   preferred: PaymentMethod | undefined,
@@ -50,6 +61,7 @@ export async function markOrderPaidManually(input: {
       orderSource: true,
       status: true,
       paidAt: true,
+      cancelledAt: true,
       paymentMethod: true,
       fulfillmentType: true,
       customerDataStatus: true,
@@ -122,6 +134,7 @@ export async function markOrderPaidManually(input: {
           description: `Acréscimo manual · pedido #${order.orderNumber ?? order.id.slice(0, 8)}`,
           orderId: order.id,
           actorUserId: input.markedByUserId,
+          idempotencyKey: cashLedgerIdempotencyKey("sale", pendingCharge.id),
         });
       });
     } catch (e) {
@@ -154,6 +167,30 @@ export async function markOrderPaidManually(input: {
 
   try {
     await prisma.$transaction(async (tx) => {
+      const claimed = await tx.order.updateMany({
+        where: {
+          id: order.id,
+          status: isCancelled
+            ? ORDER_STATUS.CANCELLED
+            : ORDER_STATUS.PENDING_PAYMENT,
+        },
+        data: {
+          status: ORDER_STATUS.PAID,
+          paidAt,
+          paidTotal: order.total,
+          shippingStatus: "to_pack",
+          paymentMethod,
+          paymentChannel: PaymentChannel.MANUAL,
+          manualPaidByUserId: input.markedByUserId,
+          cancellationReason: null,
+          cancelledAt: null,
+          expiredAt: null,
+        },
+      });
+      if (claimed.count !== 1) {
+        throw new OrderAlreadySettledError();
+      }
+
       if (isCancelled) {
         const lines = order.items
           .filter(
@@ -174,22 +211,6 @@ export async function markOrderPaidManually(input: {
       } else {
         await commitStockReservations(tx, order.id);
       }
-
-      await tx.order.update({
-        where: { id: order.id },
-        data: {
-          status: ORDER_STATUS.PAID,
-          paidAt,
-          paidTotal: order.total,
-          shippingStatus: "to_pack",
-          paymentMethod,
-          paymentChannel: PaymentChannel.MANUAL,
-          manualPaidByUserId: input.markedByUserId,
-          cancellationReason: null,
-          cancelledAt: null,
-          expiredAt: null,
-        },
-      });
 
       await tx.orderItem.updateMany({
         where: { orderId: order.id },
@@ -229,9 +250,15 @@ export async function markOrderPaidManually(input: {
           : `Venda avulsa · pedido #${order.orderNumber ?? order.id.slice(0, 8)}`,
         orderId: order.id,
         actorUserId: input.markedByUserId,
+        idempotencyKey: isCancelled
+          ? orderReactivationLedgerKey(order.id, order.cancelledAt)
+          : cashLedgerIdempotencyKey("sale", order.id),
       });
     });
   } catch (e) {
+    if (e instanceof OrderAlreadySettledError) {
+      return { ok: true };
+    }
     if (e instanceof OrderCreateError && e.code === "INSUFFICIENT_STOCK") {
       return {
         ok: false,
@@ -414,6 +441,7 @@ export async function markOrderItemPaidManually(input: {
         description: `Acréscimo manual (peça) · pedido #${order.orderNumber ?? order.id.slice(0, 8)}`,
         orderId: order.id,
         actorUserId: input.markedByUserId,
+        idempotencyKey: cashLedgerIdempotencyKey("sale", input.itemId),
       });
     });
   } catch (e) {

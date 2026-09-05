@@ -4,8 +4,11 @@ import {
   ExchangeKind,
   ExchangeStatus,
 } from "@/app/generated/prisma/client";
+import { cashLedgerIdempotencyKey } from "@/lib/cash/idempotency";
 import { appendCashLedgerEntry } from "@/lib/cash/ledger";
 import { ExchangeError } from "@/lib/exchanges/constants";
+import { canCompleteExchangeWithOutbound } from "@/lib/exchanges/outbound-complete";
+import { releaseExchangeStockReservations } from "@/lib/exchanges/outbound-stock";
 import { appendExchangeEvent } from "@/lib/exchanges/events";
 import { additionalSaleRecognitionDate } from "@/lib/exchanges/additional-sale";
 import { maybeReleaseOutboundShipping } from "@/lib/exchanges/release-outbound";
@@ -110,6 +113,10 @@ export async function settleExchangeBalance(input: {
           exchangeId: exchange.id,
           paymentAttemptId: input.paymentAttemptId ?? null,
           actorUserId: input.actorUserId,
+          idempotencyKey: cashLedgerIdempotencyKey(
+            "exchange-balance",
+            exchange.id
+          ),
         });
       } else if (input.action === "mark_credit_settled") {
         await appendCashLedgerEntry(tx, {
@@ -120,6 +127,10 @@ export async function settleExchangeBalance(input: {
           orderId: exchange.orderId,
           exchangeId: exchange.id,
           actorUserId: input.actorUserId,
+          idempotencyKey: cashLedgerIdempotencyKey(
+            "exchange-refund",
+            exchange.id
+          ),
         });
       }
     }
@@ -176,7 +187,7 @@ export async function completeExchange(input: {
 }) {
   const exchange = await prisma.exchange.findUnique({
     where: { id: input.exchangeId },
-    include: { items: true },
+    include: { items: true, shippings: true },
   });
 
   if (!exchange) {
@@ -215,6 +226,17 @@ export async function completeExchange(input: {
     throw new ExchangeError(
       "NOT_INSPECTED",
       "Conclua a conferência antes de finalizar."
+    );
+  }
+  if (
+    !canCompleteExchangeWithOutbound({
+      hasOutboundItems: hasOutbound,
+      outboundShippings: exchange.shippings.filter((s) => s.type === "OUTBOUND"),
+    })
+  ) {
+    throw new ExchangeError(
+      "OUTBOUND_NOT_SHIPPED",
+      "Poste ou marque o reenvio como enviado antes de concluir a troca."
     );
   }
 
@@ -310,6 +332,8 @@ export async function cancelExchange(input: {
         },
       },
     });
+
+    await releaseExchangeStockReservations(tx, exchange.id);
 
     await appendExchangeEvent(tx, {
       exchangeId: exchange.id,

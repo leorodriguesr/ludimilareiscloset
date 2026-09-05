@@ -649,6 +649,10 @@ export async function createExchange(input: CreateExchangeInput) {
           shippingCustomerTotal: balance.shippingCustomerTotal,
           balanceAmount: balance.balanceAmount,
           balanceStatus: balance.balanceStatus,
+          outboundDefinedAt:
+            outboundRows.length > 0
+              ? (existing.outboundDefinedAt ?? new Date())
+              : null,
           items: { create: itemCreates },
         },
         include: {
@@ -701,6 +705,7 @@ export async function createExchange(input: CreateExchangeInput) {
         shippingCustomerTotal: balance.shippingCustomerTotal,
         balanceAmount: balance.balanceAmount,
         balanceStatus: balance.balanceStatus,
+        outboundDefinedAt: outboundRows.length > 0 ? new Date() : null,
         items: { create: itemCreates },
         shippings: { create: shippingCreates },
       },

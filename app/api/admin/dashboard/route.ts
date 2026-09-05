@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  dashboardMetricsForRole,
   getDashboardMetrics,
   parseDashboardDateRange,
 } from "@/lib/admin/dashboard-metrics";
@@ -16,7 +17,10 @@ export async function GET(request: NextRequest) {
   );
 
   try {
-    const metrics = await getDashboardMetrics(range);
+    const metrics = dashboardMetricsForRole(
+      await getDashboardMetrics(range),
+      gate.role
+    );
     return NextResponse.json(metrics);
   } catch (e) {
     console.error("[GET /api/admin/dashboard]", e);

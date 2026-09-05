@@ -2181,8 +2181,13 @@ type MelhorEnvioStatus = {
   error?: string;
 };
 
-export function ShippingManager() {
+export function ShippingManager({
+  canViewExchangeShipments,
+}: {
+  canViewExchangeShipments?: boolean;
+} = {}) {
   const { isAdmin } = useAuth();
+  const showExchangeShipments = canViewExchangeShipments ?? isAdmin;
   const [orders, setOrders] = useState<ShipmentOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterKey | null>(null);
@@ -2795,7 +2800,7 @@ export function ShippingManager() {
         </div>
       ) : null}
 
-      <ExchangeShipmentQueue filter={filter} />
+      {showExchangeShipments ? <ExchangeShipmentQueue filter={filter} /> : null}
 
       {loading ? (
         <div className="flex items-center gap-2.5 py-10 text-sm text-stone-400">

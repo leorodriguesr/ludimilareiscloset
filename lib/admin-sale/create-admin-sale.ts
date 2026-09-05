@@ -524,6 +524,9 @@ export async function createAdminSale(
         await reserveStockForOrderLines(tx, order.id, stockLines);
         await commitStockReservations(tx, order.id);
       }
+      const { cashLedgerIdempotencyKey } = await import(
+        "@/lib/cash/idempotency"
+      );
       const { appendCashLedgerEntry } = await import("@/lib/cash/ledger");
       await appendCashLedgerEntry(tx, {
         direction: "IN",
@@ -532,6 +535,7 @@ export async function createAdminSale(
         description: `Venda avulsa · pedido #${order.orderNumber ?? order.id.slice(0, 8)}`,
         orderId: order.id,
         actorUserId: input.createdByUserId,
+        idempotencyKey: cashLedgerIdempotencyKey("sale", order.id),
       });
     } else if (stockLines.length > 0) {
       await reserveStockForOrderLines(tx, order.id, stockLines);

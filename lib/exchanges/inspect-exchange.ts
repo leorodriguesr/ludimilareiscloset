@@ -9,9 +9,10 @@ import {
 } from "@/lib/exchanges/constants";
 import { appendExchangeEvent } from "@/lib/exchanges/events";
 import {
-  debitCommittedStock,
-  restoreCommittedStock,
-} from "@/lib/orders/stock/restore";
+  commitExchangeOutboundStock,
+  reserveExchangeOutboundStock,
+} from "@/lib/exchanges/outbound-stock";
+import { restoreCommittedStock } from "@/lib/orders/stock/restore";
 import { prisma } from "@/lib/prisma";
 
 export type InspectReturnLine = {
@@ -81,6 +82,30 @@ export async function inspectExchange(input: {
   const now = new Date();
 
   return prisma.$transaction(async (tx) => {
+    const claimed = await tx.exchange.updateMany({
+      where: {
+        id: exchange.id,
+        inspectedAt: null,
+        status: {
+          in: [
+            ExchangeStatus.AWAITING_RETURN,
+            ExchangeStatus.RETURN_IN_TRANSIT,
+            ExchangeStatus.RECEIVED,
+          ],
+        },
+      },
+      data: {
+        inspectedAt: now,
+        receivedAt: exchange.receivedAt ?? now,
+      },
+    });
+    if (claimed.count !== 1) {
+      throw new ExchangeError(
+        "ALREADY_INSPECTED",
+        "Esta troca já foi conferida."
+      );
+    }
+
     const restoreLines: {
       productId: string;
       pieceVariantId: string | null;
@@ -118,41 +143,36 @@ export async function inspectExchange(input: {
       });
     }
 
-    const debitLines: {
-      productId: string;
-      pieceVariantId: string | null;
-      quantity: number;
-    }[] = [];
-
-    for (const item of outboundItems) {
-      if (!item.productId || item.stockDebited) continue;
-      debitLines.push({
-        productId: item.productId,
-        pieceVariantId: item.pieceVariantId,
-        quantity: item.quantity,
-      });
-      await tx.exchangeItem.update({
-        where: { id: item.id },
-        data: { stockDebited: true },
-      });
-    }
-
-    if (debitLines.length > 0) {
-      await debitCommittedStock(tx, debitLines);
-      await appendExchangeEvent(tx, {
-        exchangeId: exchange.id,
-        type: "STOCK_DEBITED",
-        actorUserId: input.actorUserId,
-        payload: { lines: debitLines.length },
-      });
-    }
-
     const balanceOpen =
       exchange.balanceStatus === ExchangeBalanceStatus.PENDING ||
       exchange.balanceStatus === ExchangeBalanceStatus.CREDIT_PENDING;
 
     const customerOwes =
       exchange.balanceStatus === ExchangeBalanceStatus.PENDING;
+
+    const stockLines = outboundItems
+      .filter((item) => item.productId && !item.stockDebited)
+      .map((item) => ({
+        productId: item.productId!,
+        pieceVariantId: item.pieceVariantId,
+        quantity: item.quantity,
+      }));
+
+    if (stockLines.length > 0) {
+      if (customerOwes) {
+        await reserveExchangeOutboundStock(tx, {
+          exchangeId: exchange.id,
+          orderId: exchange.orderId,
+          actorUserId: input.actorUserId,
+          lines: stockLines,
+        });
+      } else {
+        await commitExchangeOutboundStock(tx, {
+          exchangeId: exchange.id,
+          actorUserId: input.actorUserId,
+        });
+      }
+    }
     const nextStatus =
       exchange.kind === "EXCHANGE" && outboundItems.length === 0
         ? ExchangeStatus.RECEIVED
@@ -168,8 +188,6 @@ export async function inspectExchange(input: {
       where: { id: exchange.id },
       data: {
         status: nextStatus,
-        receivedAt: exchange.receivedAt ?? now,
-        inspectedAt: now,
         completedAt: nextStatus === ExchangeStatus.COMPLETED ? now : null,
       },
       include: {

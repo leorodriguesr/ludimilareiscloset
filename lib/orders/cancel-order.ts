@@ -7,6 +7,7 @@ import { ORDER_ITEM_PAYMENT_STATUS, ORDER_STATUS } from "@/lib/orders/constants"
 import { releaseStockReservations } from "@/lib/orders/stock/reservation";
 import { restoreCommittedStock } from "@/lib/orders/stock/restore";
 import { buildStockDemands } from "@/lib/orders/stock/build-demands";
+import { orderCancellationLedgerKey } from "@/lib/cash/idempotency";
 import { appendCashLedgerEntry } from "@/lib/cash/ledger";
 
 export type CancelOrderResult = {
@@ -54,7 +55,7 @@ export async function cancelOrder(
     throw new ShippingQuoteError("VALIDATION", "Pedido não encontrado.", 404);
   }
 
-  if (order.status === "cancelled") {
+  if (order.status === ORDER_STATUS.CANCELLED) {
     throw new ShippingQuoteError("VALIDATION", "Pedido já está cancelado.", 400);
   }
 
@@ -79,8 +80,29 @@ export async function cancelOrder(
 
   const wasPaid =
     order.status === ORDER_STATUS.PAID || Boolean(order.paidAt);
+  const cancelledAt = new Date();
 
   await prisma.$transaction(async (tx) => {
+    const claimed = await tx.order.updateMany({
+      where: {
+        id: orderId,
+        status: { not: ORDER_STATUS.CANCELLED },
+      },
+      data: {
+        status: ORDER_STATUS.CANCELLED,
+        shippingStatus: "cancelled",
+        cancellationReason: trimmedReason,
+        cancelledAt,
+      },
+    });
+    if (claimed.count !== 1) {
+      throw new ShippingQuoteError(
+        "VALIDATION",
+        "Pedido já está cancelado.",
+        400
+      );
+    }
+
     await releaseStockReservations(tx, orderId);
 
     if (wasPaid) {
@@ -109,6 +131,7 @@ export async function cancelOrder(
         amount: refundAmount,
         description: `Cancelamento · pedido #${order.orderNumber ?? order.id.slice(0, 8)}`,
         orderId: order.id,
+        idempotencyKey: orderCancellationLedgerKey(order.id, order.paidAt),
       });
     }
 
@@ -116,25 +139,7 @@ export async function cancelOrder(
       where: { orderId, status: "pending" },
       data: { status: "cancelled" },
     });
-
-    await tx.order.update({
-      where: { id: orderId },
-      data: {
-        status: "cancelled",
-        shippingStatus: "cancelled",
-      },
-    });
   });
-
-  await prisma.$executeRawUnsafe(
-    `UPDATE "Order" SET
-      "cancellationReason" = ?,
-      "cancelledAt" = datetime('now'),
-      "updatedAt" = datetime('now')
-    WHERE id = ?`,
-    trimmedReason,
-    orderId
-  );
 
   return { orderId, labelCancelled };
 }

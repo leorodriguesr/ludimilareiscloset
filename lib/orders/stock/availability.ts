@@ -1,3 +1,4 @@
+import { ExchangeStatus } from "@/app/generated/prisma/client";
 import { ORDER_STATUS } from "@/lib/orders/constants";
 import { prisma } from "@/lib/prisma";
 
@@ -11,7 +12,8 @@ export async function sumReservedQuantityByOthers(
   input: {
     productId: string;
     pieceVariantId: string | null;
-    excludeOrderId: string;
+    excludeOrderId?: string | null;
+    excludeExchangeId?: string | null;
     now?: Date;
   }
 ): Promise<number> {
@@ -21,11 +23,29 @@ export async function sumReservedQuantityByOthers(
     where: {
       productId: input.productId,
       pieceVariantId: input.pieceVariantId,
-      orderId: { not: input.excludeOrderId },
-      order: {
-        status: ORDER_STATUS.PENDING_PAYMENT,
-        expiresAt: { gt: now },
-      },
+      OR: [
+        {
+          exchangeId: null,
+          ...(input.excludeOrderId
+            ? { orderId: { not: input.excludeOrderId } }
+            : {}),
+          order: {
+            status: ORDER_STATUS.PENDING_PAYMENT,
+            expiresAt: { gt: now },
+          },
+        },
+        {
+          AND: [
+            { exchangeId: { not: null } },
+            ...(input.excludeExchangeId
+              ? [{ exchangeId: { not: input.excludeExchangeId } }]
+              : []),
+          ],
+          exchange: {
+            status: { not: ExchangeStatus.CANCELLED },
+          },
+        },
+      ],
     },
     _sum: { quantity: true },
   });
@@ -60,7 +80,8 @@ export async function getAvailableStock(
   input: {
     productId: string;
     pieceVariantId: string | null;
-    excludeOrderId: string;
+    excludeOrderId?: string | null;
+    excludeExchangeId?: string | null;
     now?: Date;
   }
 ): Promise<number> {

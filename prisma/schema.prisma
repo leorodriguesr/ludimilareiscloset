@@ -147,6 +147,7 @@ enum ExchangeEventType {
   RECEIVED
   INSPECTED
   STOCK_RESTORED
+  STOCK_RESERVED
   STOCK_DEBITED
   OUTBOUND_LABEL_GENERATED
   BALANCE_UPDATED
@@ -331,6 +332,8 @@ model Exchange {
   openedBy        User?          @relation("ExchangesOpenedByStaff", fields: [openedByUserId], references: [id], onDelete: SetNull)
   receivedAt      DateTime?
   inspectedAt     DateTime?
+  /** Trava atômica: garante uma única definição de itens/frete de saída. */
+  outboundDefinedAt DateTime?
   completedAt     DateTime?
   cancelledAt     DateTime?
   cancellationReason String?
@@ -366,6 +369,7 @@ model Exchange {
   events           ExchangeEvent[]
   paymentAttempts  PaymentAttempt[]
   cashLedgerEntries CashLedgerEntry[]
+  stockReservations StockReservation[]
 
   @@index([orderId])
   @@index([status])
@@ -527,6 +531,8 @@ model CashLedgerEntry {
   exchange         Exchange?           @relation(fields: [exchangeId], references: [id], onDelete: SetNull)
   paymentAttemptId String?
   actorUserId      String?
+  /** Impede lançamento duplicado do mesmo evento financeiro. */
+  idempotencyKey   String?             @unique
   createdAt        DateTime            @default(now())
 
   @@index([createdAt])
@@ -559,6 +565,9 @@ model StockReservation {
   id             String        @id @default(cuid())
   orderId        String
   order          Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  /** Reserva de saída de troca (ainda não debitada no estoque físico). */
+  exchangeId     String?
+  exchange       Exchange?     @relation(fields: [exchangeId], references: [id], onDelete: Cascade)
   productId      String
   product        Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
   /** Null quando o produto não usa matriz cor×tamanho. */
@@ -568,6 +577,7 @@ model StockReservation {
   createdAt      DateTime      @default(now())
 
   @@index([orderId])
+  @@index([exchangeId])
   @@index([productId])
   @@index([pieceVariantId])
 }
