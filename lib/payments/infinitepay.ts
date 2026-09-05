@@ -334,7 +334,13 @@ export async function infinitePayPaymentCheckWithFallback(input: {
 
 export function infinitePayWebhookUrl(): string {
   /** Precisa ser HTTPS acessível pela internet (não localhost). Mesmo host do Link Integrado no app InfinitePay ajuda na entrega. */
-  return `${getPaymentCallbackBaseUrl()}/api/webhooks/infinitepay`;
+  const url = `${getPaymentCallbackBaseUrl()}/api/webhooks/infinitepay`;
+  if (/ngrok/i.test(url) && process.env.NODE_ENV === "production") {
+    console.warn(
+      "[InfinitePay] webhook_url aponta para túnel ngrok. Use PAYMENT_CALLBACK_BASE_URL com o domínio permanente da loja."
+    );
+  }
+  return url;
 }
 
 export function infinitePayOrderRedirectUrl(orderId: string): string {

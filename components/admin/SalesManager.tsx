@@ -25,6 +25,7 @@ import {
   orderCustomerDisplayName,
   shouldOfferCustomerDataFillLink,
 } from "@/lib/admin-sale/customer-display";
+import { isCheckoutPaymentLinkWithinDeadline } from "@/lib/admin-sale/payment-link-expiry";
 import {
   composeDeliveryNotesFromUserEdit,
   orderDeliveryUserNotes,
@@ -124,6 +125,7 @@ type AdminOrder = {
   cancellationReason: string | null;
   cancelledAt: string | null;
   expiredAt?: string | null;
+  expiresAt?: string | null;
   createdAt: string;
   user: { name: string; email: string; phone: string } | null;
   createdBy?: { name: string | null; role?: string | null } | null;
@@ -220,6 +222,32 @@ function manualMarkPaidOrderPatch(order: AdminOrder): Partial<AdminOrder> {
 
 function isInactiveSale(order: AdminOrder): boolean {
   return order.status === "cancelled" || order.status === "expired";
+}
+
+function isCheckoutOrigin(order: Pick<AdminOrder, "orderSource">): boolean {
+  return order.orderSource !== "ADMIN_SALE";
+}
+
+/** Link de pagamento copiável: venda avulsa ou checkout ainda aguardando. */
+function canSharePaymentLink(order: AdminOrder): boolean {
+  if (isInactiveSale(order)) return false;
+  if (
+    !isCheckoutPaymentLinkWithinDeadline({
+      orderSource: order.orderSource,
+      expiresAt: order.expiresAt,
+    })
+  ) {
+    return false;
+  }
+  if (!orderHasUnpaidItems(order)) return false;
+  if (order.paymentChannel === "MANUAL" && !order.paidAt) return false;
+  if (isCheckoutOrigin(order) && order.paidAt) return false;
+  return (
+    order.paymentMethod === "pix" ||
+    order.paymentMethod === "card" ||
+    order.paymentShare?.type === "pix" ||
+    order.paymentShare?.type === "card"
+  );
 }
 
 function gatewayMethodForCancelledSale(order: AdminOrder): "pix" | "card" | null {
@@ -1411,11 +1439,7 @@ function AdminSaleLinks({
   const canReactivatePayment = resumeMethod != null;
   const switchTarget = switchablePaymentMethod(order);
 
-  const showPaymentLink =
-    order.orderSource === "ADMIN_SALE" &&
-    !isInactiveSale(order) &&
-    orderHasUnpaidItems(order) &&
-    !(order.paymentChannel === "MANUAL" && !order.paidAt);
+  const showPaymentLink = canSharePaymentLink(order);
   const isPixPayment =
     order.paymentMethod === "pix" || order.paymentShare?.type === "pix";
   const isCardPayment =
@@ -1672,11 +1696,7 @@ function OrderRowActionsMenu({
   const isInactive = isInactiveSale(order);
   const isPaid = Boolean(order.paidAt);
   const showCustomerLink = shouldOfferCustomerDataFillLink(order);
-  const showPaymentLink =
-    order.orderSource === "ADMIN_SALE" &&
-    !isInactive &&
-    orderHasUnpaidItems(order) &&
-    !(order.paymentChannel === "MANUAL" && !order.paidAt);
+  const showPaymentLink = canSharePaymentLink(order);
   const showMarkPaid =
     canMarkPaid &&
     order.orderSource === "ADMIN_SALE" &&
@@ -1796,6 +1816,11 @@ function OrderRowActionsMenu({
   }
 
   async function handleCopyPaymentLink() {
+    if (!canSharePaymentLink(order)) {
+      window.alert("Este pedido não está mais disponível para pagamento.");
+      return;
+    }
+
     const shareUrl = orderPaymentShareAbsoluteUrl(order);
     const isPix = isPixPayment || order.paymentShare?.type === "pix";
     const isCard = isCardPayment || order.paymentShare?.type === "card";
@@ -2578,11 +2603,7 @@ function OrderDetailsBody({
   const showCustomerLink = shouldOfferCustomerDataFillLink(order);
   const canReactivatePayment = gatewayMethodForCancelledSale(order) != null;
   const canSwitchPayment = switchablePaymentMethod(order) != null;
-  const showPaymentLink =
-    order.orderSource === "ADMIN_SALE" &&
-    !isInactiveSale(order) &&
-    orderHasUnpaidItems(order) &&
-    !(order.paymentChannel === "MANUAL" && !order.paidAt);
+  const showPaymentLink = canSharePaymentLink(order);
   const hasAdminLinks =
     showCustomerLink || showPaymentLink || canReactivatePayment || canSwitchPayment;
   const shippingStatusInfo = sInfo(order.shippingStatus);

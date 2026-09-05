@@ -7,6 +7,8 @@ export type ParsedInfinitePayWebhook = {
   transactionNsu: string;
   invoiceSlug: string;
   captureMethod: string;
+  /** Valor do pedido em centavos, quando o payload traz `amount`. */
+  amountCents: number | null;
 };
 
 export function parseInfinitePayWebhookPayload(
@@ -16,6 +18,7 @@ export function parseInfinitePayWebhookPayload(
   let transactionNsu = "";
   let invoiceSlug = "";
   let captureMethod = "";
+  let amountCents: number | null = null;
 
   function visit(node: unknown, depth: number): void {
     if (node === null || node === undefined) return;
@@ -60,6 +63,10 @@ export function parseInfinitePayWebhookPayload(
         else if (kl === "slug" && depth <= 2) invoiceSlug ||= s;
         else if (kl === "lenc") invoiceSlug ||= s;
         else if (kl === "capture_method") captureMethod ||= s;
+        else if (kl === "amount" && amountCents == null) {
+          const n = typeof v === "number" ? v : Number(s);
+          if (Number.isFinite(n) && n > 0) amountCents = Math.round(n);
+        }
       }
       visit(v, depth + 1);
     }
@@ -75,5 +82,6 @@ export function parseInfinitePayWebhookPayload(
     transactionNsu,
     invoiceSlug,
     captureMethod,
+    amountCents,
   };
 }

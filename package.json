@@ -7,7 +7,7 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test lib/exchanges/balance.test.ts lib/exchanges/outbound-complete.test.ts lib/cash/idempotency.test.ts lib/admin/dashboard-cash.test.ts lib/admin/nav.test.ts lib/orders/stock/reservation-scope.test.ts lib/config/checkout-shipping-charge.test.ts",
+    "test": "tsx --test lib/exchanges/balance.test.ts lib/exchanges/outbound-complete.test.ts lib/cash/idempotency.test.ts lib/admin/dashboard-cash.test.ts lib/admin/nav.test.ts lib/orders/stock/reservation-scope.test.ts lib/config/checkout-shipping-charge.test.ts lib/payments/verify-infinitepay-payment.test.ts lib/admin-sale/payment-link-expiry.test.ts",
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",

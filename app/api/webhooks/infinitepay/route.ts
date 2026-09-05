@@ -1,7 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { confirmPaymentFromInfinitePay } from "@/lib/orders/confirm-payment";
+import {
+  confirmPaymentFromInfinitePay,
+  lookupInfinitePayAttempt,
+} from "@/lib/orders/confirm-payment";
+import { WEBHOOK_AUDIT_OUTCOME } from "@/lib/orders/payment-webhook-audit";
 import { parseInfinitePayWebhookPayload } from "@/lib/payments/parse-infinitepay-webhook";
 import { readWebhookJsonBody } from "@/lib/payments/read-webhook-json-body";
+import {
+  infinitePayOrderNsuCandidates,
+  verifyInfinitePayPaymentWithApi,
+} from "@/lib/payments/verify-infinitepay-payment";
+
+function retryable(error: string): NextResponse {
+  return NextResponse.json({ ok: false, error }, { status: 400 });
+}
 
 /** InfinitePay pode chamar POST (corpo JSON), GET (query string) ou form conforme ambiente. */
 async function respondInfinitePayWebhook(
@@ -24,6 +36,7 @@ async function respondInfinitePayWebhook(
   const parsed = parseInfinitePayWebhookPayload(body);
   const orderNsu = parsed?.orderNsu?.trim() ?? "";
   const invoiceSlug = parsed?.invoiceSlug?.trim() ?? "";
+  const transactionNsu = parsed?.transactionNsu?.trim() ?? "";
 
   if (!orderNsu && !invoiceSlug) {
     if (process.env.NODE_ENV === "development") {
@@ -39,35 +52,66 @@ async function respondInfinitePayWebhook(
     );
   }
 
-  if (process.env.NODE_ENV === "development") {
-    console.info("[webhook infinitepay]", {
-      orderNsu: orderNsu ? `${orderNsu.slice(0, 12)}…` : "(slug only)",
-      invoiceSlug: invoiceSlug ? `${invoiceSlug.slice(0, 8)}…` : "",
-      hasTransaction: Boolean(parsed?.transactionNsu?.trim()),
+  if (!transactionNsu) {
+    console.warn("[webhook infinitepay] sem transaction_nsu");
+    return retryable("missing transaction_nsu");
+  }
+
+  const attempt = await lookupInfinitePayAttempt({
+    orderNsu: orderNsu || null,
+    invoiceSlug: invoiceSlug || null,
+  });
+  if (!attempt) {
+    console.warn("[webhook infinitepay] tentativa não encontrada", {
+      orderNsu: orderNsu || null,
+      invoiceSlug: invoiceSlug || null,
     });
+    return retryable("payment attempt not found");
+  }
+
+  const verified = await verifyInfinitePayPaymentWithApi({
+    orderNsuCandidates: infinitePayOrderNsuCandidates({
+      orderNsu,
+      orderId: attempt.orderId,
+      attemptNumber: attempt.attemptNumber,
+    }),
+    transactionNsu,
+    references: [invoiceSlug, attempt.gatewayReference],
+    expectedAmountBRL: attempt.amount,
+  });
+
+  if (!verified.ok) {
+    console.warn("[webhook infinitepay] payment_check falhou", verified.reason);
+    return retryable(verified.reason);
   }
 
   try {
     const result = await confirmPaymentFromInfinitePay({
-      orderNsu: orderNsu || null,
-      invoiceSlug: invoiceSlug || null,
-      transactionNsu: parsed?.transactionNsu?.trim() || null,
-      captureMethod: parsed?.captureMethod?.trim() || null,
+      orderNsu: verified.orderNsu,
+      invoiceSlug: invoiceSlug || verified.reference,
+      transactionNsu,
+      captureMethod:
+        parsed?.captureMethod?.trim() || verified.check.captureMethod || null,
       source: "webhook",
       payload: body,
     });
-    if (process.env.NODE_ENV === "development" && !result.updated) {
+    if (
+      result.updated ||
+      result.outcome === WEBHOOK_AUDIT_OUTCOME.IGNORED_ALREADY_PAID
+    ) {
+      return NextResponse.json({ ok: true, matched: true });
+    }
+    if (process.env.NODE_ENV === "development") {
       console.info(
         "[webhook infinitepay] pagamento não confirmado:",
         result.outcome
       );
     }
+    return retryable(result.outcome);
   } catch (e) {
     console.error("[webhook infinitepay]", e);
     return NextResponse.json({ error: "server" }, { status: 500 });
   }
-
-  return NextResponse.json({ ok: true });
 }
 
 export async function POST(request: NextRequest) {

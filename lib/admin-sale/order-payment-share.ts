@@ -3,6 +3,7 @@ import {
   buildPaymentPagePath,
   ensureOrderPaymentToken,
 } from "@/lib/admin-sale/payment-page";
+import { isCheckoutPaymentLinkWithinDeadline } from "@/lib/admin-sale/payment-link-expiry";
 import {
   ORDER_STATUS,
   PAYMENT_ATTEMPT_STATUS,
@@ -29,6 +30,7 @@ type OrderShareSource = {
   paymentChannel: string | null;
   paymentToken: string | null;
   paymentTokenExpiresAt?: Date | string | null;
+  expiresAt?: Date | string | null;
   items?: { paymentStatus?: string | null }[];
 };
 
@@ -38,8 +40,24 @@ function hasUnpaidItems(order: OrderShareSource): boolean {
   );
 }
 
+function isShareablePaymentSource(source: string | null | undefined): boolean {
+  return (
+    source === OrderSource.ADMIN_SALE ||
+    source === OrderSource.CHECKOUT ||
+    source == null
+  );
+}
+
 function needsPaymentShare(order: OrderShareSource): boolean {
-  if (order.orderSource !== OrderSource.ADMIN_SALE) return false;
+  if (!isShareablePaymentSource(order.orderSource)) return false;
+  if (
+    !isCheckoutPaymentLinkWithinDeadline({
+      orderSource: order.orderSource,
+      expiresAt: order.expiresAt,
+    })
+  ) {
+    return false;
+  }
   if (order.status === ORDER_STATUS.CANCELLED) return false;
   if (order.status === ORDER_STATUS.EXPIRED) return false;
   if (order.paidAt && !hasUnpaidItems(order)) return false;
@@ -170,8 +188,12 @@ export async function attachOrderPaymentShare<T extends OrderShareSource>(
       }
     }
 
-    // Sem URL reutilizável: regenera link na InfinitePay.
-    const missingCardIds = cardOrderIds.filter((id) => !cardShareById.has(id));
+    // Sem URL reutilizável: regenera só venda avulsa (checkout reusa a tentativa).
+    const missingCardIds = cardOrderIds.filter((id) => {
+      if (cardShareById.has(id)) return false;
+      const order = cardOrders.find((row) => row.id === id);
+      return order?.orderSource === OrderSource.ADMIN_SALE;
+    });
     await Promise.all(
       missingCardIds.map(async (orderId) => {
         try {

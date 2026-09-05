@@ -3,11 +3,11 @@
 import { confirmPaymentFromInfinitePay } from "@/lib/orders/confirm-payment";
 import { getActivePaymentAttempt } from "@/lib/orders/get-active-payment-attempt";
 import { PAYMENT_GATEWAY } from "@/lib/orders/constants";
+import { expandInfinitePayPaymentReferences } from "@/lib/payments/infinitepay";
 import {
-  buildInfinitePayOrderNsu,
-  expandInfinitePayPaymentReferences,
-  infinitePayPaymentCheckWithFallback,
-} from "@/lib/payments/infinitepay";
+  infinitePayOrderNsuCandidates,
+  verifyInfinitePayPaymentWithApi,
+} from "@/lib/payments/verify-infinitepay-payment";
 import { prisma } from "@/lib/prisma";
 
 function pickParam(
@@ -64,30 +64,22 @@ export async function syncOrderPaymentFromReturn(
     orderRow?.infinitePayInvoiceSlug,
   ]);
 
-  const orderNsuCandidates = [
-    attempt?.attemptNumber != null
-      ? buildInfinitePayOrderNsu(orderId, attempt.attemptNumber)
-      : null,
-    orderId,
-  ].filter((value): value is string => Boolean(value));
-
-  let verified: Awaited<
-    ReturnType<typeof infinitePayPaymentCheckWithFallback>
-  > = null;
-  let matchedOrderNsu = orderId;
-  for (const orderNsu of orderNsuCandidates) {
-    verified = await infinitePayPaymentCheckWithFallback({
-      orderNsu,
-      transactionNsu,
-      references,
-    });
-    if (verified) {
-      matchedOrderNsu = orderNsu;
-      break;
-    }
+  if (!attempt || attempt.gateway !== PAYMENT_GATEWAY.INFINITEPAY) {
+    return { confirmed: false };
   }
 
-  if (!verified) {
+  const verified = await verifyInfinitePayPaymentWithApi({
+    orderNsuCandidates: infinitePayOrderNsuCandidates({
+      orderNsu: pickParam(searchParams, ["order_nsu", "orderNsu"]),
+      orderId,
+      attemptNumber: attempt.attemptNumber,
+    }),
+    transactionNsu,
+    references,
+    expectedAmountBRL: attempt.amount,
+  });
+
+  if (!verified.ok) {
     return { confirmed: false };
   }
 
@@ -97,7 +89,7 @@ export async function syncOrderPaymentFromReturn(
       : verified.reference;
 
   const result = await confirmPaymentFromInfinitePay({
-    orderNsu: matchedOrderNsu,
+    orderNsu: verified.orderNsu,
     invoiceSlug,
     transactionNsu,
     captureMethod: verified.check.captureMethod ?? undefined,

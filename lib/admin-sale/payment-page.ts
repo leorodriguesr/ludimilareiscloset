@@ -1,5 +1,6 @@
 import { randomBytes } from "crypto";
 import { OrderSource } from "@/app/generated/prisma/client";
+import { isCheckoutPaymentLinkWithinDeadline } from "@/lib/admin-sale/payment-link-expiry";
 import { ORDER_STATUS, PAYMENT_METHOD } from "@/lib/orders/constants";
 import { prisma } from "@/lib/prisma";
 import { getAppBaseUrl } from "@/lib/site-url";
@@ -25,7 +26,11 @@ export function buildPaymentPagePath(token: string): string {
   return `/venda-avulsa/pagar/${token}`;
 }
 
-/** Garante token de pagamento para venda avulsa PIX pendente. */
+function acceptsPaymentPageToken(source: string | null | undefined): boolean {
+  return source === OrderSource.ADMIN_SALE || source === OrderSource.CHECKOUT;
+}
+
+/** Garante token de pagamento para PIX pendente (venda avulsa ou checkout). */
 export async function ensureOrderPaymentToken(
   orderId: string
 ): Promise<{ token: string; paymentUrl: string; paymentPath: string } | null> {
@@ -37,13 +42,22 @@ export async function ensureOrderPaymentToken(
       status: true,
       paymentMethod: true,
       paidAt: true,
+      expiresAt: true,
       paymentToken: true,
       paymentTokenExpiresAt: true,
     },
   });
 
   if (!order) return null;
-  if (order.orderSource !== OrderSource.ADMIN_SALE) return null;
+  if (!acceptsPaymentPageToken(order.orderSource)) return null;
+  if (
+    !isCheckoutPaymentLinkWithinDeadline({
+      orderSource: order.orderSource,
+      expiresAt: order.expiresAt,
+    })
+  ) {
+    return null;
+  }
   if (order.paymentMethod !== PAYMENT_METHOD.PIX) return null;
   if (
     order.status === ORDER_STATUS.CANCELLED ||
@@ -100,12 +114,14 @@ export async function validatePaymentToken(token: string): Promise<
   const order = await prisma.order.findFirst({
     where: {
       paymentToken: token,
-      orderSource: OrderSource.ADMIN_SALE,
+      orderSource: { in: [OrderSource.ADMIN_SALE, OrderSource.CHECKOUT] },
     },
     select: {
       id: true,
+      orderSource: true,
       status: true,
       paidAt: true,
+      expiresAt: true,
       paymentMethod: true,
       paymentTokenExpiresAt: true,
     },
@@ -120,6 +136,15 @@ export async function validatePaymentToken(token: string): Promise<
     order.paymentTokenExpiresAt < new Date()
   ) {
     return { ok: false, error: "Este link expirou. Solicite um novo ao vendedor." };
+  }
+
+  if (
+    !isCheckoutPaymentLinkWithinDeadline({
+      orderSource: order.orderSource,
+      expiresAt: order.expiresAt,
+    })
+  ) {
+    return { ok: false, error: "Este pedido expirou." };
   }
 
   if (order.status === ORDER_STATUS.CANCELLED) {

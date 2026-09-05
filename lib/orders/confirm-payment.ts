@@ -66,6 +66,7 @@ type AttemptWithOrder = {
   purpose: string;
   status: string;
   amount: number;
+  attemptNumber: number;
   gateway: string;
   gatewayReference: string | null;
   paymentMethod: string;
@@ -816,14 +817,10 @@ export async function confirmPaymentFromMercadoPago(input: {
   });
 }
 
-export async function confirmPaymentFromInfinitePay(input: {
+export async function lookupInfinitePayAttempt(input: {
   orderNsu?: string | null;
   invoiceSlug?: string | null;
-  transactionNsu?: string | null;
-  captureMethod?: string | null;
-  source: ConfirmPaymentSource;
-  payload?: unknown;
-}): Promise<ConfirmPaymentResult> {
+}): Promise<AttemptWithOrder | null> {
   const slug = (input.invoiceSlug ?? "").trim();
   const orderNsu = (input.orderNsu ?? "").trim();
 
@@ -891,6 +888,24 @@ export async function confirmPaymentFromInfinitePay(input: {
       });
     }
   }
+
+  return attempt;
+}
+
+export async function confirmPaymentFromInfinitePay(input: {
+  orderNsu?: string | null;
+  invoiceSlug?: string | null;
+  transactionNsu?: string | null;
+  captureMethod?: string | null;
+  source: ConfirmPaymentSource;
+  payload?: unknown;
+}): Promise<ConfirmPaymentResult> {
+  const slug = (input.invoiceSlug ?? "").trim();
+  const orderNsu = (input.orderNsu ?? "").trim();
+  const attempt = await lookupInfinitePayAttempt({
+    orderNsu,
+    invoiceSlug: slug,
+  });
 
   if (!attempt) {
     const { orderId } = orderNsu
