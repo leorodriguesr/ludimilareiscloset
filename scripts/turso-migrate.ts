@@ -54,7 +54,13 @@ function splitSqlStatements(sql: string): string[] {
         .join("\n")
         .trim()
     )
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((statement) => !isTransactionControl(statement));
+}
+
+/** Turso HTTP auto-commit por statement; BEGIN/COMMIT quebram o apply. */
+function isTransactionControl(statement: string): boolean {
+  return /^(BEGIN|COMMIT|ROLLBACK|END)(\s|$)/i.test(statement);
 }
 
 function isIgnorableAlreadyAppliedError(message: string): boolean {

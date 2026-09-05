@@ -1,6 +1,6 @@
 import { cartLineKey } from "@/lib/cart/pure";
 import type { CartPieceSelection } from "@/lib/cart/types";
-import { CHECKOUT_SHIPPING_AMOUNT_BRL } from "@/lib/config/checkout-shipping-charge";
+import { resolveCheckoutShippingCharge } from "@/lib/config/checkout-shipping-charge";
 import type { PaymentMethod } from "@/lib/orders/constants";
 import { ORDER_STATUS } from "@/lib/orders/constants";
 import {
@@ -243,7 +243,7 @@ function buildPreparedFromStoredShipping(input: {
   return {
     mergedLines: input.mergedLines,
     destCep: input.destCep,
-    shippingAmount: CHECKOUT_SHIPPING_AMOUNT_BRL,
+    shippingAmount: Math.round(quotedPrice * 100) / 100,
     shippingQuotedPrice: Math.round(quotedPrice * 100) / 100,
     shippingDeliveryDaysMin: input.stored.shippingDeliveryDaysMin,
     shippingDeliveryDaysMax: input.stored.shippingDeliveryDaysMax,
@@ -261,6 +261,45 @@ function buildPreparedFromStoredShipping(input: {
   };
 }
 
+async function withChargedShipping(
+  prepared: PreparedOrderRecalculation,
+  options: Array<{ id: string; price: number }>
+): Promise<PreparedOrderRecalculation> {
+  const [settings, products] = await Promise.all([
+    prisma.storeSettings.findUnique({
+      where: { id: "default" },
+      select: {
+        freeShippingEnabled: true,
+        freeShippingType: true,
+        freeShippingMinValue: true,
+      },
+    }),
+    prisma.product.findMany({
+      where: {
+        id: { in: [...new Set(prepared.mergedLines.map((line) => line.productId))] },
+      },
+      select: { id: true, price: true },
+    }),
+  ]);
+  const priceById = new Map(products.map((product) => [product.id, product.price]));
+  let catalogSubtotal = 0;
+  for (const line of prepared.mergedLines) {
+    const price = priceById.get(line.productId);
+    if (price == null) continue;
+    catalogSubtotal += price * line.quantity;
+  }
+  return {
+    ...prepared,
+    shippingAmount: resolveCheckoutShippingCharge({
+      quotedPrice: prepared.shippingQuotedPrice,
+      chosenOptionId: prepared.chosenOption.id,
+      options,
+      cartSubtotal: Math.round(catalogSubtotal * 100) / 100,
+      settings,
+    }),
+  };
+}
+
 export async function prepareOrderRecalculation(
   input: PrepareRecalculationInput
 ): Promise<PreparedOrderRecalculation> {
@@ -272,11 +311,12 @@ export async function prepareOrderRecalculation(
   }
 
   if (canReuseStoredShipping(mergedLines, destCep, input.shipping, input.storedOrder)) {
-    return buildPreparedFromStoredShipping({
+    const prepared = buildPreparedFromStoredShipping({
       mergedLines,
       destCep,
       stored: input.storedOrder,
     });
+    return withChargedShipping(prepared, [prepared.chosenOption]);
   }
 
   const cartLinesForQuote = mergedLines.map((l) => ({
@@ -292,11 +332,12 @@ export async function prepareOrderRecalculation(
       console.warn(
         "[prepareOrderRecalculation] SuperFrete indisponível — reutilizando frete salvo na Order"
       );
-      return buildPreparedFromStoredShipping({
+      const prepared = buildPreparedFromStoredShipping({
         mergedLines,
         destCep,
         stored: input.storedOrder,
       });
+      return withChargedShipping(prepared, [prepared.chosenOption]);
     }
     console.error("[prepareOrderRecalculation] frete", e);
     throw new OrderCreateError(
@@ -322,10 +363,10 @@ export async function prepareOrderRecalculation(
     ? JSON.stringify(chosen.packages)
     : null;
 
-  return {
+  return withChargedShipping({
     mergedLines,
     destCep,
-    shippingAmount: CHECKOUT_SHIPPING_AMOUNT_BRL,
+    shippingAmount: Math.round(chosen.price * 100) / 100,
     shippingQuotedPrice: Math.round(chosen.price * 100) / 100,
     shippingDeliveryDaysMin:
       chosen.deliveryDaysMin > 0 ? Math.floor(chosen.deliveryDaysMin) : null,
@@ -341,7 +382,7 @@ export async function prepareOrderRecalculation(
     packageLengthCm: ideal?.lengthCm ?? null,
     packageWeightKg: ideal?.weightKg ?? null,
     chosenOption: chosen,
-  };
+  }, quoteResult.options);
 }
 
 export type ResolvedOrderLine = {

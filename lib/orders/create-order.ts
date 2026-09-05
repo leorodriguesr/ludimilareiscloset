@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { quoteShippingForCartLines } from "@/lib/shipping/quote-cart";
 import { parseSuperfreteServiceId } from "@/lib/shipping/service-id";
 import { normalizePostalCode } from "@/lib/shipping/superfrete";
-import { CHECKOUT_SHIPPING_AMOUNT_BRL } from "@/lib/config/checkout-shipping-charge";
+import { resolveCheckoutShippingCharge } from "@/lib/config/checkout-shipping-charge";
 import { resolveShippingProviderFromQuote } from "@/lib/shipping/providers";
 
 export type CheckoutLineInput = {
@@ -121,7 +121,6 @@ export async function createOrderFromCheckout(input: {
     );
   }
 
-  const shippingAmount = CHECKOUT_SHIPPING_AMOUNT_BRL;
   const shippingQuotedPrice = Math.round(chosen.price * 100) / 100;
   const shippingDeliveryDaysMin =
     chosen.deliveryDaysMin > 0 ? Math.floor(chosen.deliveryDaysMin) : null;
@@ -150,6 +149,7 @@ export async function createOrderFromCheckout(input: {
       pieceSelections?: CartPieceSelection[];
     }[] = [];
     let subtotal = 0;
+    let catalogSubtotal = 0;
 
     const usePix = input.paymentMethod === "pix";
 
@@ -204,10 +204,26 @@ export async function createOrderFromCheckout(input: {
           ? { pieceSelections: line.pieceSelections }
           : {}),
       });
+      catalogSubtotal += product.price * line.quantity;
       subtotal += linePrice * line.quantity;
     }
 
     subtotal = Math.round(subtotal * 100) / 100;
+    const settings = await tx.storeSettings.findUnique({
+      where: { id: "default" },
+      select: {
+        freeShippingEnabled: true,
+        freeShippingType: true,
+        freeShippingMinValue: true,
+      },
+    });
+    const shippingAmount = resolveCheckoutShippingCharge({
+      quotedPrice: shippingQuotedPrice,
+      chosenOptionId: input.shipping.optionId,
+      options: quoteResult.options,
+      cartSubtotal: Math.round(catalogSubtotal * 100) / 100,
+      settings,
+    });
     const total = Math.round((subtotal + shippingAmount) * 100) / 100;
 
     // Número sequencial legível: MAX atual + 1 (seguro dentro da transação)

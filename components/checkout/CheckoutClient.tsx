@@ -293,9 +293,8 @@ function DesktopSummary({
     ? checkFreeShipping(settings, subtotal).isFree
     : false;
   const showShippingAsFree = Boolean(shipping.optionIsFree);
-
-  // Frete não é cobrado no pagamento — R$0 sempre para totais
-  const effectiveShipping = 0;
+  const effectiveShipping =
+    deliveryDone && !showShippingAsFree ? shipping.optionPrice : 0;
 
   // Max installments across all items (fallback 6)
   const maxInstallments = lines.reduce((acc, l) => {
@@ -939,8 +938,7 @@ function ConfirmStep({
     ? checkFreeShipping(settings, subtotal).isFree
     : false;
   const showShippingAsFree = Boolean(shipping.optionIsFree);
-  // Frete não é cobrado no pagamento
-  const effectiveShipping = 0;
+  const effectiveShipping = showShippingAsFree ? 0 : shipping.optionPrice;
   const pixTotal = subtotalPix + effectiveShipping;
   const cardTotal = subtotal + effectiveShipping;
   const cardInstallmentValue = installmentValueEqualParts(cardTotal, maxInstallments);
