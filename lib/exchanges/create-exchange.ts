@@ -606,6 +606,7 @@ export async function createExchange(input: CreateExchangeInput) {
     packageWidthCm: s.packageWidthCm,
     packageLengthCm: s.packageLengthCm,
     packageWeightKg: s.packageWeightKg,
+    ...(s.type === "OUTBOUND" ? { shippingStatus: "to_pack" } : {}),
   }));
 
   const created = await prisma.$transaction(async (tx) => {

@@ -18,7 +18,6 @@ import { isCancelledProviderShipmentStatus } from "@/lib/shipping/service-id";
 import { canManuallyMarkCarrierAsShipped } from "@/lib/fulfillment/shipping-status-policy";
 import { shippingTrackingUrl } from "@/lib/shipping/tracking-url";
 import type { NormalizedShippingOption } from "@/lib/shipping/types";
-import { ExchangeShipmentQueue } from "@/components/admin/ExchangeShipmentQueue";
 import {
   isPendingAdminSaleCustomer,
   orderCustomerDisplayName,
@@ -67,6 +66,9 @@ type ShipmentItem = {
 
 type ShipmentOrder = {
   id: string;
+  shipmentKind?: "order" | "exchange";
+  exchangeId?: string;
+  exchangeNumber?: number | null;
   orderNumber: number | null;
   status: string;
   email: string;
@@ -251,7 +253,22 @@ function packingListPieceDetail(
     .join(" · ");
 }
 
+function isExchangeShipment(order: Pick<ShipmentOrder, "shipmentKind">) {
+  return order.shipmentKind === "exchange";
+}
+
+function shipmentStatusPatchUrl(order: Pick<ShipmentOrder, "id" | "shipmentKind">) {
+  return isExchangeShipment(order)
+    ? `/api/admin/exchange-shipments/${order.id}`
+    : `/api/admin/orders/${order.id}`;
+}
+
 function orderNumberLabel(order: ShipmentOrder) {
+  if (isExchangeShipment(order)) {
+    const number =
+      order.exchangeNumber ?? order.orderNumber;
+    return number != null ? `#${number}` : order.id.slice(0, 8);
+  }
   return order.orderNumber != null ? `#${order.orderNumber}` : order.id.slice(0, 8);
 }
 
@@ -411,6 +428,8 @@ function shipmentMatchesCustomerSearch(order: ShipmentOrder, query: string): boo
     order.recipientName ?? "",
     orderNumberLabel(order),
     order.orderNumber != null ? String(order.orderNumber) : "",
+    order.exchangeNumber != null ? String(order.exchangeNumber) : "",
+    isExchangeShipment(order) ? "troca" : "",
     order.trackingCode ?? "",
   ]
     .map(normalizeSearchText)
@@ -850,6 +869,7 @@ function PackingListPrint({
                 <tr className={`align-top${noteBits.length > 0 ? " packing-row-with-notes" : ""}`}>
                   <td className="border border-black px-1.5 py-2 text-center font-mono text-xs font-semibold">
                     {orderNumberLabel(order)}
+                    {isExchangeShipment(order) ? " TROCA" : ""}
                   </td>
                   <td className="border border-black px-1.5 py-2 font-semibold">
                     {packingListCustomerName(order)}
@@ -979,6 +999,7 @@ function PackingSlipModal({
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-stone-900">
               Pedido {orderNumberLabel(order)}
+              {isExchangeShipment(order) ? " TROCA" : ""}
             </p>
           </div>
           <button
@@ -1287,7 +1308,9 @@ function ChangeShippingModal({
         <div className="border-b border-stone-100 px-5 py-4">
           <h3 className="text-base font-semibold text-stone-900">Alterar modalidade de frete</h3>
           <p className="mt-1 text-sm text-stone-500">
-            Pedido {orderNumberLabel(order)} · {orderCustomerDisplayName(order)}
+              Pedido {orderNumberLabel(order)}
+              {isExchangeShipment(order) ? " TROCA" : ""}
+              · {orderCustomerDisplayName(order)}
           </p>
         </div>
 
@@ -1407,6 +1430,10 @@ function useShipmentActions(
   ]);
 
   async function pollTrackingUntilReady(attemptsLeft = 6) {
+    if (isExchangeShipment(order)) {
+      setAwaitingTracking(false);
+      return;
+    }
     if (attemptsLeft <= 0) {
       setAwaitingTracking(false);
       return;
@@ -1482,7 +1509,31 @@ function useShipmentActions(
         status?: string;
         shippingStatus?: string;
         superfreteShipmentId?: string | null;
+        exchange?: {
+          shippings?: Array<{
+            id: string;
+            type: string;
+            trackingCode?: string | null;
+            labelUrl?: string | null;
+            superfreteShipmentId?: string | null;
+            superfreteStatus?: string | null;
+            shippingStatus?: string;
+          }>;
+        };
       };
+      if (isExchangeShipment(order) && data.exchange?.shippings) {
+        const shipping =
+          data.exchange.shippings.find((row) => row.id === order.id) ??
+          data.exchange.shippings.find((row) => row.type === "OUTBOUND");
+        if (shipping) {
+          data.labelUrl = shipping.labelUrl ?? data.labelUrl;
+          data.shipmentId = shipping.superfreteShipmentId ?? data.shipmentId;
+          data.trackingCode = shipping.trackingCode ?? data.trackingCode;
+          data.superfreteStatus = shipping.superfreteStatus ?? data.superfreteStatus;
+          data.superfreteShipmentId = shipping.superfreteShipmentId ?? data.superfreteShipmentId;
+          data.shippingStatus = shipping.shippingStatus ?? data.shippingStatus;
+        }
+      }
       if (!res.ok) {
         setError(data.error ?? "Erro na operação.");
         return false;
@@ -1536,8 +1587,11 @@ function useShipmentActions(
           patch.superfreteStatus = data.superfreteStatus ?? data.status ?? null;
         }
         patch.labelAutoGenerateError = null;
-        if (!paymentPending && data.shipmentId) {
+        if (!paymentPending && data.shipmentId && !isExchangeShipment(order)) {
           patch.shippingStatus = "packed";
+        }
+        if (!paymentPending && isExchangeShipment(order)) {
+          patch.shippingStatus = data.shippingStatus || "to_pack";
         }
       }
       if (key === "sync") {
@@ -1572,7 +1626,11 @@ function useShipmentActions(
       }
 
       if (opts?.openPdf !== false && data.shipmentId && !paymentPending) {
-        window.open(`/api/admin/orders/${order.id}/label/pdf`, "_blank");
+        if (isExchangeShipment(order) && data.labelUrl) {
+          window.open(data.labelUrl, "_blank");
+        } else if (!isExchangeShipment(order)) {
+          window.open(`/api/admin/orders/${order.id}/label/pdf`, "_blank");
+        }
       }
       if (key === "label" && !tracking && !paymentPending) {
         void pollTrackingUntilReady();
@@ -1616,7 +1674,12 @@ function shipmentCapabilities(order: ShipmentOrder, trackingCode?: string | null
     isArranged,
     isSaleCancelled,
     canSelectForBulk: !order.labelUrl && !isSaleCancelled && !isArranged && !hasUnpaidItems,
-    canChangeShipping: !order.labelUrl && !order.superfreteShipmentId && !isSaleCancelled && !isArranged,
+    canChangeShipping:
+      !isExchangeShipment(order) &&
+      !order.labelUrl &&
+      !order.superfreteShipmentId &&
+      !isSaleCancelled &&
+      !isArranged,
     canMarkPacked: isPaid && !isSaleCancelled && !hasUnpaidItems && order.shippingStatus === "to_pack",
     canMarkShipped: canManuallyMarkCarrierAsShipped({
       fulfillmentType: order.fulfillmentType,
@@ -1753,7 +1816,7 @@ function ShipmentRowActionsMenu({
         onClick: () =>
           void runAction(
             "pack",
-            `/api/admin/orders/${order.id}`,
+            shipmentStatusPatchUrl(order),
             "PATCH",
             { shippingStatus: "packed" },
             { openPdf: false }
@@ -1771,7 +1834,7 @@ function ShipmentRowActionsMenu({
         onClick: () =>
           void runAction(
             "ship",
-            `/api/admin/orders/${order.id}`,
+            shipmentStatusPatchUrl(order),
             "PATCH",
             { shippingStatus: "shipped" },
             { openPdf: false }
@@ -1802,9 +1865,17 @@ function ShipmentRowActionsMenu({
           </svg>
         ),
         onClick: () =>
-          void runAction("label", `/api/admin/orders/${order.id}/label`, "POST", undefined, {
-            openPdf: true,
-          }),
+          void runAction(
+            "label",
+            isExchangeShipment(order)
+              ? `/api/admin/exchanges/${order.exchangeId}/labels`
+              : `/api/admin/orders/${order.id}/label`,
+            "POST",
+            isExchangeShipment(order)
+              ? { type: "OUTBOUND", serviceId: order.shippingServiceId }
+              : undefined,
+            { openPdf: true }
+          ),
       });
     }
 
@@ -1819,6 +1890,10 @@ function ShipmentRowActionsMenu({
           </svg>
         ),
         onClick: () => {
+          if (isExchangeShipment(order) && order.labelUrl) {
+            window.open(order.labelUrl, "_blank");
+            return;
+          }
           window.open(`/api/admin/orders/${order.id}/label/pdf`, "_blank");
         },
       });
@@ -1838,12 +1913,16 @@ function ShipmentRowActionsMenu({
         onClick: () =>
           void runAction(
             "arranged-delivered",
-            `/api/admin/sales/${order.id}/mark-shipped`
+            isExchangeShipment(order)
+              ? shipmentStatusPatchUrl(order)
+              : `/api/admin/sales/${order.id}/mark-shipped`,
+            isExchangeShipment(order) ? "PATCH" : "POST",
+            isExchangeShipment(order) ? { shippingStatus: "delivered" } : undefined
           ),
       });
     }
 
-    if (order.superfreteShipmentId) {
+    if (order.superfreteShipmentId && !isExchangeShipment(order)) {
       // Reimprimir etiqueta: oculto no menu — "Baixar etiqueta" já renova URL expirada via /label/pdf.
       // items.push({
       //   id: "print",
@@ -1908,8 +1987,9 @@ function ShipmentRowActionsMenu({
     caps.canMarkShipped,
     onChangeShipping,
     onViewPacking,
-    order.id,
-    order.labelUrl,
+    order.exchangeId,
+    order.shippingServiceId,
+    order.shipmentKind,
     order.shippingProvider,
     order.shippingStatus,
     order.superfreteShipmentId,
@@ -2044,6 +2124,11 @@ function ShipmentRow({
         <div className="flex flex-col gap-0.5">
           <div className="flex items-center gap-1.5">
             <span className={`font-mono ${TABLE_CELL_PRIMARY}`}>{orderNumberLabel(order)}</span>
+            {isExchangeShipment(order) ? (
+              <span className="text-xs font-semibold uppercase tracking-wide text-sky-800">
+                TROCA
+              </span>
+            ) : null}
             {order.orderSource === "ADMIN_SALE" ? (
               <span className="text-xs font-normal text-stone-600">Avulsa</span>
             ) : null}
@@ -2181,13 +2266,8 @@ type MelhorEnvioStatus = {
   error?: string;
 };
 
-export function ShippingManager({
-  canViewExchangeShipments,
-}: {
-  canViewExchangeShipments?: boolean;
-} = {}) {
+export function ShippingManager() {
   const { isAdmin } = useAuth();
-  const showExchangeShipments = canViewExchangeShipments ?? isAdmin;
   const [orders, setOrders] = useState<ShipmentOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterKey | null>(null);
@@ -2800,8 +2880,6 @@ export function ShippingManager({
         </div>
       ) : null}
 
-      {showExchangeShipments ? <ExchangeShipmentQueue filter={filter} /> : null}
-
       {loading ? (
         <div className="flex items-center gap-2.5 py-10 text-sm text-stone-400">
           <span className="h-4 w-4 animate-spin rounded-full border-2 border-stone-200 border-t-stone-700" />
@@ -2904,7 +2982,7 @@ export function ShippingManager({
               const orderId = packingModalOrder.id;
               setPackingBusy(true);
               try {
-                const res = await fetch(`/api/admin/orders/${orderId}`, {
+                const res = await fetch(shipmentStatusPatchUrl(packingModalOrder), {
                   method: "PATCH",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ shippingStatus: "packed" }),
@@ -2928,7 +3006,7 @@ export function ShippingManager({
               const orderId = packingModalOrder.id;
               setPackingBusy(true);
               try {
-                const res = await fetch(`/api/admin/orders/${orderId}`, {
+                const res = await fetch(shipmentStatusPatchUrl(packingModalOrder), {
                   method: "PATCH",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ shippingStatus: "shipped" }),

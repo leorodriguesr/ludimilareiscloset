@@ -17,6 +17,12 @@ import {
   parseAdminListPage,
   searchDigits,
 } from "@/lib/admin/list-pagination";
+import {
+  exchangeOutboundMatchesFilter,
+  exchangeOutboundMatchesSearch,
+  listExchangeOutboundShipmentOrders,
+  sliceMergedShipmentPage,
+} from "@/lib/exchanges/list-outbound-shipments";
 
 const BASE_WHERE: Prisma.OrderWhereInput = {
   paidAt: { not: null },
@@ -72,24 +78,52 @@ export async function GET(request: NextRequest) {
     const countFor = (key: string | null) =>
       prisma.order.count({ where: andWhere([filterWhere(key), search]) });
 
-    const [total, allTotal, needsLabel, toPack, packed, shipped, delivered, cancelled] =
-      await Promise.all([
-        prisma.order.count({ where }),
-        prisma.order.count({ where: BASE_WHERE }),
-        countFor("needs_label"),
-        countFor("to_pack"),
-        countFor("packed"),
-        countFor("shipped"),
-        countFor("delivered"),
-        countFor("cancelled"),
-      ]);
+    const allExchanges = await listExchangeOutboundShipmentOrders();
+    const matchingExchanges = (key: string | null) =>
+      allExchanges.filter(
+        (row) =>
+          exchangeOutboundMatchesFilter({
+            shippingStatus: row.shippingStatus,
+            labelUrl: row.labelUrl,
+            fulfillmentType: row.fulfillmentType,
+            exchangeStatus: row.exchangeStatus,
+            filter: key,
+          }) && exchangeOutboundMatchesSearch(row, q)
+      );
 
+    const [
+      orderTotal,
+      orderAllTotal,
+      needsLabel,
+      toPack,
+      packed,
+      shipped,
+      delivered,
+      cancelled,
+    ] = await Promise.all([
+      prisma.order.count({ where }),
+      prisma.order.count({ where: BASE_WHERE }),
+      countFor("needs_label"),
+      countFor("to_pack"),
+      countFor("packed"),
+      countFor("shipped"),
+      countFor("delivered"),
+      countFor("cancelled"),
+    ]);
+
+    const pageExchanges = matchingExchanges(filter);
+    const total = orderTotal + pageExchanges.length;
+    const allTotal =
+      orderAllTotal +
+      allExchanges.filter((row) => row.exchangeStatus !== "CANCELLED").length;
     const safePage = clampAdminListPage(page, total, limit);
+    const offset = (safePage - 1) * limit;
+
     const orders = await prisma.order.findMany({
       where,
       orderBy: { paidAt: "desc" },
-      skip: (safePage - 1) * limit,
-      take: limit,
+      skip: 0,
+      take: offset + limit,
       select: {
         id: true,
         orderNumber: true,
@@ -143,21 +177,34 @@ export async function GET(request: NextRequest) {
       orders.map((order) => order.id)
     );
     const withAddress = mergeOrderContactAddress(orders, contactAddressById);
-    const enrichedOrders = mergeOrderShippingFields(withAddress, shippingById);
+    const enrichedOrders = mergeOrderShippingFields(withAddress, shippingById).map(
+      (order) => ({
+        ...order,
+        shipmentKind: "order" as const,
+        sortAt: order.paidAt ? new Date(order.paidAt).getTime() : 0,
+      })
+    );
+
+    const pageRows = sliceMergedShipmentPage(
+      enrichedOrders,
+      pageExchanges,
+      offset,
+      limit
+    );
 
     return NextResponse.json({
-      orders: enrichedOrders,
+      orders: pageRows.map(({ sortAt: _sortAt, ...row }) => row),
       total,
       allTotal,
       page: safePage,
       limit,
       counts: {
-        needs_label: needsLabel,
-        to_pack: toPack,
-        packed,
-        shipped,
-        delivered,
-        cancelled,
+        needs_label: needsLabel + matchingExchanges("needs_label").length,
+        to_pack: toPack + matchingExchanges("to_pack").length,
+        packed: packed + matchingExchanges("packed").length,
+        shipped: shipped + matchingExchanges("shipped").length,
+        delivered: delivered + matchingExchanges("delivered").length,
+        cancelled: cancelled + matchingExchanges("cancelled").length,
       },
     });
   } catch (e) {

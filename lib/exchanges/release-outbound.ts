@@ -33,6 +33,15 @@ export async function maybeReleaseOutboundShipping(
   const hasOutbound = exchange.items.some((item) => item.direction === "OUTBOUND");
   if (!hasOutbound) return;
 
+  await tx.exchangeShipping.updateMany({
+    where: {
+      exchangeId,
+      type: "OUTBOUND",
+      shippingStatus: { in: ["pending", "labeled"] },
+    },
+    data: { shippingStatus: "to_pack" },
+  });
+
   if (exchange.status !== ExchangeStatus.READY_OUTBOUND) {
     await tx.exchange.update({
       where: { id: exchangeId },

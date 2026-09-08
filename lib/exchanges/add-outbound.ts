@@ -253,6 +253,7 @@ export async function addExchangeOutbound(input: {
         packageWidthCm: outboundShipping.packageWidthCm,
         packageLengthCm: outboundShipping.packageLengthCm,
         packageWeightKg: outboundShipping.packageWeightKg,
+        shippingStatus: "to_pack",
       },
     });
 

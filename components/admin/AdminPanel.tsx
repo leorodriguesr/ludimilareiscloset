@@ -426,7 +426,7 @@ export function AdminPanel({
 
         {activeSection === "shipping" && (
           <section>
-            <ShippingManager canViewExchangeShipments={role === "ADMIN"} />
+            <ShippingManager />
           </section>
         )}
 

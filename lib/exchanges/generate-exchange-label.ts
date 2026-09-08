@@ -16,6 +16,10 @@ import {
   type LabelParty,
 } from "@/lib/shipping/superfrete-label";
 import {
+  createMelhorEnvioLabelForOrder,
+  fetchMelhorEnvioOrderInfoWithTrackingPoll,
+} from "@/lib/shipping/melhor-envio/label";
+import {
   mapSuperfreteStatusToShippingStatus,
   parseSuperfreteServiceId,
 } from "@/lib/shipping/service-id";
@@ -283,18 +287,23 @@ export async function generateExchangeLabel(input: {
     0
   );
 
+  const labelPayload = {
+    serviceId,
+    from,
+    to,
+    products,
+    volume,
+    insuranceValue,
+    tag: `T${exchange.exchangeNumber ?? exchange.id.slice(0, 6)}-${input.type === "RETURN" ? "R" : "O"}`,
+    orderNumber: exchange.order.orderNumber,
+  };
+
   let result;
   try {
-    result = await createSuperfreteLabelForOrder({
-      serviceId,
-      from,
-      to,
-      products,
-      volume,
-      insuranceValue,
-      tag: `T${exchange.exchangeNumber ?? exchange.id.slice(0, 6)}-${input.type === "RETURN" ? "R" : "O"}`,
-      orderNumber: exchange.order.orderNumber,
-    });
+    result =
+      input.type === "OUTBOUND"
+        ? await createMelhorEnvioLabelForOrder(labelPayload)
+        : await createSuperfreteLabelForOrder(labelPayload);
   } catch (e) {
     if (e instanceof ShippingQuoteError) {
       throw new ExchangeError("SUPERFRETE", e.message);
@@ -308,9 +317,14 @@ export async function generateExchangeLabel(input: {
   let labelUrl = result.labelUrl || null;
 
   try {
-    const info = await fetchSuperfreteOrderInfoWithTrackingPoll(result.shipmentId, {
-      maxWaitMs: 8000,
-    });
+    const info =
+      input.type === "OUTBOUND"
+        ? await fetchMelhorEnvioOrderInfoWithTrackingPoll(result.shipmentId, {
+            maxWaitMs: 8000,
+          })
+        : await fetchSuperfreteOrderInfoWithTrackingPoll(result.shipmentId, {
+            maxWaitMs: 8000,
+          });
     tracking = info.tracking;
     if (info.price != null) cost = info.price;
     superfreteStatus = info.status;
@@ -321,7 +335,11 @@ export async function generateExchangeLabel(input: {
 
   const mapped = mapSuperfreteStatusToShippingStatus(superfreteStatus);
   const shippingStatus =
-    mapped === "shipped" || mapped === "delivered" ? mapped : "labeled";
+    mapped === "shipped" || mapped === "delivered"
+      ? mapped
+      : input.type === "OUTBOUND"
+        ? "to_pack"
+        : "labeled";
 
   const updated = await prisma.$transaction(async (tx) => {
     await tx.exchangeShipping.update({

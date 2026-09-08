@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ExchangeShippingType } from "@/app/generated/prisma/client";
+import { ExchangeError } from "@/lib/exchanges/constants";
+import { generateExchangeLabel } from "@/lib/exchanges/generate-exchange-label";
+import { prisma } from "@/lib/prisma";
 import { generateOrderLabel } from "@/lib/shipping/generate-order-label";
 import { ShippingQuoteError } from "@/lib/shipping/types";
 import { requireAdminApi } from "@/lib/require-admin-api";
@@ -61,6 +65,33 @@ export async function POST(request: NextRequest) {
 
   const results = await runPool(orderIds, CONCURRENCY, async (orderId) => {
     try {
+      const outbound = await prisma.exchangeShipping.findUnique({
+        where: { id: orderId },
+        select: {
+          id: true,
+          type: true,
+          exchangeId: true,
+          shippingServiceId: true,
+        },
+      });
+      if (outbound?.type === ExchangeShippingType.OUTBOUND) {
+        const exchange = await generateExchangeLabel({
+          exchangeId: outbound.exchangeId,
+          type: "OUTBOUND",
+          actorUserId: gate.userId,
+          serviceId: outbound.shippingServiceId,
+        });
+        const shipping =
+          exchange.shippings.find((row) => row.id === outbound.id) ??
+          exchange.shippings.find((row) => row.type === ExchangeShippingType.OUTBOUND);
+        return {
+          orderId,
+          ok: true,
+          tracking: shipping?.trackingCode ?? null,
+          labelUrl: shipping?.labelUrl ?? undefined,
+        } satisfies BulkResult;
+      }
+
       const result = await generateOrderLabel(orderId);
       return {
         orderId,
@@ -70,7 +101,7 @@ export async function POST(request: NextRequest) {
       } satisfies BulkResult;
     } catch (e) {
       const message =
-        e instanceof ShippingQuoteError
+        e instanceof ExchangeError || e instanceof ShippingQuoteError
           ? e.message
           : e instanceof Error
             ? e.message
