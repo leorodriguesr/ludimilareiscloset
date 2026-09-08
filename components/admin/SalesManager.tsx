@@ -27,6 +27,10 @@ import {
 } from "@/lib/admin-sale/customer-display";
 import { isCheckoutPaymentLinkWithinDeadline } from "@/lib/admin-sale/payment-link-expiry";
 import {
+  parseManualPaidAtDate,
+  saoPauloCalendarDate,
+} from "@/lib/admin-sale/parse-manual-paid-at";
+import {
   composeDeliveryNotesFromUserEdit,
   orderDeliveryUserNotes,
   parseArrangedDeliveryMode,
@@ -199,11 +203,13 @@ function orderPayableAmount(order: AdminOrder): number {
   return order.total;
 }
 
-function manualMarkPaidOrderPatch(order: AdminOrder): Partial<AdminOrder> {
+function manualMarkPaidOrderPatch(
+  order: AdminOrder,
+  paidAtIso: string
+): Partial<AdminOrder> {
   const isAddon = Boolean(order.paidAt) && orderHasUnpaidItems(order);
-  const now = new Date().toISOString();
   return {
-    paidAt: order.paidAt ?? now,
+    paidAt: order.paidAt ?? paidAtIso,
     status: "paid",
     paymentChannel: isAddon ? order.paymentChannel : "MANUAL",
     paidTotal: isAddon
@@ -218,6 +224,93 @@ function manualMarkPaidOrderPatch(order: AdminOrder): Partial<AdminOrder> {
     cancelledAt: null,
     ...(isAddon ? {} : { shippingStatus: "to_pack" }),
   };
+}
+
+function ConfirmManualPaymentModal({
+  orderLabel,
+  variant,
+  busy,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  orderLabel: string;
+  variant: "mark" | "addon" | "cancelled";
+  busy: boolean;
+  error: string | null;
+  onClose: () => void;
+  onConfirm: (paidAt: string) => void;
+}) {
+  const today = saoPauloCalendarDate();
+  const [paidAt, setPaidAt] = useState(today);
+
+  const title =
+    variant === "addon"
+      ? "Confirmar pagamento das peças"
+      : variant === "cancelled"
+        ? "Confirmar pagamento"
+        : "Marcar como paga";
+  const hint =
+    variant === "addon"
+      ? `O acréscimo da venda ${orderLabel} entra no caixa na data informada.`
+      : variant === "cancelled"
+        ? `A venda ${orderLabel} volta a ficar ativa. Use a data em que a cliente pagou.`
+        : `A venda ${orderLabel} será marcada como paga na data informada.`;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[120] flex items-end justify-center bg-stone-900/50 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+      <button
+        type="button"
+        aria-label="Fechar"
+        className="absolute inset-0"
+        disabled={busy}
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-paid-title"
+        className="relative z-[1] w-full rounded-t-2xl bg-white p-5 shadow-2xl sm:max-w-md sm:rounded-2xl"
+      >
+        <h2 id="confirm-paid-title" className="text-base font-semibold text-stone-900">
+          {title}
+        </h2>
+        <p className="mt-1 text-sm text-stone-500">{hint}</p>
+        <label className="mt-4 block">
+          <span className="mb-1.5 block text-xs font-medium text-stone-600">
+            Data do pagamento
+          </span>
+          <input
+            type="date"
+            value={paidAt}
+            max={today}
+            onChange={(event) => setPaidAt(event.target.value)}
+            className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+          />
+        </label>
+        {error ? <p className="mt-2 text-xs text-red-600">{error}</p> : null}
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onClose}
+            className="rounded-lg border border-stone-200 px-4 py-2 text-sm font-medium text-stone-600 hover:bg-stone-50 disabled:opacity-50"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onConfirm(paidAt)}
+            className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+          >
+            {busy ? "Confirmando…" : "Confirmar"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
 }
 
 function isInactiveSale(order: AdminOrder): boolean {
@@ -1691,6 +1784,8 @@ function OrderRowActionsMenu({
   const [busy, setBusy] = useState<string | null>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [confirmPaid, setConfirmPaid] = useState<"mark" | "cancelled" | null>(null);
+  const [confirmPaidError, setConfirmPaidError] = useState<string | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
 
   const isInactive = isInactiveSale(order);
@@ -1747,62 +1842,78 @@ function OrderRowActionsMenu({
     setOpen(true);
   }
 
-  async function handleMarkPaid() {
-    const label = order.orderNumber != null ? `#${order.orderNumber}` : "esta venda";
-    const confirmed = window.confirm(
-      isPaid && orderHasUnpaidItems(order)
-        ? `Confirmar pagamento das peças em aberto da venda ${label}? O acréscimo entra no caixa e a etiqueta pode ser gerada.`
-        : `Marcar a venda ${label} como paga? Isso registra pagamento manual e libera o pedido para envio.`
-    );
-    if (!confirmed) return;
+  async function submitMarkPaid(paidAtDate: string) {
+    const parsed = parseManualPaidAtDate(paidAtDate);
+    if (!parsed) {
+      setConfirmPaidError("Informe uma data de pagamento válida, até hoje.");
+      return;
+    }
     setBusy("mark-paid");
+    setConfirmPaidError(null);
     try {
       const res = await fetch(`/api/admin/sales/${order.id}/mark-paid`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paidAt: paidAtDate }),
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => null)) as { error?: string } | null;
-        window.alert(data?.error ?? "Não foi possível marcar a venda como paga.");
+        setConfirmPaidError(data?.error ?? "Não foi possível marcar a venda como paga.");
         return;
       }
-      onPatchOrder(order.id, manualMarkPaidOrderPatch(order));
+      onPatchOrder(order.id, manualMarkPaidOrderPatch(order, parsed.toISOString()));
+      setConfirmPaid(null);
     } finally {
       setBusy(null);
     }
   }
 
-  async function handleConfirmPaymentCancelled() {
-    const label =
-      order.orderNumber != null ? `#${order.orderNumber}` : "esta venda";
-    const confirmed = window.confirm(
-      `Confirmar pagamento da venda ${label}? A venda cancelada volta a ficar ativa e marcada como paga.`
-    );
-    if (!confirmed) return;
+  async function submitConfirmPaymentCancelled(paidAtDate: string) {
+    const parsed = parseManualPaidAtDate(paidAtDate);
+    if (!parsed) {
+      setConfirmPaidError("Informe uma data de pagamento válida, até hoje.");
+      return;
+    }
     setBusy("confirm-paid");
+    setConfirmPaidError(null);
     try {
       const res = await fetch(`/api/admin/sales/${order.id}/mark-paid`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paidAt: paidAtDate }),
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => null)) as {
           error?: string;
         } | null;
-        window.alert(
+        setConfirmPaidError(
           data?.error ?? "Não foi possível confirmar o pagamento."
         );
         return;
       }
       onPatchOrder(order.id, {
-        paidAt: new Date().toISOString(),
-        status: "paid",
+        ...manualMarkPaidOrderPatch(order, parsed.toISOString()),
         paymentChannel: "MANUAL",
         shippingStatus: "to_pack",
         cancellationReason: null,
         cancelledAt: null,
       });
+      setConfirmPaid(null);
     } finally {
       setBusy(null);
     }
+  }
+
+  async function handleMarkPaid() {
+    closeMenu();
+    setConfirmPaidError(null);
+    setConfirmPaid("mark");
+  }
+
+  async function handleConfirmPaymentCancelled() {
+    closeMenu();
+    setConfirmPaidError(null);
+    setConfirmPaid("cancelled");
   }
 
   async function copyText(value: string) {
@@ -2213,6 +2324,34 @@ function OrderRowActionsMenu({
           document.body
         )
         : null}
+      {confirmPaid ? (
+        <ConfirmManualPaymentModal
+          orderLabel={
+            order.orderNumber != null ? `#${order.orderNumber}` : "esta venda"
+          }
+          variant={
+            confirmPaid === "cancelled"
+              ? "cancelled"
+              : isPaid && orderHasUnpaidItems(order)
+                ? "addon"
+                : "mark"
+          }
+          busy={busy === "mark-paid" || busy === "confirm-paid"}
+          error={confirmPaidError}
+          onClose={() => {
+            if (busy === "mark-paid" || busy === "confirm-paid") return;
+            setConfirmPaid(null);
+            setConfirmPaidError(null);
+          }}
+          onConfirm={(paidAtDate) => {
+            if (confirmPaid === "cancelled") {
+              void submitConfirmPaymentCancelled(paidAtDate);
+              return;
+            }
+            void submitMarkPaid(paidAtDate);
+          }}
+        />
+      ) : null}
     </td>
   );
 }
@@ -2265,6 +2404,7 @@ function OrderDetailsBody({
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [markingPaid, setMarkingPaid] = useState(false);
   const [markPaidError, setMarkPaidError] = useState<string | null>(null);
+  const [showMarkPaidModal, setShowMarkPaidModal] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState(false);
   const [customerForm, setCustomerForm] = useState<CustomerEditForm>(() =>
     customerEditFormFromOrder(order)
@@ -2365,28 +2505,28 @@ function OrderDetailsBody({
     }
   }
 
-  async function markSalePaid() {
-    const label = order.orderNumber != null ? `#${order.orderNumber}` : "esta venda";
-    const isAddon = Boolean(order.paidAt) && orderHasUnpaidItems(order);
-    const confirmed = window.confirm(
-      isAddon
-        ? `Confirmar pagamento das peças em aberto da venda ${label}? O acréscimo entra no caixa e a etiqueta pode ser gerada.`
-        : `Marcar a venda ${label} como paga? Isso registra pagamento manual e libera o pedido para envio.`
-    );
-    if (!confirmed) return;
+  async function markSalePaid(paidAtDate: string) {
+    const parsed = parseManualPaidAtDate(paidAtDate);
+    if (!parsed) {
+      setMarkPaidError("Informe uma data de pagamento válida, até hoje.");
+      return;
+    }
 
     setMarkingPaid(true);
     setMarkPaidError(null);
     try {
       const res = await fetch(`/api/admin/sales/${order.id}/mark-paid`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paidAt: paidAtDate }),
       });
       const data = (await res.json().catch(() => null)) as { error?: string } | null;
       if (!res.ok) {
         setMarkPaidError(data?.error ?? "Não foi possível marcar a venda como paga.");
         return;
       }
-      onPatchOrder(order.id, manualMarkPaidOrderPatch(order));
+      onPatchOrder(order.id, manualMarkPaidOrderPatch(order, parsed.toISOString()));
+      setShowMarkPaidModal(false);
     } catch {
       setMarkPaidError("Erro de conexão.");
     } finally {
@@ -3296,7 +3436,10 @@ function OrderDetailsBody({
                 <button
                   type="button"
                   disabled={markingPaid}
-                  onClick={() => void markSalePaid()}
+                  onClick={() => {
+                    setMarkPaidError(null);
+                    setShowMarkPaidModal(true);
+                  }}
                   className="flex w-full items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 py-2 text-sm font-medium text-emerald-800 transition-colors hover:bg-emerald-100 disabled:opacity-50"
                 >
                   {markingPaid
@@ -3375,6 +3518,25 @@ function OrderDetailsBody({
         <ExpandedSection title="Links">
           <AdminSaleLinks order={order} onPatchOrder={onPatchOrder} />
         </ExpandedSection>
+      ) : null}
+
+      {showMarkPaidModal ? (
+        <ConfirmManualPaymentModal
+          orderLabel={
+            order.orderNumber != null ? `#${order.orderNumber}` : "esta venda"
+          }
+          variant={
+            Boolean(order.paidAt) && orderHasUnpaidItems(order) ? "addon" : "mark"
+          }
+          busy={markingPaid}
+          error={markPaidError}
+          onClose={() => {
+            if (markingPaid) return;
+            setShowMarkPaidModal(false);
+            setMarkPaidError(null);
+          }}
+          onConfirm={(paidAtDate) => void markSalePaid(paidAtDate)}
+        />
       ) : null}
     </div>
   );

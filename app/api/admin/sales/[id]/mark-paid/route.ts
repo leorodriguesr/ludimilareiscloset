@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { parseManualPaidAtDate } from "@/lib/admin-sale/parse-manual-paid-at";
 import { markOrderItemPaidManually, markOrderPaidManually } from "@/lib/order/payment/manual-payment";
 import { PERMISSION } from "@/lib/auth/permissions";
 import { requirePermission } from "@/lib/auth/require-permission";
@@ -12,10 +13,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   let paymentMethod: PaymentMethod | undefined;
   let itemId: string | undefined;
+  let paidAt: Date | undefined;
   try {
     const body = (await request.json()) as {
       paymentMethod?: unknown;
       itemId?: unknown;
+      paidAt?: unknown;
     };
     if (body.paymentMethod === PAYMENT_METHOD.CARD) {
       paymentMethod = PAYMENT_METHOD.CARD;
@@ -24,6 +27,16 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
     if (typeof body.itemId === "string" && body.itemId.trim()) {
       itemId = body.itemId.trim();
+    }
+    if (body.paidAt != null && body.paidAt !== "") {
+      const parsed = parseManualPaidAtDate(body.paidAt);
+      if (!parsed) {
+        return NextResponse.json(
+          { error: "Informe uma data de pagamento válida, até hoje." },
+          { status: 400 }
+        );
+      }
+      paidAt = parsed;
     }
   } catch {
     /* body opcional */
@@ -35,11 +48,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
         orderId: id,
         itemId,
         markedByUserId: gate.userId,
+        paidAt,
       })
     : await markOrderPaidManually({
         orderId: id,
         paymentMethod,
         markedByUserId: gate.userId,
+        paidAt,
       });
 
   if (!result.ok) {

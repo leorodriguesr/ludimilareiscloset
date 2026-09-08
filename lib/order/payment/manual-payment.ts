@@ -50,6 +50,7 @@ export async function markOrderPaidManually(input: {
   orderId: string;
   paymentMethod?: PaymentMethod;
   markedByUserId: string;
+  paidAt?: Date;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const order = await prisma.order.findUnique({
     where: { id: input.orderId },
@@ -75,6 +76,7 @@ export async function markOrderPaidManually(input: {
           productId: true,
           quantity: true,
           price: true,
+          lineSubtotalFinal: true,
           paymentStatus: true,
           pieceSelectionsJson: true,
         },
@@ -87,34 +89,53 @@ export async function markOrderPaidManually(input: {
   }
 
   if (order.status === ORDER_STATUS.PAID && order.paidAt) {
-    const pendingCharge = await prisma.orderCharge.findFirst({
+    const pendingItems = order.items.filter(
+      (item) => item.paymentStatus !== ORDER_ITEM_PAYMENT_STATUS.PAID
+    );
+    const pendingCharges = await prisma.orderCharge.findMany({
       where: { orderId: order.id, status: ORDER_CHARGE_STATUS.PENDING },
+      select: { id: true, amount: true },
       orderBy: { sequence: "desc" },
     });
-    if (!pendingCharge) {
+    if (pendingItems.length === 0 && pendingCharges.length === 0) {
       await onOrderPaymentConfirmed(order);
       return { ok: true };
     }
 
-    const paidAt = new Date();
+    const remainingAmount = round2(
+      pendingItems.reduce((sum, item) => sum + itemAmount(item), 0)
+    );
+    const ledgerAmount =
+      remainingAmount > 0
+        ? remainingAmount
+        : round2(pendingCharges.reduce((sum, charge) => sum + charge.amount, 0));
+    const paidAt = input.paidAt ?? new Date();
     try {
       await prisma.$transaction(async (tx) => {
         await commitStockReservations(tx, order.id);
-        await tx.orderCharge.update({
-          where: { id: pendingCharge.id },
-          data: { status: ORDER_CHARGE_STATUS.PAID, paidAt },
-        });
         await tx.orderItem.updateMany({
-          where: { chargeId: pendingCharge.id },
+          where: {
+            orderId: order.id,
+            paymentStatus: { not: ORDER_ITEM_PAYMENT_STATUS.PAID },
+          },
           data: {
             paymentStatus: ORDER_ITEM_PAYMENT_STATUS.PAID,
             paidAt,
           },
         });
-        await tx.order.update({
-          where: { id: order.id },
-          data: { paidTotal: { increment: pendingCharge.amount } },
+        await tx.orderCharge.updateMany({
+          where: {
+            orderId: order.id,
+            status: ORDER_CHARGE_STATUS.PENDING,
+          },
+          data: { status: ORDER_CHARGE_STATUS.PAID, paidAt },
         });
+        if (ledgerAmount > 0) {
+          await tx.order.update({
+            where: { id: order.id },
+            data: { paidTotal: { increment: ledgerAmount } },
+          });
+        }
         await tx.paymentAttempt.updateMany({
           where: {
             orderId: order.id,
@@ -130,11 +151,15 @@ export async function markOrderPaidManually(input: {
         await appendCashLedgerEntry(tx, {
           direction: "IN",
           kind: "SALE",
-          amount: pendingCharge.amount,
+          amount: ledgerAmount,
           description: `Acréscimo manual · pedido #${order.orderNumber ?? order.id.slice(0, 8)}`,
           orderId: order.id,
           actorUserId: input.markedByUserId,
-          idempotencyKey: cashLedgerIdempotencyKey("sale", pendingCharge.id),
+          idempotencyKey: cashLedgerIdempotencyKey(
+            "sale",
+            pendingCharges[0]?.id ?? `${order.id}:remaining`
+          ),
+          createdAt: paidAt,
         });
       });
     } catch (e) {
@@ -163,7 +188,7 @@ export async function markOrderPaidManually(input: {
     input.paymentMethod,
     order.paymentMethod
   );
-  const paidAt = new Date();
+  const paidAt = input.paidAt ?? new Date();
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -253,6 +278,7 @@ export async function markOrderPaidManually(input: {
         idempotencyKey: isCancelled
           ? orderReactivationLedgerKey(order.id, order.cancelledAt)
           : cashLedgerIdempotencyKey("sale", order.id),
+        createdAt: paidAt,
       });
     });
   } catch (e) {
@@ -283,10 +309,23 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+function itemAmount(item: {
+  lineSubtotalFinal?: number | null;
+  price: number;
+  quantity: number;
+}): number {
+  return round2(
+    item.lineSubtotalFinal != null
+      ? item.lineSubtotalFinal
+      : item.price * item.quantity
+  );
+}
+
 export async function markOrderItemPaidManually(input: {
   orderId: string;
   itemId: string;
   markedByUserId: string;
+  paidAt?: Date;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const order = await prisma.order.findUnique({
     where: { id: input.orderId },
@@ -329,12 +368,8 @@ export async function markOrderItemPaidManually(input: {
     return { ok: true };
   }
 
-  const itemAmount = round2(
-    item.lineSubtotalFinal != null
-      ? item.lineSubtotalFinal
-      : item.price * item.quantity
-  );
-  const paidAt = new Date();
+  const itemPaidAmount = itemAmount(item);
+  const paidAt = input.paidAt ?? new Date();
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -404,7 +439,7 @@ export async function markOrderItemPaidManually(input: {
 
       await tx.order.update({
         where: { id: order.id },
-        data: { paidTotal: { increment: itemAmount } },
+        data: { paidTotal: { increment: itemPaidAmount } },
       });
 
       if (item.productId) {
@@ -437,11 +472,12 @@ export async function markOrderItemPaidManually(input: {
       await appendCashLedgerEntry(tx, {
         direction: "IN",
         kind: "SALE",
-        amount: itemAmount,
+        amount: itemPaidAmount,
         description: `Acréscimo manual (peça) · pedido #${order.orderNumber ?? order.id.slice(0, 8)}`,
         orderId: order.id,
         actorUserId: input.markedByUserId,
         idempotencyKey: cashLedgerIdempotencyKey("sale", input.itemId),
+        createdAt: paidAt,
       });
     });
   } catch (e) {

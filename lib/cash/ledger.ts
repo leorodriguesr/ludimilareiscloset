@@ -18,6 +18,7 @@ export async function appendCashLedgerEntry(
     paymentAttemptId?: string | null;
     actorUserId?: string | null;
     idempotencyKey?: string | null;
+    createdAt?: Date;
   }
 ) {
   const amount = Math.round(Math.abs(input.amount) * 100) / 100;
@@ -43,6 +44,7 @@ export async function appendCashLedgerEntry(
         paymentAttemptId: input.paymentAttemptId ?? null,
         actorUserId: input.actorUserId ?? null,
         idempotencyKey,
+        ...(input.createdAt ? { createdAt: input.createdAt } : {}),
       },
     });
   } catch (error) {
