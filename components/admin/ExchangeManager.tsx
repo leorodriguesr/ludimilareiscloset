@@ -31,6 +31,7 @@ import { ExchangeInspectModal } from "@/components/admin/ExchangeInspectModal";
 import { ExchangeReverseModal } from "@/components/admin/ExchangeReverseModal";
 import { ExchangeRefundModal } from "@/components/admin/ExchangeRefundModal";
 import { ExchangeChargeModal } from "@/components/admin/ExchangeChargeModal";
+import { useAuth } from "@/components/auth/AuthProvider";
 import type {
   ExchangeItemDisposition,
   ExchangeKind,
@@ -231,17 +232,25 @@ function returnMethodLabel(ship: ExchangeShippingRow | null): string {
   return EXCHANGE_RETURN_METHOD_LABELS[ship.method];
 }
 
+function isAwaitingCustomerPayment(ex: {
+  status: ExchangeStatus;
+  balanceStatus?: string;
+  items?: { direction: string }[];
+}): boolean {
+  return (
+    ex.status === "RECEIVED" &&
+    ex.balanceStatus === "PENDING" &&
+    (ex.items ?? []).some((item) => item.direction === "OUTBOUND")
+  );
+}
+
 function exchangeStatusLabel(ex: {
   status: ExchangeStatus;
   balanceStatus?: string;
   items?: { direction: string }[];
   shippings: ExchangeShippingRow[];
 }): string {
-  if (
-    ex.status === "RECEIVED" &&
-    ex.balanceStatus === "PENDING" &&
-    (ex.items ?? []).some((item) => item.direction === "OUTBOUND")
-  ) {
+  if (isAwaitingCustomerPayment(ex)) {
     return "Aguardando pagamento";
   }
   if (ex.status === "AWAITING_RETURN") {
@@ -260,6 +269,7 @@ const LIST_BTN_SOFT = `${LIST_BTN} border-stone-200 bg-white text-stone-700 hove
 const LIST_BTN_OK = `${LIST_BTN} border-emerald-700 bg-emerald-700 text-white hover:bg-emerald-800`;
 
 export function ExchangeManager() {
+  const { isAdmin } = useAuth();
   const [filter, setFilter] = useState<FilterKey | null>(null);
   const [exchanges, setExchanges] = useState<ExchangeListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -410,6 +420,18 @@ export function ExchangeManager() {
       return false;
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function confirmExchangePayment(exchangeId: string, amount: number) {
+    const confirmed = window.confirm(
+      `Confirmar o pagamento de ${formatPrice(amount)} desta troca? O saldo será marcado como pago e o reenvio poderá ser liberado.`
+    );
+    if (!confirmed) return;
+    const ok = await runAction("/balance", { action: "mark_paid" }, exchangeId);
+    if (ok) {
+      setChargeId(null);
+      setPaymentResult(null);
     }
   }
 
@@ -639,7 +661,7 @@ export function ExchangeManager() {
                               disabled: busy,
                               onClick: () => setRefundId(ex.id),
                             }
-                          : canCharge
+                        : canCharge
                             ? {
                                 label: "Cobrar cliente",
                                 className: LIST_BTN_PRIMARY,
@@ -958,11 +980,20 @@ export function ExchangeManager() {
           busy={busy || paymentLoading}
           error={actionError}
           paymentResult={paymentResult}
+          showConfirmPayment={
+            isAdmin && isAwaitingCustomerPayment(chargeTarget)
+          }
           onClose={() => {
             setChargeId(null);
             setPaymentResult(null);
           }}
           onGenerate={(method) => void generatePayment(method)}
+          onConfirmPayment={() =>
+            void confirmExchangePayment(
+              chargeTarget.id,
+              chargeTarget.balanceAmount
+            )
+          }
         />
       ) : null}
 

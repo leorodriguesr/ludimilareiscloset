@@ -10,8 +10,6 @@ export async function POST(request: NextRequest, { params }: Params) {
   const gate = await requirePermission(PERMISSION.EXCHANGES_MANAGE);
   if (gate instanceof NextResponse) return gate;
 
-  const { id } = await params;
-
   let body: unknown;
   try {
     body = await request.json();
@@ -28,6 +26,12 @@ export async function POST(request: NextRequest, { params }: Params) {
   ) {
     return NextResponse.json({ error: "Ação inválida." }, { status: 400 });
   }
+
+  if (action === "mark_paid" && gate.role !== "ADMIN") {
+    return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
+  }
+
+  const { id } = await params;
 
   try {
     const exchange = await settleExchangeBalance({

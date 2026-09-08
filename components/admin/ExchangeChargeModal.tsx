@@ -19,15 +19,19 @@ export function ExchangeChargeModal({
   busy,
   error,
   paymentResult,
+  showConfirmPayment,
   onClose,
   onGenerate,
+  onConfirmPayment,
 }: {
   amount: number;
   busy: boolean;
   error: string | null;
   paymentResult: PaymentResult | null;
+  showConfirmPayment?: boolean;
   onClose: () => void;
   onGenerate: (method: "pix" | "card") => void;
+  onConfirmPayment?: () => void;
 }) {
   const [copied, setCopied] = useState<"pix" | "card" | null>(null);
 
@@ -55,6 +59,18 @@ export function ExchangeChargeModal({
       title="Cobrar cliente"
       subtitle="Gere o pagamento da diferença. Depois de pago, o reenvio cai em Envios."
       onClose={onClose}
+      footer={
+        showConfirmPayment && onConfirmPayment ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onConfirmPayment}
+            className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+          >
+            Confirmar pagamento
+          </button>
+        ) : undefined
+      }
     >
       <p className="text-xs text-stone-500">Valor pendente de pagamento</p>
       <p className="mt-0.5 text-lg font-semibold text-stone-900">
