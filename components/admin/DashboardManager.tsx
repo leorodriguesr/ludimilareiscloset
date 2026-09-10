@@ -196,8 +196,15 @@ export function DashboardManager({
     (metrics?.cancelledCount ?? 0);
   const fulfillmentTotal =
     (metrics?.outboundSalesCount ?? 0) + (metrics?.inboundSalesCount ?? 0);
+  const salesByState = (metrics?.salesByState ?? []).filter((row) => {
+    const trimmed = row.state.trim();
+    if (!trimmed) return false;
+    const lower = trimmed.toLocaleLowerCase("pt-BR");
+    return lower !== "não informado" && lower !== "nao informado";
+  });
+  const paidCount = metrics?.paidCount ?? 0;
   const maxStateCount = Math.max(
-    ...(metrics?.salesByState.map((row) => row.count) ?? [0]),
+    ...salesByState.map((row) => row.count),
     1
   );
   const piecesPerSale =
@@ -206,11 +213,11 @@ export function DashboardManager({
       : 0;
 
   async function copySalesByState() {
-    if (!metrics || metrics.salesByState.length === 0) return;
-    const list = metrics.salesByState
+    if (!metrics || salesByState.length === 0) return;
+    const list = salesByState
       .map((row) => {
         const { name } = describeState(row.state);
-        const share = percent(row.count, metrics.paidCount);
+        const share = percent(row.count, paidCount);
         return `${name} ${row.count.toLocaleString("pt-BR")} (${share}%)`;
       })
       .join("\n");
@@ -501,14 +508,14 @@ export function DashboardManager({
                     Ranking pelo endereço de entrega
                   </p>
                 </div>
-                {metrics.salesByState.length > 0 ? (
+                {salesByState.length > 0 ? (
                   <div className="flex items-center gap-2">
                     <p className="text-xs text-stone-500">
-                      {metrics.paidCount.toLocaleString("pt-BR")}{" "}
-                      {metrics.paidCount === 1 ? "venda" : "vendas"}
+                      {paidCount.toLocaleString("pt-BR")}{" "}
+                      {paidCount === 1 ? "venda" : "vendas"}
                       {" · "}
-                      {metrics.salesByState.length}{" "}
-                      {metrics.salesByState.length === 1 ? "estado" : "estados"}
+                      {salesByState.length}{" "}
+                      {salesByState.length === 1 ? "estado" : "estados"}
                     </p>
                     <button
                       type="button"
@@ -555,15 +562,15 @@ export function DashboardManager({
                 ) : null}
               </div>
 
-              {metrics.salesByState.length === 0 ? (
+              {salesByState.length === 0 ? (
                 <p className="py-10 text-center text-sm text-stone-400">
-                  Nenhuma venda paga no período.
+                  Nenhuma venda com estado no período.
                 </p>
               ) : (
                 <ol className="mt-4 min-h-0 flex-1 divide-y divide-stone-100 overflow-y-auto lg:max-h-[22rem]">
-                  {metrics.salesByState.map((row, index) => {
+                  {salesByState.map((row, index) => {
                     const { uf, name } = describeState(row.state);
-                    const share = percent(row.count, metrics.paidCount);
+                    const share = percent(row.count, paidCount);
                     const bar = Math.max((row.count / maxStateCount) * 100, 4);
                     return (
                       <li

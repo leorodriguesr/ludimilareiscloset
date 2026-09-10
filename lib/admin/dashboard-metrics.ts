@@ -214,8 +214,10 @@ export async function getDashboardMetrics(
       outboundSalesCount += 1;
     }
 
-    const state = normalizeState(order.addressState) ?? "Não informado";
-    stateCounts.set(state, (stateCounts.get(state) ?? 0) + 1);
+    const state = normalizeState(order.addressState);
+    if (state) {
+      stateCounts.set(state, (stateCounts.get(state) ?? 0) + 1);
+    }
   }
 
   const [extraSales, ledgerRows, storeShippings] = await Promise.all([
