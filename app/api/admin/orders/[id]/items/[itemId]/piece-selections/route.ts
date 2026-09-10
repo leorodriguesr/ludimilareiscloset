@@ -29,6 +29,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       orderId: id,
       itemId,
       pieceSelections: b.pieceSelections,
+      productName: b.productName,
     });
     return NextResponse.json(result);
   } catch (e) {

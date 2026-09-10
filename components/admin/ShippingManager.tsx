@@ -954,18 +954,22 @@ function PackingListPrint({
 
 function PackingSlipModal({
   order,
+  canMarkToPack,
   canMarkPacked,
   canMarkShipped,
   packingBusy,
   onClose,
+  onMarkToPack,
   onMarkPacked,
   onMarkShipped,
 }: {
   order: ShipmentOrder;
+  canMarkToPack: boolean;
   canMarkPacked: boolean;
   canMarkShipped: boolean;
   packingBusy: boolean;
   onClose: () => void;
+  onMarkToPack: () => void;
   onMarkPacked: () => void;
   onMarkShipped: () => void;
 }) {
@@ -1019,6 +1023,17 @@ function PackingSlipModal({
         </div>
 
         <div className="flex flex-col gap-2 border-t border-stone-100 px-5 py-4 sm:flex-row">
+          {canMarkToPack ? (
+            <button
+              type="button"
+              disabled={packingBusy}
+              onClick={onMarkToPack}
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-800 transition-colors hover:bg-stone-50 disabled:opacity-50"
+            >
+              <PackBoxIcon className="h-4 w-4" />
+              {packingBusy ? "Salvando…" : "Voltar para por embalar"}
+            </button>
+          ) : null}
           {canMarkPacked ? (
             <button
               type="button"
@@ -1041,7 +1056,7 @@ function PackingSlipModal({
               {packingBusy ? "Salvando…" : "Marcar como enviado"}
             </button>
           ) : null}
-          {!canMarkPacked && !canMarkShipped ? (
+          {!canMarkToPack && !canMarkPacked && !canMarkShipped ? (
             <button
               type="button"
               onClick={onClose}
@@ -1566,6 +1581,7 @@ function useShipmentActions(
       }
 
       const patch: Partial<ShipmentOrder> = {};
+      if (key === "unpack") patch.shippingStatus = "to_pack";
       if (key === "pack") patch.shippingStatus = "packed";
       if (key === "ship") patch.shippingStatus = "shipped";
       if (key === "arranged-delivered") {
@@ -1680,6 +1696,11 @@ function shipmentCapabilities(order: ShipmentOrder, trackingCode?: string | null
       !order.superfreteShipmentId &&
       !isSaleCancelled &&
       !isArranged,
+    canMarkToPack:
+      isPaid &&
+      !isSaleCancelled &&
+      !hasUnpaidItems &&
+      order.shippingStatus === "packed",
     canMarkPacked: isPaid && !isSaleCancelled && !hasUnpaidItems && order.shippingStatus === "to_pack",
     canMarkShipped: canManuallyMarkCarrierAsShipped({
       fulfillmentType: order.fulfillmentType,
@@ -1803,6 +1824,24 @@ function ShipmentRowActionsMenu({
         separatorBefore: items.length > 0,
         icon: <TruckIcon className="h-[18px] w-[18px]" />,
         onClick: onChangeShipping,
+      });
+    }
+
+    if (caps.canMarkToPack) {
+      items.push({
+        id: "unpack",
+        label: busy === "unpack" ? "Salvando…" : "Voltar para por embalar",
+        separatorBefore: items.length > 0,
+        disabled: busy === "unpack",
+        icon: <PackBoxIcon />,
+        onClick: () =>
+          void runAction(
+            "unpack",
+            shipmentStatusPatchUrl(order),
+            "PATCH",
+            { shippingStatus: "to_pack" },
+            { openPdf: false }
+          ),
       });
     }
 
@@ -1983,6 +2022,7 @@ function ShipmentRowActionsMenu({
     caps.canChangeShipping,
     caps.canGenerateLabel,
     caps.canMarkArrangedDelivered,
+    caps.canMarkToPack,
     caps.canMarkPacked,
     caps.canMarkShipped,
     onChangeShipping,
@@ -2965,6 +3005,11 @@ export function ShippingManager() {
           order={
             orders.find((o) => o.id === packingModalOrder.id) ?? packingModalOrder
           }
+          canMarkToPack={
+            shipmentCapabilities(
+              orders.find((o) => o.id === packingModalOrder.id) ?? packingModalOrder
+            ).canMarkToPack
+          }
           canMarkPacked={
             shipmentCapabilities(
               orders.find((o) => o.id === packingModalOrder.id) ?? packingModalOrder
@@ -2977,6 +3022,30 @@ export function ShippingManager() {
           }
           packingBusy={packingBusy}
           onClose={() => setPackingModalOrder(null)}
+          onMarkToPack={() => {
+            void (async () => {
+              const orderId = packingModalOrder.id;
+              setPackingBusy(true);
+              try {
+                const res = await fetch(shipmentStatusPatchUrl(packingModalOrder), {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ shippingStatus: "to_pack" }),
+                });
+                if (!res.ok) {
+                  const data = (await res.json()) as { error?: string };
+                  alert(data.error ?? "Erro ao voltar para por embalar.");
+                  return;
+                }
+                patchOrder(orderId, { shippingStatus: "to_pack" });
+                setPackingModalOrder(null);
+              } catch {
+                alert("Erro de conexão.");
+              } finally {
+                setPackingBusy(false);
+              }
+            })();
+          }}
           onMarkPacked={() => {
             void (async () => {
               const orderId = packingModalOrder.id;

@@ -57,7 +57,7 @@ function parseIncomingSelections(raw: unknown): CartPieceSelection[] {
       throw new UpdatePieceSelectionsError(`Seleção inválida (#${index + 1}).`);
     }
     const r = row as Record<string, unknown>;
-    if (typeof r.pieceName !== "string" || !r.pieceName.trim()) {
+    if (typeof r.pieceName !== "string") {
       throw new UpdatePieceSelectionsError(`Seleção inválida (#${index + 1}).`);
     }
     const size =
@@ -116,11 +116,26 @@ function validateCatalogSelections(
   return buildCartPieceSelections(pieces, map);
 }
 
-/** Itens descritivos da venda avulsa: só cor/tamanho mudam; nomes das peças ficam iguais. */
+function parseProductName(raw: unknown): string | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "string") {
+    throw new UpdatePieceSelectionsError("Nome do produto inválido.");
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    throw new UpdatePieceSelectionsError("Informe o nome do produto.");
+  }
+  return trimmed;
+}
+
+/** Itens descritivos da venda avulsa: cor, tamanho e nome das peças. */
 function validateCustomSelections(
   current: CartPieceSelection[],
   incoming: CartPieceSelection[]
 ): CartPieceSelection[] {
+  if (current.length === 0 && incoming.length === 0) {
+    return [];
+  }
   if (current.length === 0) {
     throw new UpdatePieceSelectionsError(
       "Este item não tem cor/tamanho para editar."
@@ -132,15 +147,10 @@ function validateCustomSelections(
     );
   }
 
-  return current.map((base, index) => {
-    const next = incoming[index]!;
-    if (next.pieceName !== base.pieceName) {
-      throw new UpdatePieceSelectionsError(
-        "Não é possível alterar o nome das peças."
-      );
-    }
+  return incoming.map((next, index) => {
+    const base = current[index]!;
     return {
-      pieceName: base.pieceName,
+      pieceName: next.pieceName.trim() || base.pieceName,
       size: next.size,
       color: next.color,
     };
@@ -151,7 +161,8 @@ export async function updateOrderItemPieceSelections(input: {
   orderId: string;
   itemId: string;
   pieceSelections: unknown;
-}): Promise<{ pieceSelectionsJson: string | null }> {
+  productName?: unknown;
+}): Promise<{ pieceSelectionsJson: string | null; productName?: string }> {
   const order = await prisma.order.findUnique({
     where: { id: input.orderId },
     select: {
@@ -164,6 +175,7 @@ export async function updateOrderItemPieceSelections(input: {
         select: {
           id: true,
           productId: true,
+          productName: true,
           quantity: true,
           price: true,
           pieceSelectionsJson: true,
@@ -208,6 +220,9 @@ export async function updateOrderItemPieceSelections(input: {
   const incoming = parseIncomingSelections(input.pieceSelections);
   const currentSelections = parsePieceSelections(item.pieceSelectionsJson);
   const isCustomItem = !item.productId;
+  const nextProductName = parseProductName(input.productName);
+  const nameChanged =
+    nextProductName != null && nextProductName !== (item.productName ?? "").trim();
 
   let nextSelections: CartPieceSelection[];
 
@@ -229,19 +244,43 @@ export async function updateOrderItemPieceSelections(input: {
     );
   }
 
-  if (sameSelections(currentSelections, nextSelections)) {
-    return { pieceSelectionsJson: item.pieceSelectionsJson };
+  const selectionsChanged = !sameSelections(currentSelections, nextSelections);
+  if (!selectionsChanged && !nameChanged) {
+    return {
+      pieceSelectionsJson: item.pieceSelectionsJson,
+      ...(nextProductName ? { productName: nextProductName } : {}),
+    };
   }
 
-  const nextJson = serializePieceSelections(nextSelections);
+  const nextJson = selectionsChanged
+    ? serializePieceSelections(nextSelections)
+    : item.pieceSelectionsJson;
+  const itemPatch = {
+    ...(selectionsChanged ? { pieceSelectionsJson: nextJson } : {}),
+    ...(nameChanged ? { productName: nextProductName } : {}),
+  };
 
   // Item descritivo da venda avulsa: sem estoque vinculado.
   if (isCustomItem) {
     await prisma.orderItem.update({
       where: { id: item.id },
-      data: { pieceSelectionsJson: nextJson },
+      data: itemPatch,
     });
-    return { pieceSelectionsJson: nextJson };
+    return {
+      pieceSelectionsJson: nextJson,
+      ...(nextProductName ? { productName: nextProductName } : {}),
+    };
+  }
+
+  if (!selectionsChanged) {
+    await prisma.orderItem.update({
+      where: { id: item.id },
+      data: itemPatch,
+    });
+    return {
+      pieceSelectionsJson: nextJson,
+      ...(nextProductName ? { productName: nextProductName } : {}),
+    };
   }
 
   try {
@@ -251,7 +290,7 @@ export async function updateOrderItemPieceSelections(input: {
 
         await tx.orderItem.update({
           where: { id: item.id },
-          data: { pieceSelectionsJson: nextJson },
+          data: itemPatch,
         });
 
         const stockLines: StockReservationLine[] = order.items
@@ -317,7 +356,7 @@ export async function updateOrderItemPieceSelections(input: {
 
         await tx.orderItem.update({
           where: { id: item.id },
-          data: { pieceSelectionsJson: nextJson },
+          data: itemPatch,
         });
         return;
       }
@@ -334,5 +373,8 @@ export async function updateOrderItemPieceSelections(input: {
     throw e;
   }
 
-  return { pieceSelectionsJson: nextJson };
+  return {
+    pieceSelectionsJson: nextJson,
+    ...(nextProductName ? { productName: nextProductName } : {}),
+  };
 }

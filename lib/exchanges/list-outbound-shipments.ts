@@ -228,7 +228,7 @@ export async function listExchangeOutboundShipmentOrders(): Promise<
 
 export async function updateExchangeOutboundPacking(input: {
   shippingId: string;
-  shippingStatus: "packed" | "shipped" | "delivered";
+  shippingStatus: "to_pack" | "packed" | "shipped" | "delivered";
 }) {
   const row = await prisma.exchangeShipping.findUnique({
     where: { id: input.shippingId },

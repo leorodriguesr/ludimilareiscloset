@@ -18,6 +18,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const b = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
   const shippingStatus = b.shippingStatus;
   if (
+    shippingStatus !== "to_pack" &&
     shippingStatus !== "packed" &&
     shippingStatus !== "shipped" &&
     shippingStatus !== "delivered"

@@ -154,6 +154,7 @@ export function OrderItemsEditor({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
   const [editUnitPrice, setEditUnitPrice] = useState("");
+  const [editName, setEditName] = useState("");
 
   const pendingItems = order.items.filter(
     (item) => (item.paymentStatus ?? "pending") !== "paid"
@@ -303,11 +304,13 @@ export function OrderItemsEditor({
     setPieceProduct(null);
     setCustomDraft([]);
     setEditUnitPrice("");
+    setEditName("");
   }
 
   async function persistPieceSelections(
     item: EditableOrderItem,
-    nextSelections: CartPieceSelection[]
+    nextSelections: CartPieceSelection[],
+    productName?: string
   ) {
     setSavingPieces(true);
     setError(null);
@@ -317,7 +320,10 @@ export function OrderItemsEditor({
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pieceSelections: nextSelections }),
+          body: JSON.stringify({
+            pieceSelections: nextSelections,
+            ...(productName?.trim() ? { productName: productName.trim() } : {}),
+          }),
         }
       );
       const data = (await res.json()) as { error?: string };
@@ -329,6 +335,7 @@ export function OrderItemsEditor({
       setPieceProduct(null);
       setCustomDraft([]);
       setEditUnitPrice("");
+      setEditName("");
       onRefresh();
     } catch {
       setError("Erro de conexão.");
@@ -341,6 +348,7 @@ export function OrderItemsEditor({
     const pieces = parsePieceSelections(item.pieceSelectionsJson);
     setError(null);
     setEditUnitPrice(String(item.price));
+    setEditName(orderItemDisplayName(item));
     setEditingPiecesId(item.id);
     setCustomDraft(pieces.map((p) => ({ ...p })));
     setPieceProduct(null);
@@ -370,8 +378,19 @@ export function OrderItemsEditor({
       return;
     }
 
+    const isCustom = !item.productId;
+    const nextName = editName.trim();
+    if (isCustom && !nextName) {
+      setError("Informe o nome do produto.");
+      return;
+    }
+
     if (paid) {
-      await persistPieceSelections(item, nextPieces);
+      await persistPieceSelections(
+        item,
+        nextPieces,
+        isCustom ? nextName : undefined
+      );
       return;
     }
 
@@ -385,14 +404,18 @@ export function OrderItemsEditor({
       Math.round(unitPrice * 100) !== Math.round(item.price * 100);
 
     if (!valueChanged) {
-      await persistPieceSelections(item, nextPieces);
+      await persistPieceSelections(
+        item,
+        nextPieces,
+        isCustom ? nextName : undefined
+      );
       return;
     }
 
-    const updatedLine = !item.productId
+    const updatedLine = isCustom
       ? {
           kind: "custom" as const,
-          description: orderItemDisplayName(item),
+          description: nextName,
           pieces: nextPieces.map((p) => ({
             name: p.pieceName,
             size: p.size ?? "",
@@ -519,6 +542,17 @@ export function OrderItemsEditor({
 
         {isEditingPieces ? (
           <div className="space-y-3 rounded-lg border border-stone-200 bg-stone-50/80 p-3">
+            {!item.productId ? (
+              <label className="block text-xs font-medium text-stone-500">
+                Nome do produto
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900"
+                />
+              </label>
+            ) : null}
             {!paid ? (
               <label className="block text-xs font-medium text-stone-500">
                 Valor unitário
@@ -550,7 +584,20 @@ export function OrderItemsEditor({
                     key={`${item.id}-c-${index}`}
                     className="rounded-lg border border-stone-200 bg-white p-3"
                   >
-                    <p className="mb-2 text-xs font-semibold">{piece.pieceName}</p>
+                    <input
+                      value={piece.pieceName}
+                      onChange={(e) =>
+                        setCustomDraft((prev) =>
+                          prev.map((row, i) =>
+                            i === index
+                              ? { ...row, pieceName: e.target.value }
+                              : row
+                          )
+                        )
+                      }
+                      placeholder="Nome da peça"
+                      className="mb-2 w-full rounded-lg border border-stone-200 px-3 py-2 text-sm font-semibold"
+                    />
                     <input
                       value={piece.color ?? ""}
                       onChange={(e) =>
