@@ -28,6 +28,7 @@ export default async function Home({ searchParams }: HomeProps) {
             include: {
               products: {
                 where: { product: publicCatalogProductWhere },
+                orderBy: [{ sortOrder: "asc" }, { product: { createdAt: "desc" } }],
                 include: {
                   product: { include: productListInclude },
                 },

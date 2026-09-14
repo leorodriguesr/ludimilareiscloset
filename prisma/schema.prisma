@@ -656,10 +656,12 @@ model Section {
 model ProductSection {
   productId String
   sectionId String
+  sortOrder Int     @default(0) @map("order")
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
   section   Section @relation(fields: [sectionId], references: [id], onDelete: Cascade)
 
   @@id([productId, sectionId])
+  @@index([sectionId, sortOrder])
 }
 
 model Product {

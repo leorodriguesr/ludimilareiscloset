@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma, StockType } from "@/app/generated/prisma/client";
 import { insertPieceVariantRow } from "@/lib/piece-variant-sql";
 import { prisma } from "@/lib/prisma";
+import { nextOrdersForSections } from "@/lib/admin/section-product-order";
 import { productFullInclude } from "@/lib/product-include";
 import { requireAdminApi } from "@/lib/require-admin-api";
 
@@ -264,6 +265,10 @@ export async function POST(request: NextRequest) {
 
   try {
     const product = await prisma.$transaction(async (tx) => {
+      const sectionOrders =
+        sectionIds.length > 0
+          ? await nextOrdersForSections(tx, sectionIds)
+          : [];
       const prod = await tx.product.create({
         data: {
           name: name.trim(),
@@ -297,10 +302,11 @@ export async function POST(request: NextRequest) {
                 }
               : undefined,
           sections:
-            sectionIds.length > 0
+            sectionOrders.length > 0
               ? {
-                  create: sectionIds.map((sectionId) => ({
+                  create: sectionOrders.map(({ sectionId, sortOrder }) => ({
                     section: { connect: { id: sectionId } },
+                    sortOrder,
                   })),
                 }
               : undefined,

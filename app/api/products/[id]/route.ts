@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/app/generated/prisma/client";
 import { StockType } from "@/app/generated/prisma/client";
+import { sectionRowsForProduct } from "@/lib/admin/section-product-order";
 import { syncProductPieces } from "@/lib/admin/sync-product-pieces";
 import { prisma } from "@/lib/prisma";
 import { productFullInclude } from "@/lib/product-include";
@@ -228,10 +229,12 @@ export async function PUT(
             throw new Error("INVALID_SECTION");
           }
         }
+        const sectionRows =
+          ids.length > 0 ? await sectionRowsForProduct(tx, id, ids) : [];
         await tx.productSection.deleteMany({ where: { productId: id } });
-        if (ids.length > 0) {
+        if (sectionRows.length > 0) {
           await tx.productSection.createMany({
-            data: ids.map((sectionId) => ({ productId: id, sectionId })),
+            data: sectionRows,
           });
         }
       }

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { DashboardManager } from "@/components/admin/DashboardManager";
 import { ProductList } from "@/components/admin/ProductList";
 import { ProductFormModal } from "@/components/admin/ProductFormModal";
+import { SectionProductOrderModal } from "@/components/admin/SectionProductOrderModal";
 import { BannerForm } from "@/components/admin/BannerForm";
 import { CategoryManager } from "@/components/admin/CategoryManager";
 import { SectionManager } from "@/components/admin/SectionManager";
@@ -194,6 +195,7 @@ export function AdminPanel({
       : "dashboard";
   });
   const [showProductModal, setShowProductModal] = useState(false);
+  const [showOrderModal, setShowOrderModal] = useState(false);
   const [productSearchQuery, setProductSearchQuery] = useState("");
 
   const navGroups = useMemo(() => visibleAdminNavGroups(role), [role]);
@@ -234,6 +236,7 @@ export function AdminPanel({
 
   useEffect(() => {
     setShowProductModal(false);
+    setShowOrderModal(false);
     setProductSearchQuery("");
   }, [activeSection]);
 
@@ -377,6 +380,27 @@ export function AdminPanel({
 
                 <button
                   type="button"
+                  onClick={() => setShowOrderModal(true)}
+                  className={`inline-flex w-full shrink-0 items-center justify-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 text-xs font-semibold text-stone-700 shadow-sm transition-colors hover:bg-stone-50 sm:w-auto ${ADMIN_SEARCH_INPUT_SIZE}`}
+                >
+                  <svg
+                    className="h-3.5 w-3.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    viewBox="0 0 24 24"
+                    aria-hidden
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12"
+                    />
+                  </svg>
+                  Ordenação
+                </button>
+                <button
+                  type="button"
                   onClick={() => setShowProductModal(true)}
                   className={`inline-flex w-full shrink-0 items-center justify-center gap-1.5 rounded-lg bg-sky-100 px-3 text-xs font-semibold text-sky-900 shadow-sm ring-1 ring-sky-200/80 transition-colors hover:bg-sky-200 sm:w-auto ${ADMIN_SEARCH_INPUT_SIZE}`}
                 >
@@ -414,6 +438,10 @@ export function AdminPanel({
               open={showProductModal}
               onClose={() => setShowProductModal(false)}
               onSuccess={fetchProducts}
+            />
+            <SectionProductOrderModal
+              open={showOrderModal}
+              onClose={() => setShowOrderModal(false)}
             />
           </div>
         )}
