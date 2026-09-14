@@ -4,9 +4,8 @@ import {
   type ExchangeReturnSourceItem,
   type ExistingReturnLine,
   pieceIdentity,
-  pieceReturnKey,
   type ReturnCard,
-  unavailableReturnUnitKeys,
+  returnUnitCount,
 } from "@/lib/exchanges/return-units";
 import { parsePieceSelections } from "@/lib/exchanges/serialize";
 
@@ -20,17 +19,29 @@ export function unavailableReshipUnitKeys(
   cards: ReturnType<typeof buildReturnCards>,
   existingLines: ExistingReturnLine[]
 ): Set<string> {
-  return unavailableReturnUnitKeys(cards, existingLines);
-}
+  const remainingByItem = new Map<string, number>();
+  for (const line of existingLines) {
+    if (!line.orderItemId) continue;
+    const units = returnUnitCount(
+      line.quantity,
+      parsePieceSelections(line.pieceSelectionsJson)
+    );
+    remainingByItem.set(
+      line.orderItemId,
+      (remainingByItem.get(line.orderItemId) ?? 0) + units
+    );
+  }
 
-export function remainingQtyForLine(input: {
-  orderItemId: string;
-  piece: CartPieceSelection | null;
-  purchased: Map<string, number>;
-  reserved: Map<string, number>;
-}): number {
-  const key = pieceReturnKey(input.orderItemId, input.piece);
-  return Math.max(0, (input.purchased.get(key) ?? 0) - (input.reserved.get(key) ?? 0));
+  const unavailable = new Set<string>();
+  for (const card of cards) {
+    for (const unit of card.units) {
+      const left = remainingByItem.get(unit.orderItemId) ?? 0;
+      if (left <= 0) continue;
+      unavailable.add(unit.key);
+      remainingByItem.set(unit.orderItemId, left - 1);
+    }
+  }
+  return unavailable;
 }
 
 export function consumeReshipLinesIntoMap(
@@ -39,22 +50,19 @@ export function consumeReshipLinesIntoMap(
   const map = new Map<string, number>();
   for (const line of lines) {
     if (!line.orderItemId) continue;
-    const pieces = parsePieceSelections(line.pieceSelectionsJson);
-    const rows: Array<CartPieceSelection | null> =
-      pieces.length > 0 ? pieces : [null];
-    for (let q = 0; q < line.quantity; q++) {
-      for (const piece of rows) {
-        const key = `${line.orderItemId}\0${pieceIdentity(piece)}`;
-        map.set(key, (map.get(key) ?? 0) + 1);
-      }
-    }
+    const units = returnUnitCount(
+      line.quantity,
+      parsePieceSelections(line.pieceSelectionsJson)
+    );
+    map.set(line.orderItemId, (map.get(line.orderItemId) ?? 0) + units);
   }
   return map;
 }
 
 export function groupSelectedReshipUnits(
   cards: ReturnCard[],
-  selectedKeys: Iterable<string>
+  selectedKeys: Iterable<string>,
+  shippedByUnitKey?: Readonly<Record<string, CartPieceSelection | null>>
 ): Array<{
   orderItemId: string;
   quantity: number;
@@ -72,7 +80,11 @@ export function groupSelectedReshipUnits(
   for (const card of cards) {
     for (const unit of card.units) {
       if (!selected.has(unit.key)) continue;
-      const mapKey = `${unit.orderItemId}\0${pieceIdentity(unit.pieceSelection)}`;
+      const shipped =
+        shippedByUnitKey && Object.prototype.hasOwnProperty.call(shippedByUnitKey, unit.key)
+          ? shippedByUnitKey[unit.key] ?? null
+          : unit.pieceSelection;
+      const mapKey = `${unit.orderItemId}\0${pieceIdentity(shipped)}`;
       const existing = groups.get(mapKey);
       if (existing) {
         existing.quantity += 1;
@@ -80,7 +92,7 @@ export function groupSelectedReshipUnits(
         groups.set(mapKey, {
           orderItemId: unit.orderItemId,
           quantity: 1,
-          pieceSelections: unit.pieceSelection ? [unit.pieceSelection] : undefined,
+          pieceSelections: shipped ? [shipped] : undefined,
         });
       }
     }

@@ -4261,7 +4261,10 @@ export function SalesManager() {
                           onToggleDetails={() => toggleDetails(order.id)}
                           onPatchOrder={patchOrder}
                           onRequestCancel={() => requestCancel(order.id)}
-                          onCreateReshipment={() => setReshipOrder(order)}
+                          onCreateReshipment={() => {
+                            void ensureProducts();
+                            setReshipOrder(order);
+                          }}
                         />
                       </tr>
                     </Fragment>
@@ -4305,6 +4308,7 @@ export function SalesManager() {
               ? `#${reshipOrder.orderNumber}`
               : "este pedido"
           }
+          products={products}
           onClose={() => setReshipOrder(null)}
           onCreated={() => {
             setReshipOrder(null);

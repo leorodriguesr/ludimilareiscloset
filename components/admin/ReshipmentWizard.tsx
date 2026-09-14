@@ -2,27 +2,73 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AdminModal } from "@/components/admin/AdminModal";
+import { CUSTOM_SET_SIZES } from "@/components/admin/CustomSaleSetsForm";
 import { formatPrice } from "@/lib/format";
 import { formatDeliveryDaysLabel } from "@/lib/shipping/delivery-days-label";
 import type { NormalizedShippingOption } from "@/lib/shipping/types";
 import type { ExchangeShippingMethod } from "@/app/generated/prisma/client";
 import { EXCHANGE_SHIPPING_METHOD_LABELS } from "@/lib/exchanges/shipping-method";
-import type { ReturnCard } from "@/lib/exchanges/return-units";
+import {
+  formatPieceLabel,
+  type ReturnCard,
+  type ReturnUnit,
+} from "@/lib/exchanges/return-units";
+import type { CartPieceSelection } from "@/lib/cart/types";
 import { groupSelectedReshipUnits } from "@/lib/reshipments/availability";
+import type { Product, ProductPiece } from "@/lib/types";
 
 type Props = {
   orderId: string;
   orderLabel: string;
+  products?: Product[];
   onClose: () => void;
   onCreated: () => void;
 };
 
-export function ReshipmentWizard({ orderId, orderLabel, onClose, onCreated }: Props) {
+type PieceOverride = { color: string | null; size: string | null };
+
+function catalogPieceForUnit(
+  products: Product[],
+  unit: ReturnUnit
+): ProductPiece | null {
+  if (!unit.productId) return null;
+  const product = products.find((row) => row.id === unit.productId);
+  if (!product?.pieces?.length) return null;
+  const pieceName = unit.pieceSelection?.pieceName?.trim();
+  if (pieceName) {
+    const named = product.pieces.find((piece) => piece.name === pieceName);
+    if (named) return named;
+  }
+  return product.pieces.length === 1 ? product.pieces[0]! : null;
+}
+
+function shippedPiece(
+  unit: ReturnUnit,
+  override: PieceOverride | undefined
+): CartPieceSelection | null {
+  const base = unit.pieceSelection;
+  if (!base && !override) return null;
+  return {
+    pieceName: base?.pieceName ?? unit.identification,
+    color: override ? override.color : base?.color ?? null,
+    size: override ? override.size : base?.size ?? null,
+  };
+}
+
+export function ReshipmentWizard({
+  orderId,
+  orderLabel,
+  products = [],
+  onClose,
+  onCreated,
+}: Props) {
+  const [catalogProducts, setCatalogProducts] = useState<Product[]>(products);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cards, setCards] = useState<ReturnCard[]>([]);
   const [unavailableKeys, setUnavailableKeys] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [overrides, setOverrides] = useState<Record<string, PieceOverride>>({});
   const [method, setMethod] = useState<ExchangeShippingMethod>("CARRIER");
   const [destinationCep, setDestinationCep] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
@@ -30,6 +76,23 @@ export function ReshipmentWizard({ orderId, orderLabel, onClose, onCreated }: Pr
   const [options, setOptions] = useState<NormalizedShippingOption[]>([]);
   const [optionId, setOptionId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setCatalogProducts(products);
+  }, [products]);
+
+  useEffect(() => {
+    if (products.length > 0) return;
+    void (async () => {
+      try {
+        const res = await fetch("/api/products");
+        const data = (await res.json()) as unknown;
+        if (Array.isArray(data)) setCatalogProducts(data as Product[]);
+      } catch {
+        /* opções de catálogo são opcionais */
+      }
+    })();
+  }, [products.length]);
 
   useEffect(() => {
     void (async () => {
@@ -60,9 +123,19 @@ export function ReshipmentWizard({ orderId, orderLabel, onClose, onCreated }: Pr
     })();
   }, [orderId]);
 
+  const shippedByUnitKey = useMemo(() => {
+    const map: Record<string, CartPieceSelection | null> = {};
+    for (const card of cards) {
+      for (const unit of card.units) {
+        map[unit.key] = shippedPiece(unit, overrides[unit.key]);
+      }
+    }
+    return map;
+  }, [cards, overrides]);
+
   const selectedItems = useMemo(
-    () => groupSelectedReshipUnits(cards, selected),
-    [cards, selected]
+    () => groupSelectedReshipUnits(cards, selected, shippedByUnitKey),
+    [cards, selected, shippedByUnitKey]
   );
 
   function toggleUnit(key: string, disabled: boolean) {
@@ -72,6 +145,19 @@ export function ReshipmentWizard({ orderId, orderLabel, onClose, onCreated }: Pr
       if (next.has(key)) next.delete(key);
       else next.add(key);
       return next;
+    });
+  }
+
+  function patchOverride(unit: ReturnUnit, patch: Partial<PieceOverride>) {
+    setOverrides((current) => {
+      const shipped = shippedPiece(unit, current[unit.key]);
+      return {
+        ...current,
+        [unit.key]: {
+          color: patch.color !== undefined ? patch.color : shipped?.color ?? null,
+          size: patch.size !== undefined ? patch.size : shipped?.size ?? null,
+        },
+      };
     });
   }
 
@@ -190,19 +276,29 @@ export function ReshipmentWizard({ orderId, orderLabel, onClose, onCreated }: Pr
       ) : (
         <div className="space-y-5">
           <p className="text-xs text-stone-500">
-            Use quando uma peça paga ficou de fora do pacote. O reenvio entra em Envios e o
-            frete (pago pela loja) conta no custo operacional — não nas vendas.
+            Use quando uma peça paga ficou de fora do pacote. Cor e tamanho podem ser
+            alterados no reenvio.
           </p>
           <div className="space-y-3">
             {cards.map((card) => (
               <div key={card.orderItemId} className="rounded-lg border border-stone-200 p-3">
                 <p className="text-sm font-medium text-stone-900">{card.identification}</p>
-                <ul className="mt-2 space-y-1.5">
+                <ul className="mt-2 space-y-2">
                   {card.units.map((unit) => {
                     const blocked = unavailableKeys.has(unit.key);
                     const checked = selected.has(unit.key);
+                    const shipped = shippedPiece(unit, overrides[unit.key]);
+                    const pieceOptions = catalogPieceForUnit(catalogProducts, unit);
+                    const colorOptions = pieceOptions?.colors.map((color) => color.name) ?? [];
+                    const sizeOptions = pieceOptions?.sizes.map((size) => size.name) ?? [];
+                    const customSizes =
+                      shipped?.size &&
+                      !(CUSTOM_SET_SIZES as readonly string[]).includes(shipped.size) &&
+                      !sizeOptions.includes(shipped.size)
+                        ? [...CUSTOM_SET_SIZES, shipped.size]
+                        : [...CUSTOM_SET_SIZES];
                     return (
-                      <li key={unit.key}>
+                      <li key={unit.key} className="rounded-md bg-stone-50 px-2 py-2">
                         <label
                           className={`flex items-center gap-2 text-sm ${
                             blocked ? "cursor-not-allowed text-stone-400" : "text-stone-700"
@@ -215,11 +311,78 @@ export function ReshipmentWizard({ orderId, orderLabel, onClose, onCreated }: Pr
                             onChange={() => toggleUnit(unit.key, blocked)}
                             className="h-4 w-4 rounded border-stone-300 accent-stone-900 disabled:opacity-40"
                           />
-                          <span>{unit.pieceLabel}</span>
+                          <span>
+                            {shipped ? formatPieceLabel(shipped) : unit.pieceLabel}
+                          </span>
                           {blocked ? (
                             <span className="text-xs">já em reenvio ativo</span>
                           ) : null}
                         </label>
+                        {checked && !blocked ? (
+                          <div className="mt-2 space-y-2 pl-6">
+                            {colorOptions.length > 0 ? (
+                              <div>
+                                <p className="mb-1 text-[11px] font-medium text-stone-500">Cor</p>
+                                <div className="flex flex-wrap gap-1">
+                                  {colorOptions.map((color) => (
+                                    <button
+                                      key={color}
+                                      type="button"
+                                      onClick={() => patchOverride(unit, { color })}
+                                      className={`rounded-md px-2 py-1 text-xs font-medium ${
+                                        shipped?.color === color
+                                          ? "bg-stone-900 text-white"
+                                          : "bg-white text-stone-600 ring-1 ring-stone-200"
+                                      }`}
+                                    >
+                                      {color}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : (
+                              <label className="block text-[11px] font-medium text-stone-500">
+                                Cor
+                                <input
+                                  value={shipped?.color ?? ""}
+                                  onChange={(e) =>
+                                    patchOverride(unit, {
+                                      color: e.target.value.trim() || null,
+                                    })
+                                  }
+                                  className="mt-1 w-full rounded-md border border-stone-200 bg-white px-2 py-1.5 text-sm text-stone-800"
+                                />
+                              </label>
+                            )}
+                            <div>
+                              <p className="mb-1 text-[11px] font-medium text-stone-500">
+                                Tamanho
+                              </p>
+                              <div className="flex flex-wrap gap-1">
+                                {(sizeOptions.length > 0 ? sizeOptions : customSizes).map(
+                                  (size) => (
+                                    <button
+                                      key={size}
+                                      type="button"
+                                      onClick={() =>
+                                        patchOverride(unit, {
+                                          size: shipped?.size === size ? null : size,
+                                        })
+                                      }
+                                      className={`min-w-[2.25rem] rounded-md px-2 py-1 text-xs font-semibold ${
+                                        shipped?.size === size
+                                          ? "bg-stone-900 text-white"
+                                          : "bg-white text-stone-600 ring-1 ring-stone-200"
+                                      }`}
+                                    >
+                                      {size}
+                                    </button>
+                                  )
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
                       </li>
                     );
                   })}

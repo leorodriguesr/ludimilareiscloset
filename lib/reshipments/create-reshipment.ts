@@ -5,10 +5,7 @@ import type {
 import { ARRANGED_DELIVERY_LABELS } from "@/lib/admin-sale/arranged-delivery";
 import type { CartPieceSelection } from "@/lib/cart/types";
 import { isLocalExchangeShippingMethod } from "@/lib/exchanges/shipping-method";
-import {
-  maxPieceUnitsForOrderItem,
-  pieceReturnKey,
-} from "@/lib/exchanges/return-units";
+import { returnUnitCount } from "@/lib/exchanges/return-units";
 import {
   parsePieceSelections,
   serializePieceSelections,
@@ -108,9 +105,10 @@ export async function createOrderReshipment(
   const purchased = new Map<string, number>();
   const itemById = new Map(order.items.map((item) => [item.id, item]));
   for (const item of order.items) {
-    for (const [key, qty] of maxPieceUnitsForOrderItem(item)) {
-      purchased.set(key, (purchased.get(key) ?? 0) + qty);
-    }
+    purchased.set(
+      item.id,
+      returnUnitCount(item.quantity, parsePieceSelections(item.pieceSelectionsJson))
+    );
   }
 
   const reserved = consumeReshipLinesIntoMap(
@@ -161,32 +159,34 @@ export async function createOrderReshipment(
     }
 
     const originalPieces = parsePieceSelections(orderItem.pieceSelectionsJson);
-    if (originalPieces.length > 0 && !line.pieceSelections?.length) {
+    const pieces = line.pieceSelections?.length
+      ? line.pieceSelections
+      : originalPieces;
+    if (originalPieces.length > 0 && pieces.length === 0) {
       throw new ReshipmentError(
         "PIECE_REQUIRED",
         "Informe cor e tamanho da peça."
       );
     }
-    const pieces = line.pieceSelections?.length
-      ? line.pieceSelections
-      : originalPieces;
-    const pieceRows: Array<CartPieceSelection | null> =
-      pieces.length > 0 ? pieces : [null];
-
-    for (let copy = 0; copy < qty; copy++) {
-      for (const piece of pieceRows) {
-        const key = pieceReturnKey(orderItem.id, piece);
-        const bought = purchased.get(key) ?? 0;
-        const used = reserved.get(key) ?? 0;
-        if (used + 1 > bought) {
-          throw new ReshipmentError(
-            "QTY_EXCEEDED",
-            "Quantidade maior do que a comprada (ou já em outro reenvio ativo)."
-          );
-        }
-        reserved.set(key, used + 1);
+    const originalNames = new Set(originalPieces.map((piece) => piece.pieceName));
+    for (const piece of pieces) {
+      if (originalNames.size > 0 && !originalNames.has(piece.pieceName)) {
+        throw new ReshipmentError(
+          "PIECE_MISMATCH",
+          "Só é possível alterar cor e tamanho da peça original, não o produto."
+        );
       }
     }
+    const incoming = returnUnitCount(qty, pieces);
+    const bought = purchased.get(orderItem.id) ?? 0;
+    const used = reserved.get(orderItem.id) ?? 0;
+    if (used + incoming > bought) {
+      throw new ReshipmentError(
+        "QTY_EXCEEDED",
+        "Quantidade maior do que a comprada (ou já em outro reenvio ativo)."
+      );
+    }
+    reserved.set(orderItem.id, used + incoming);
 
     itemRows.push({
       orderItem: { connect: { id: orderItem.id } },
