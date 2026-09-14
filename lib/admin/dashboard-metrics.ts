@@ -11,6 +11,7 @@ import {
   CashLedgerKind,
   ExchangeShippingPaidBy,
   ExchangeStatus,
+  OrderReshipmentStatus,
 } from "@/app/generated/prisma/client";
 import { ORDER_STATUS } from "@/lib/orders/constants";
 import { expireOrdersBatch } from "@/lib/orders/expire-orders";
@@ -220,7 +221,7 @@ export async function getDashboardMetrics(
     }
   }
 
-  const [extraSales, ledgerRows, storeShippings] = await Promise.all([
+  const [extraSales, ledgerRows, storeShippings, storeReships] = await Promise.all([
     prisma.exchange.findMany({
       where: {
         additionalSaleRecognizedAt: inPeriod,
@@ -255,6 +256,23 @@ export async function getDashboardMetrics(
       },
       select: { cost: true },
     }),
+    prisma.orderReshipment.findMany({
+      where: {
+        paidBy: ExchangeShippingPaidBy.STORE,
+        cost: { gt: 0 },
+        OR: [
+          { labelGeneratedAt: inPeriod },
+          {
+            AND: [
+              { labelGeneratedAt: null },
+              { createdAt: inPeriod },
+              { status: { not: OrderReshipmentStatus.CANCELLED } },
+            ],
+          },
+        ],
+      },
+      select: { cost: true },
+    }),
   ]);
   const exchangeAdditionalSaleCount = extraSales.length;
   const exchangeAdditionalItemsCount = extraSales.reduce(
@@ -278,7 +296,10 @@ export async function getDashboardMetrics(
       .reduce((sum, row) => sum + row.amount, 0) * 100
   ) / 100;
   const storeShippingCost = Math.round(
-    storeShippings.reduce((sum, row) => sum + (row.cost ?? 0), 0) * 100
+    [...storeShippings, ...storeReships].reduce(
+      (sum, row) => sum + (row.cost ?? 0),
+      0
+    ) * 100
   ) / 100;
   const cashInTotal = Math.round(
     ledgerRows

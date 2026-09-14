@@ -56,6 +56,24 @@ enum OrderEventType {
   NOTE_ADDED
 }
 
+/** Reenvio de peça esquecida: não é venda nem troca. */
+enum OrderReshipmentStatus {
+  TO_PACK
+  PACKED
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum OrderReshipmentEventType {
+  CREATED
+  LABEL_GENERATED
+  PACKED
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
 enum ExchangeKind {
   /** Troca: devolve itens e (opcionalmente) envia novos. */
   EXCHANGE
@@ -177,6 +195,7 @@ model User {
   orders       Order[]
   ordersCreated Order[]   @relation("OrdersCreatedByStaff")
   exchangesOpened Exchange[] @relation("ExchangesOpenedByStaff")
+  reshipmentsCreated OrderReshipment[] @relation("ReshipmentsCreatedByStaff")
   favorites    Favorite[]
 }
 
@@ -307,6 +326,7 @@ model Order {
   stockReservations  StockReservation[]
   events             OrderEvent[]
   exchanges          Exchange[]
+  reshipments        OrderReshipment[]
   cashLedgerEntries  CashLedgerEntry[]
 
   @@index([userId, status])
@@ -464,6 +484,92 @@ model OrderEvent {
   @@index([orderId, createdAt])
 }
 
+/** Reenvio de peças do pedido original (sem nova venda e sem novo débito de estoque). */
+model OrderReshipment {
+  id                String                 @id @default(cuid())
+  orderId           String
+  order             Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status            OrderReshipmentStatus  @default(TO_PACK)
+  notes             String?
+  createdByUserId   String?
+  createdBy         User?                  @relation("ReshipmentsCreatedByStaff", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  method            ExchangeShippingMethod @default(CARRIER)
+  paidBy            ExchangeShippingPaidBy @default(STORE)
+  shippingServiceId Int?
+  shippingServiceName String?
+  quotedPrice       Float?
+  cost              Float?
+  trackingCode      String?
+  superfreteShipmentId String?
+  superfreteStatus  String?
+  labelUrl          String?
+  labelGeneratedAt  DateTime?
+  packageHeightCm   Float?
+  packageWidthCm    Float?
+  packageLengthCm   Float?
+  packageWeightKg   Float?
+  shippingStatus    String                 @default("to_pack")
+
+  recipientName     String?
+  phone             String?
+  email             String?
+  cpf               String?
+  destinationCep    String?
+  addressStreet     String?
+  addressNumber     String?
+  addressComplement String?
+  addressNeighborhood String?
+  addressCity       String?
+  addressState      String?
+
+  packedAt          DateTime?
+  shippedAt         DateTime?
+  deliveredAt       DateTime?
+  cancelledAt       DateTime?
+  cancellationReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items  OrderReshipmentItem[]
+  events OrderReshipmentEvent[]
+
+  @@index([orderId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([superfreteShipmentId])
+}
+
+model OrderReshipmentItem {
+  id                  String          @id @default(cuid())
+  reshipmentId        String
+  reshipment          OrderReshipment @relation(fields: [reshipmentId], references: [id], onDelete: Cascade)
+  orderItemId         String
+  orderItem           OrderItem       @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  productId           String?
+  productName         String
+  productImageUrl     String?
+  quantity            Int
+  unitPrice           Float
+  pieceSelectionsJson String?
+
+  @@index([reshipmentId])
+  @@index([orderItemId])
+}
+
+model OrderReshipmentEvent {
+  id          String                    @id @default(cuid())
+  reshipmentId String
+  reshipment  OrderReshipment           @relation(fields: [reshipmentId], references: [id], onDelete: Cascade)
+  type        OrderReshipmentEventType
+  actorUserId String?
+  payloadJson String?
+  createdAt   DateTime                  @default(now())
+
+  @@index([reshipmentId, createdAt])
+}
+
 /** Cobrança de um pedido: inicial ou acréscimo após o pagamento. */
 model OrderCharge {
   id        String   @id @default(cuid())
@@ -618,6 +724,7 @@ model OrderItem {
   paidAt        DateTime?
   chargeId      String?
   charge        OrderCharge? @relation(fields: [chargeId], references: [id], onDelete: SetNull)
+  reshipmentItems OrderReshipmentItem[]
 
   @@index([orderId])
   @@index([productId])

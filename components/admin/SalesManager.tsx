@@ -19,6 +19,7 @@ import { formatDeliveryDaysLabel } from "@/lib/shipping/delivery-days-label";
 import type { NormalizedShippingOption } from "@/lib/shipping/types";
 import type { Product } from "@/lib/types";
 import { StandaloneSaleWizard } from "@/components/admin/StandaloneSaleWizard";
+import { ReshipmentWizard } from "@/components/admin/ReshipmentWizard";
 import {
   isPendingAdminSaleCustomer,
   orderCustomerDisplayEmail,
@@ -1771,15 +1772,18 @@ function OrderRowActionsMenu({
   onToggleDetails,
   onPatchOrder,
   onRequestCancel,
+  onCreateReshipment,
 }: {
   order: AdminOrder;
   isDetailsOpen: boolean;
   onToggleDetails: () => void;
   onPatchOrder: (id: string, patch: Partial<AdminOrder>) => void;
   onRequestCancel: () => void;
+  onCreateReshipment: () => void;
 }) {
   const { hasPermission } = useAuth();
   const canMarkPaid = hasPermission(PERMISSION.ADMIN_SALE_MARK_PAID);
+  const canCreateReshipment = hasPermission(PERMISSION.SHIPPING_MANAGE);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -2222,6 +2226,20 @@ function OrderRowActionsMenu({
       });
     }
 
+    if (canCreateReshipment && isPaid && !isInactive) {
+      items.push({
+        id: "reship",
+        label: "Criar reenvio",
+        separatorBefore: items.length > 0,
+        icon: (
+          <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5 12 2.25 3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+          </svg>
+        ),
+        onClick: onCreateReshipment,
+      });
+    }
+
     if (!isInactive) {
       items.push({
         id: "cancel",
@@ -2240,8 +2258,11 @@ function OrderRowActionsMenu({
     return items;
   }, [
     busy,
+    canCreateReshipment,
     isInactive,
+    isPaid,
     isDetailsOpen,
+    onCreateReshipment,
     onRequestCancel,
     onToggleDetails,
     order.customerDataToken,
@@ -3538,6 +3559,7 @@ function OrderDetailsBody({
           onConfirm={(paidAtDate) => void markSalePaid(paidAtDate)}
         />
       ) : null}
+
     </div>
   );
 }
@@ -3720,6 +3742,7 @@ export function SalesManager() {
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
   const [showWizard, setShowWizard] = useState(false);
+  const [reshipOrder, setReshipOrder] = useState<AdminOrder | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
 
   const fetchProducts = useCallback(async (): Promise<Product[]> => {
@@ -4238,6 +4261,7 @@ export function SalesManager() {
                           onToggleDetails={() => toggleDetails(order.id)}
                           onPatchOrder={patchOrder}
                           onRequestCancel={() => requestCancel(order.id)}
+                          onCreateReshipment={() => setReshipOrder(order)}
                         />
                       </tr>
                     </Fragment>
@@ -4272,6 +4296,22 @@ export function SalesManager() {
           )
         }
       />
+
+      {reshipOrder ? (
+        <ReshipmentWizard
+          orderId={reshipOrder.id}
+          orderLabel={
+            reshipOrder.orderNumber != null
+              ? `#${reshipOrder.orderNumber}`
+              : "este pedido"
+          }
+          onClose={() => setReshipOrder(null)}
+          onCreated={() => {
+            setReshipOrder(null);
+            void softRefresh();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -11,6 +11,10 @@ import {
 } from "@/lib/shipping/service-id";
 import { SHIPPING_PROVIDERS } from "@/lib/shipping/providers";
 import { deliveredAtOnStatusChange } from "@/lib/orders/delivered-at";
+import {
+  applyReshipmentProviderUpdate,
+  resolveReshipmentIdByShipmentId,
+} from "@/lib/reshipments/apply-provider-status";
 
 type MeWebhookPayload = {
   event?: string;
@@ -235,6 +239,36 @@ export async function POST(request: NextRequest) {
       });
     } catch (e) {
       console.error("[webhook melhor-envio] exchange", e);
+      return NextResponse.json({ error: "server" }, { status: 500 });
+    }
+  }
+
+  const reshipmentId = data.id?.trim()
+    ? await resolveReshipmentIdByShipmentId(data.id.trim())
+    : null;
+  if (reshipmentId) {
+    const shippingStatus =
+      mappedStatus === "shipped" || mappedStatus === "delivered"
+        ? mappedStatus
+        : labelCancelled || meStatus === "cancelled"
+          ? "cancelled"
+          : "labeled";
+    try {
+      await applyReshipmentProviderUpdate({
+        reshipmentId,
+        labelCancelled,
+        superfreteStatus: meStatus || undefined,
+        tracking,
+        shippingStatus,
+        tagUrl,
+      });
+      return NextResponse.json({
+        ok: true,
+        matched: true,
+        reshipmentId,
+      });
+    } catch (e) {
+      console.error("[webhook melhor-envio] reshipment", e);
       return NextResponse.json({ error: "server" }, { status: 500 });
     }
   }

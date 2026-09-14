@@ -23,6 +23,11 @@ import {
   listExchangeOutboundShipmentOrders,
   sliceMergedShipmentPage,
 } from "@/lib/exchanges/list-outbound-shipments";
+import {
+  listReshipmentShipmentOrders,
+  reshipmentIsActiveInAllTotal,
+  reshipmentMatchesSearch,
+} from "@/lib/reshipments/list-reship-shipments";
 
 const BASE_WHERE: Prisma.OrderWhereInput = {
   paidAt: { not: null },
@@ -78,7 +83,10 @@ export async function GET(request: NextRequest) {
     const countFor = (key: string | null) =>
       prisma.order.count({ where: andWhere([filterWhere(key), search]) });
 
-    const allExchanges = await listExchangeOutboundShipmentOrders();
+    const [allExchanges, allReships] = await Promise.all([
+      listExchangeOutboundShipmentOrders(),
+      listReshipmentShipmentOrders(),
+    ]);
     const matchingExchanges = (key: string | null) =>
       allExchanges.filter(
         (row) =>
@@ -89,6 +97,18 @@ export async function GET(request: NextRequest) {
             exchangeStatus: row.exchangeStatus,
             filter: key,
           }) && exchangeOutboundMatchesSearch(row, q)
+      );
+    const matchingReships = (key: string | null) =>
+      allReships.filter(
+        (row) =>
+          exchangeOutboundMatchesFilter({
+            shippingStatus: row.shippingStatus,
+            labelUrl: row.labelUrl,
+            fulfillmentType: row.fulfillmentType,
+            exchangeStatus:
+              row.reshipmentStatus === "CANCELLED" ? "CANCELLED" : undefined,
+            filter: key,
+          }) && reshipmentMatchesSearch(row, q)
       );
 
     const [
@@ -112,10 +132,14 @@ export async function GET(request: NextRequest) {
     ]);
 
     const pageExchanges = matchingExchanges(filter);
-    const total = orderTotal + pageExchanges.length;
+    const pageReships = matchingReships(filter);
+    const extraRows = [...pageExchanges, ...pageReships];
+    const total = orderTotal + extraRows.length;
     const allTotal =
       orderAllTotal +
-      allExchanges.filter((row) => row.exchangeStatus !== "CANCELLED").length;
+      allExchanges.filter((row) => row.exchangeStatus !== "CANCELLED").length +
+      allReships.filter((row) => reshipmentIsActiveInAllTotal(row.reshipmentStatus))
+        .length;
     const safePage = clampAdminListPage(page, total, limit);
     const offset = (safePage - 1) * limit;
 
@@ -187,7 +211,7 @@ export async function GET(request: NextRequest) {
 
     const pageRows = sliceMergedShipmentPage(
       enrichedOrders,
-      pageExchanges,
+      extraRows,
       offset,
       limit
     );
@@ -199,12 +223,26 @@ export async function GET(request: NextRequest) {
       page: safePage,
       limit,
       counts: {
-        needs_label: needsLabel + matchingExchanges("needs_label").length,
-        to_pack: toPack + matchingExchanges("to_pack").length,
-        packed: packed + matchingExchanges("packed").length,
-        shipped: shipped + matchingExchanges("shipped").length,
-        delivered: delivered + matchingExchanges("delivered").length,
-        cancelled: cancelled + matchingExchanges("cancelled").length,
+        needs_label:
+          needsLabel +
+          matchingExchanges("needs_label").length +
+          matchingReships("needs_label").length,
+        to_pack:
+          toPack + matchingExchanges("to_pack").length + matchingReships("to_pack").length,
+        packed:
+          packed + matchingExchanges("packed").length + matchingReships("packed").length,
+        shipped:
+          shipped +
+          matchingExchanges("shipped").length +
+          matchingReships("shipped").length,
+        delivered:
+          delivered +
+          matchingExchanges("delivered").length +
+          matchingReships("delivered").length,
+        cancelled:
+          cancelled +
+          matchingExchanges("cancelled").length +
+          matchingReships("cancelled").length,
       },
     });
   } catch (e) {

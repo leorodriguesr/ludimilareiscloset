@@ -8,6 +8,10 @@ import {
   normalizeProviderShipmentStatus,
 } from "@/lib/shipping/service-id";
 import { deliveredAtOnStatusChange } from "@/lib/orders/delivered-at";
+import {
+  applyReshipmentProviderUpdate,
+  resolveReshipmentIdByShipmentId,
+} from "@/lib/reshipments/apply-provider-status";
 
 type SuperfreteWebhookPayload = {
   event?: string;
@@ -146,6 +150,43 @@ export async function POST(request: NextRequest) {
         });
       } catch (e) {
         console.error("[webhook superfrete] exchange", e);
+        return NextResponse.json({ error: "server" }, { status: 500 });
+      }
+    }
+
+    const reshipmentId = data.id?.trim()
+      ? await resolveReshipmentIdByShipmentId(data.id.trim())
+      : null;
+    if (reshipmentId) {
+      const sfStatus = normalizeProviderShipmentStatus(
+        data.status ?? event.replace(/^order\./, "")
+      );
+      const mappedStatus = mapSuperfreteStatusToShippingStatus(sfStatus);
+      const tracking = data.tracking?.trim() || undefined;
+      const labelCancelled = isCancelledProviderShipmentStatus(sfStatus);
+      const shippingStatus =
+        mappedStatus === "shipped" || mappedStatus === "delivered"
+          ? mappedStatus
+          : labelCancelled
+            ? "cancelled"
+            : "labeled";
+      const tagUrl = data.tags?.find((t) => t.url?.trim())?.url?.trim();
+      try {
+        await applyReshipmentProviderUpdate({
+          reshipmentId,
+          labelCancelled,
+          superfreteStatus: sfStatus || undefined,
+          tracking,
+          shippingStatus,
+          tagUrl,
+        });
+        return NextResponse.json({
+          ok: true,
+          matched: true,
+          reshipmentId,
+        });
+      } catch (e) {
+        console.error("[webhook superfrete] reshipment", e);
         return NextResponse.json({ error: "server" }, { status: 500 });
       }
     }

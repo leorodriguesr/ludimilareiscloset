@@ -6,6 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { generateOrderLabel } from "@/lib/shipping/generate-order-label";
 import { ShippingQuoteError } from "@/lib/shipping/types";
 import { requireAdminApi } from "@/lib/require-admin-api";
+import { ReshipmentError } from "@/lib/reshipments/constants";
+import { generateReshipmentLabel } from "@/lib/reshipments/generate-reship-label";
 
 const MAX_BULK = 25;
 const CONCURRENCY = 3;
@@ -92,6 +94,24 @@ export async function POST(request: NextRequest) {
         } satisfies BulkResult;
       }
 
+      const reship = await prisma.orderReshipment.findUnique({
+        where: { id: orderId },
+        select: { id: true, shippingServiceId: true },
+      });
+      if (reship) {
+        const generated = await generateReshipmentLabel({
+          reshipmentId: reship.id,
+          actorUserId: gate.userId,
+          serviceId: reship.shippingServiceId,
+        });
+        return {
+          orderId,
+          ok: true,
+          tracking: generated?.trackingCode ?? null,
+          labelUrl: generated?.labelUrl ?? undefined,
+        } satisfies BulkResult;
+      }
+
       const result = await generateOrderLabel(orderId);
       return {
         orderId,
@@ -101,7 +121,9 @@ export async function POST(request: NextRequest) {
       } satisfies BulkResult;
     } catch (e) {
       const message =
-        e instanceof ExchangeError || e instanceof ShippingQuoteError
+        e instanceof ExchangeError ||
+        e instanceof ReshipmentError ||
+        e instanceof ShippingQuoteError
           ? e.message
           : e instanceof Error
             ? e.message
