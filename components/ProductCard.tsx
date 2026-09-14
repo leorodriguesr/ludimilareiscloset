@@ -73,9 +73,9 @@ export function ProductCard({
     pixPrice != null && Number.isFinite(pixPrice) && pixPrice > 0;
   const installments =
     installmentCount != null &&
-    Number.isFinite(installmentCount) &&
-    installmentCount >= 1 &&
-    installmentCount <= 24
+      Number.isFinite(installmentCount) &&
+      installmentCount >= 1 &&
+      installmentCount <= 24
       ? Math.floor(installmentCount)
       : null;
   const installmentEach =
@@ -152,11 +152,10 @@ export function ProductCard({
                     selectedColor === color.name ? null : color.name
                   )
                 }
-                className={`h-4 w-4 cursor-pointer rounded-full border transition-all ${
-                  selectedColor === color.name
+                className={`h-4 w-4 cursor-pointer rounded-full border transition-all ${selectedColor === color.name
                     ? "scale-110 ring-1 ring-stone-900 "
                     : "border-stone-200"
-                }`}
+                  }`}
                 style={colorSwatchStyle(color.hex)}
               />
             ))}
@@ -173,33 +172,46 @@ export function ProductCard({
             {name}
           </h3>
 
-          <div className="space-y-1.5">
-            <p className="text-sm font-semibold tabular-nums text-stone-900">
-              {formatPrice(price)}
-            </p>
-
-            {installments != null && installmentEach != null && (
-              <div className="flex items-center gap-1.5">
-                <IconCard className="h-3.5 w-3.5 shrink-0 text-stone-400" />
-                <span className="text-[11px] tabular-nums text-stone-600">
-                  {installments} x {formatPrice(installmentEach)} sem juros
-                </span>
-              </div>
-            )}
-
-            {showPix && (
+          <div className="space-y-1">
+            {showPix ? (
               <div className="flex items-center gap-1.5">
                 <Image
                   src="/pix-icon.svg"
                   alt=""
-                  width={14}
-                  height={14}
+                  width={16}
+                  height={16}
                   unoptimized
-                  className="h-3.5 w-3.5 shrink-0 object-contain"
+                  className="h-4 w-4 shrink-0 object-contain"
                 />
-                <span className="text-[11px] font-semibold tabular-nums text-emerald-700">
+                <p className="text-sm font-semibold tabular-nums text-emerald-700">
                   {formatPrice(pixPrice!)}
-                </span>
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm font-semibold tabular-nums text-stone-900">
+                {formatPrice(price)}
+              </p>
+            )}
+
+            {installments != null && installmentEach != null && (
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-1.5">
+                  <IconCard className="h-3.5 w-3.5 shrink-0 text-stone-400" />
+                  <span className="text-xs font-semibold tabular-nums text-stone-800">
+                    {installments}x {formatPrice(installmentEach)}
+                    <span className="font-normal text-stone-500"> sem juros </span>
+                    {showPix ? (
+                      <span className="hidden text-[11px] tabular-nums text-stone-400 sm:inline">
+                        ({formatPrice(price)})
+                      </span>
+                    ) : null}
+                  </span>
+                </div>
+                {showPix ? (
+                  <p className="pl-5 text-[11px] tabular-nums text-stone-400 sm:hidden">
+                    ({formatPrice(price)})
+                  </p>
+                ) : null}
               </div>
             )}
           </div>
