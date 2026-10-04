@@ -26,12 +26,15 @@ function computeProductStockFromPieces(
   namedPieces: PieceForm[]
 ): { stockType: StockTypeValue; stockQuantity: number | null } {
   let sum = 0;
+  let hasLimited = false;
   let hasVariantMatrix = false;
   for (const p of namedPieces) {
     const reconciled = reconcileVariants(p);
     if (p.sizes.length > 0 && reconciled.variants.length > 0) {
       hasVariantMatrix = true;
       for (const v of reconciled.variants) {
+        if (v.unlimited) continue;
+        hasLimited = true;
         sum += Math.max(
           0,
           Math.floor(Number.parseInt(String(v.quantity).trim(), 10) || 0)
@@ -39,7 +42,7 @@ function computeProductStockFromPieces(
       }
     }
   }
-  if (hasVariantMatrix) {
+  if (hasVariantMatrix && hasLimited) {
     return { stockType: STOCK.LIMITED, stockQuantity: sum };
   }
   return { stockType: STOCK.UNLIMITED, stockQuantity: null };
@@ -49,6 +52,7 @@ interface PieceVariantForm {
   colorName: string;
   sizeName: string;
   quantity: string;
+  unlimited: boolean;
 }
 
 interface PieceForm {
@@ -110,6 +114,7 @@ function reconcileVariants(piece: PieceForm): PieceForm {
         colorName: c.name,
         sizeName: s.name,
         quantity: found?.quantity ?? fromSizeOnly?.quantity ?? "0",
+        unlimited: found?.unlimited ?? fromSizeOnly?.unlimited ?? false,
       });
     }
   }
@@ -132,6 +137,7 @@ function mapInitialPieces(
           colorName: v.colorName,
           sizeName: v.sizeName,
           quantity: String(v.quantity),
+          unlimited: Boolean(v.unlimited),
         })) ?? [],
     });
   });
@@ -152,10 +158,13 @@ function serializePieceForApi(piece: PieceForm) {
     variants: reconciled.variants.map((v) => ({
       colorName: v.colorName,
       sizeName: v.sizeName,
-      quantity: Math.max(
-        0,
-        Math.floor(Number.parseInt(String(v.quantity).trim(), 10) || 0)
-      ),
+      unlimited: v.unlimited,
+      quantity: v.unlimited
+        ? 0
+        : Math.max(
+            0,
+            Math.floor(Number.parseInt(String(v.quantity).trim(), 10) || 0)
+          ),
     })),
   };
 }
@@ -190,6 +199,50 @@ const COMMON_COLORS = [
 ];
 
 const COMMON_COLOR_NAMES = new Set(COMMON_COLORS.map((c) => c.name));
+
+function VariantStockField({
+  label,
+  quantity,
+  unlimited,
+  onQuantity,
+  onUnlimited,
+}: {
+  label: string;
+  quantity: string;
+  unlimited: boolean;
+  onQuantity: (value: string) => void;
+  onUnlimited: (unlimited: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-center gap-1">
+      <input
+        type="number"
+        min={0}
+        step={1}
+        inputMode="numeric"
+        aria-label={label}
+        disabled={unlimited}
+        className="w-full max-w-[4.5rem] rounded-md border border-stone-300 bg-white px-1 py-1.5 text-center text-sm font-medium tabular-nums text-stone-900 focus:border-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-900/10 disabled:bg-stone-100 disabled:text-stone-400"
+        value={unlimited ? "" : quantity}
+        onChange={(e) => onQuantity(e.target.value)}
+      />
+      <button
+        type="button"
+        onClick={() => onUnlimited(!unlimited)}
+        aria-pressed={unlimited}
+        aria-label={unlimited ? `${label}: ilimitado` : `${label}: marcar como ilimitado`}
+        title="Ilimitado"
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border text-base leading-none ${
+          unlimited
+            ? "border-stone-900 bg-stone-900 text-white"
+            : "border-stone-300 bg-white text-stone-500 hover:border-stone-900 hover:text-stone-900"
+        }`}
+      >
+        ∞
+      </button>
+    </div>
+  );
+}
 
 export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -363,7 +416,26 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
         if (i !== pieceIndex) return p;
         const variants = (p.variants ?? []).map((v) =>
           v.colorName === colorName && v.sizeName === sizeName
-            ? { ...v, quantity }
+            ? { ...v, quantity, unlimited: false }
+            : v
+        );
+        return { ...p, variants };
+      })
+    );
+  }
+
+  function setVariantUnlimited(
+    pieceIndex: number,
+    colorName: string,
+    sizeName: string,
+    unlimited: boolean
+  ) {
+    setPieces((prev) =>
+      prev.map((p, i) => {
+        if (i !== pieceIndex) return p;
+        const variants = (p.variants ?? []).map((v) =>
+          v.colorName === colorName && v.sizeName === sizeName
+            ? { ...v, unlimited, quantity: unlimited ? "0" : v.quantity || "0" }
             : v
         );
         return { ...p, variants };
@@ -1174,20 +1246,24 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
                               {s.name}
                             </th>
                             <td className="border-b border-stone-50 p-1.5">
-                              <input
-                                type="number"
-                                min={0}
-                                step={1}
-                                inputMode="numeric"
-                                aria-label={`Quantidade ${piece.name || "peça"} ${s.name}`}
-                                className="w-full max-w-[4.5rem] rounded-md border border-stone-300 bg-white px-1 py-1.5 text-center text-sm font-medium tabular-nums text-stone-900 focus:border-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-900/10"
-                                value={cell?.quantity ?? "0"}
-                                onChange={(e) =>
+                              <VariantStockField
+                                label={`Quantidade ${piece.name || "peça"} ${s.name}`}
+                                quantity={cell?.quantity ?? "0"}
+                                unlimited={cell?.unlimited ?? false}
+                                onQuantity={(value) =>
                                   updateVariantQty(
                                     pi,
                                     SIZE_ONLY_COLOR_NAME,
                                     s.name,
-                                    e.target.value
+                                    value
+                                  )
+                                }
+                                onUnlimited={(unlimited) =>
+                                  setVariantUnlimited(
+                                    pi,
+                                    SIZE_ONLY_COLOR_NAME,
+                                    s.name,
+                                    unlimited
                                   )
                                 }
                               />
@@ -1250,20 +1326,19 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
                                 key={`${c.name}-${s.name}`}
                                 className="border-b border-stone-50 p-1.5"
                               >
-                                <input
-                                  type="number"
-                                  min={0}
-                                  step={1}
-                                  inputMode="numeric"
-                                  aria-label={`Quantidade ${piece.name || "peça"} ${c.name} ${s.name}`}
-                                  className="w-full max-w-[4.5rem] rounded-md border border-stone-300 bg-white px-1 py-1.5 text-center text-sm font-medium tabular-nums text-stone-900 focus:border-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-900/10"
-                                  value={cell?.quantity ?? "0"}
-                                  onChange={(e) =>
-                                    updateVariantQty(
+                                <VariantStockField
+                                  label={`Quantidade ${piece.name || "peça"} ${c.name} ${s.name}`}
+                                  quantity={cell?.quantity ?? "0"}
+                                  unlimited={cell?.unlimited ?? false}
+                                  onQuantity={(value) =>
+                                    updateVariantQty(pi, c.name, s.name, value)
+                                  }
+                                  onUnlimited={(unlimited) =>
+                                    setVariantUnlimited(
                                       pi,
                                       c.name,
                                       s.name,
-                                      e.target.value
+                                      unlimited
                                     )
                                   }
                                 />

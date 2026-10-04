@@ -10,6 +10,7 @@ export function qtyForCombination(
   const v = piece.variants.find(
     (x) => x.color.name === colorName && x.size.name === sizeName
   );
+  if (v?.unlimited) return Number.POSITIVE_INFINITY;
   return v?.quantity ?? 0;
 }
 
@@ -42,6 +43,69 @@ export function emptyPieceSelections(pieces: ProductPiece[]): PieceSelectionMap 
 
 export function pieceShowsColorPicker(piece: ProductPiece): boolean {
   return piece.colors.length > 0 && !isSizeOnlyPiece(piece);
+}
+
+/** Teto da quantidade na vitrine quando a combinação não tem estoque finito. */
+export const OPEN_PURCHASE_QTY = 99;
+
+type StockPiece = {
+  id: string;
+  name?: string;
+  variants: Array<{
+    quantity: number;
+    unlimited?: boolean;
+    color: { name: string };
+    size: { name: string };
+  }>;
+};
+
+/** Quantidade máxima comprável da seleção atual. Combinação ilimitada não usa a soma do produto. */
+export function maxPurchasableQuantity(input: {
+  stockType?: string | null;
+  stockQuantity?: number | null;
+  pieces?: StockPiece[];
+  selections?: PieceSelectionMap;
+  cartSelections?: CartPieceSelection[];
+}): number {
+  const pieces = (input.pieces ?? []).filter((piece) => piece.variants.length > 0);
+  if (pieces.length === 0) {
+    if (input.stockType === "LIMITED") {
+      return Math.max(0, input.stockQuantity ?? 0);
+    }
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const selectedLimits: number[] = [];
+  let selected = false;
+  for (const piece of pieces) {
+    const fromMap = input.selections?.[piece.id];
+    const fromCart = piece.name
+      ? input.cartSelections?.find((row) => row.pieceName === piece.name)
+      : undefined;
+    const color = fromMap?.color ?? fromCart?.color ?? null;
+    const size = fromMap?.size ?? fromCart?.size ?? null;
+    if (!color || !size) continue;
+    selected = true;
+    const variant = piece.variants.find(
+      (row) => row.color.name === color && row.size.name === size
+    );
+    if (!variant) return 0;
+    if (variant.unlimited) continue;
+    selectedLimits.push(Math.max(0, variant.quantity));
+  }
+
+  if (!selected) {
+    if (pieces.some((piece) => piece.variants.some((row) => row.unlimited))) {
+      return Number.POSITIVE_INFINITY;
+    }
+    const quantities = pieces.flatMap((piece) =>
+      piece.variants.map((row) => row.quantity)
+    );
+    return quantities.length > 0 ? Math.max(...quantities) : 0;
+  }
+
+  if (selectedLimits.length === 0) return Number.POSITIVE_INFINITY;
+  return Math.min(...selectedLimits);
 }
 
 export function buildCartPieceSelections(

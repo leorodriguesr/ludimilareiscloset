@@ -47,6 +47,7 @@ export interface PieceSize {
 export interface PieceVariant {
   id: string;
   quantity: number;
+  unlimited?: boolean;
   colorId: string;
   sizeId: string;
   color: PieceColor;

@@ -161,7 +161,7 @@ async function syncProductStockQuantityFromVariants(
       stockType: true,
       pieces: {
         select: {
-          variants: { select: { quantity: true } },
+          variants: { select: { quantity: true, unlimited: true } },
         },
       },
     },
@@ -173,7 +173,9 @@ async function syncProductStockQuantityFromVariants(
   if (!hasVariants) return;
 
   const sum = product.pieces.reduce(
-    (acc, p) => acc + p.variants.reduce((a, v) => a + v.quantity, 0),
+    (acc, p) =>
+      acc +
+      p.variants.reduce((a, v) => a + (v.unlimited ? 0 : v.quantity), 0),
     0
   );
 

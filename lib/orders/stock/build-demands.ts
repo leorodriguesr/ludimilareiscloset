@@ -24,6 +24,7 @@ type VariantReader = {
               select: {
                 id: true;
                 quantity: true;
+                unlimited: true;
                 color: { select: { name: true } };
                 size: { select: { name: true } };
               };
@@ -40,6 +41,7 @@ type VariantReader = {
         variants: {
           id: string;
           quantity: number;
+          unlimited: boolean;
           color: { name: string };
           size: { name: string };
         }[];
@@ -61,21 +63,23 @@ function mergeDemand(
   }
 }
 
-function findVariantId(
+function findVariant(
   variants: {
     id: string;
+    unlimited: boolean;
     color: { name: string };
     size: { name: string };
   }[],
   colorName: string | null,
   sizeName: string | null
-): string | null {
-  const match = variants.find(
-    (v) =>
-      (colorName == null || v.color.name === colorName) &&
-      (sizeName == null || v.size.name === sizeName)
+) {
+  return (
+    variants.find(
+      (v) =>
+        (colorName == null || v.color.name === colorName) &&
+        (sizeName == null || v.size.name === sizeName)
+    ) ?? null
   );
-  return match?.id ?? null;
 }
 
 /** Converte linhas do pedido em unidades de reserva (produto ou variante). */
@@ -99,6 +103,7 @@ export async function buildStockDemands(
               select: {
                 id: true,
                 quantity: true,
+                unlimited: true,
                 color: { select: { name: true } },
                 size: { select: { name: true } },
               },
@@ -136,21 +141,18 @@ export async function buildStockDemands(
           continue;
         }
 
-        const variantId = findVariantId(
-          piece.variants,
-          sel.color,
-          sel.size
-        );
-        if (!variantId) {
+        const variant = findVariant(piece.variants, sel.color, sel.size);
+        if (!variant) {
           throw new OrderCreateError(
             "VARIANT_NOT_FOUND",
             "Combinação de tamanho/cor indisponível."
           );
         }
+        if (variant.unlimited) continue;
 
         mergeDemand(map, {
           productId: product.id,
-          pieceVariantId: variantId,
+          pieceVariantId: variant.id,
           quantity: line.quantity,
         });
       }

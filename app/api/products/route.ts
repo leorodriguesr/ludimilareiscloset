@@ -198,7 +198,12 @@ export async function POST(request: NextRequest) {
     name: string;
     colors: { name: string; hex: string | null }[];
     sizes: { name: string }[];
-    variants: { colorName: string; sizeName: string; quantity: number }[];
+    variants: {
+      colorName: string;
+      sizeName: string;
+      quantity: number;
+      unlimited: boolean;
+    }[];
   }[] = [];
 
   for (let pi = 0; pi < piecesRaw.length; pi++) {
@@ -240,23 +245,31 @@ export async function POST(request: NextRequest) {
       colorName: string;
       sizeName: string;
       quantity: number;
+      unlimited: boolean;
     }[] = [];
     for (const vr of variantsRaw) {
       const row = vr as {
         colorName?: unknown;
         sizeName?: unknown;
         quantity?: unknown;
+        unlimited?: unknown;
       };
       const cn =
         typeof row.colorName === "string" ? row.colorName.trim() : "";
       const sn =
         typeof row.sizeName === "string" ? row.sizeName.trim() : "";
       if (!cn || !sn) continue;
+      const unlimited = row.unlimited === true;
       const q = Number(row.quantity);
       variants.push({
         colorName: cn,
         sizeName: sn,
-        quantity: Number.isFinite(q) && q >= 0 ? Math.floor(q) : 0,
+        unlimited,
+        quantity: unlimited
+          ? 0
+          : Number.isFinite(q) && q >= 0
+            ? Math.floor(q)
+            : 0,
       });
     }
 
@@ -350,6 +363,7 @@ export async function POST(request: NextRequest) {
             colorId: color.id,
             sizeId: size.id,
             quantity: v.quantity,
+            unlimited: v.unlimited,
           });
         }
       }

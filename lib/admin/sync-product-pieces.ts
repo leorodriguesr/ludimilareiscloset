@@ -5,7 +5,12 @@ export type SyncPieceInput = {
   name: string;
   colors: { name: string; hex: string | null }[];
   sizes: { name: string }[];
-  variants: { colorName: string; sizeName: string; quantity: number }[];
+  variants: {
+    colorName: string;
+    sizeName: string;
+    quantity: number;
+    unlimited: boolean;
+  }[];
 };
 
 type PieceSyncTx = Pick<
@@ -27,6 +32,7 @@ type ExistingPiece = {
   variants: {
     id: string;
     quantity: number;
+    unlimited: boolean;
     colorId: string;
     sizeId: string;
     color: { name: string };
@@ -79,6 +85,7 @@ export function parsePiecesPayload(raw: unknown): SyncPieceInput[] {
         colorName?: unknown;
         sizeName?: unknown;
         quantity?: unknown;
+        unlimited?: unknown;
       };
       const colorName =
         typeof variant.colorName === "string" ? variant.colorName.trim() : "";
@@ -86,10 +93,16 @@ export function parsePiecesPayload(raw: unknown): SyncPieceInput[] {
         typeof variant.sizeName === "string" ? variant.sizeName.trim() : "";
       if (!colorName || !sizeName) continue;
       const q = Number(variant.quantity);
+      const unlimited = variant.unlimited === true;
       variants.push({
         colorName,
         sizeName,
-        quantity: Number.isFinite(q) && q >= 0 ? Math.floor(q) : 0,
+        quantity: unlimited
+          ? 0
+          : Number.isFinite(q) && q >= 0
+            ? Math.floor(q)
+            : 0,
+        unlimited,
       });
     }
 
@@ -186,6 +199,7 @@ async function createProductPiece(
       colorId: color.id,
       sizeId: size.id,
       quantity: variant.quantity,
+      unlimited: variant.unlimited,
     });
   }
 }
@@ -201,7 +215,7 @@ async function syncPieceVariants(
   const quantityByKey = new Map(
     input.variants.map((v) => [
       variantKey(v.colorName, v.sizeName),
-      v.quantity,
+      { quantity: v.quantity, unlimited: v.unlimited },
     ])
   );
 
@@ -233,19 +247,25 @@ async function syncPieceVariants(
       if (!dbColor || !dbSize) continue;
 
       const existing = existingByKey.get(key);
-      const nextQuantity = quantityByKey.has(key)
-        ? quantityByKey.get(key)!
-        : existing?.quantity ?? 0;
+      const next = quantityByKey.get(key) ?? {
+        quantity: existing?.quantity ?? 0,
+        unlimited: existing?.unlimited ?? false,
+      };
 
       if (existing) {
-        if (nextQuantity !== existing.quantity) {
-          const reserved = await getReservedQuantity(tx, existing.id);
-          if (nextQuantity < reserved) {
-            throw new Error("INSUFFICIENT_STOCK_FOR_RESERVATIONS");
+        if (
+          next.quantity !== existing.quantity ||
+          next.unlimited !== existing.unlimited
+        ) {
+          if (!next.unlimited) {
+            const reserved = await getReservedQuantity(tx, existing.id);
+            if (next.quantity < reserved) {
+              throw new Error("INSUFFICIENT_STOCK_FOR_RESERVATIONS");
+            }
           }
           await tx.pieceVariant.update({
             where: { id: existing.id },
-            data: { quantity: nextQuantity },
+            data: { quantity: next.quantity, unlimited: next.unlimited },
           });
         }
         continue;
@@ -255,7 +275,8 @@ async function syncPieceVariants(
         pieceId: piece.id,
         colorId: dbColor.id,
         sizeId: dbSize.id,
-        quantity: nextQuantity,
+        quantity: next.quantity,
+        unlimited: next.unlimited,
       });
     }
   }

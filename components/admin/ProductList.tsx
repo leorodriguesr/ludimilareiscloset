@@ -258,8 +258,23 @@ export function ProductList({
           const coverImage = product.images[0]?.url;
           const categories = product.categories.map((pc) => pc.category.name);
           const sections = (product.sections ?? []).map((ps) => ps.section.name);
-          const stockQty = product.stockQuantity ?? 0;
-          const isLimited = product.stockType === "LIMITED";
+          const variants = product.pieces.flatMap((piece) => piece.variants);
+          const hasUnlimitedVariant = variants.some((variant) => variant.unlimited);
+          const limitedUnits = variants
+            .filter((variant) => !variant.unlimited)
+            .reduce((sum, variant) => sum + variant.quantity, 0);
+          const stockQty =
+            variants.length > 0 ? limitedUnits : product.stockQuantity ?? 0;
+          const isLimited = variants.length > 0
+            ? !hasUnlimitedVariant
+            : product.stockType === "LIMITED";
+          const stockLabel = hasUnlimitedVariant
+            ? stockQty > 0
+              ? `${stockQty} + ∞`
+              : "∞"
+            : isLimited
+              ? `${stockQty} un.`
+              : "∞";
           const variantCount = countProductVariants(product);
           const colorCount = countProductColors(product);
           const margin =
@@ -320,7 +335,7 @@ export function ProductList({
                 <div className="grid grid-cols-3 gap-1.5">
                   <StatTile
                     label="Estoque"
-                    value={isLimited ? `${stockQty} un.` : "∞"}
+                    value={stockLabel}
                     tone={
                       outOfStock || lowStock
                         ? "warning"

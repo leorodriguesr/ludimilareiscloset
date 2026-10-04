@@ -26,7 +26,12 @@ export interface ProductFormData {
     name: string;
     colors: { name: string; hex: string }[];
     sizes: { name: string }[];
-    variants: { colorName: string; sizeName: string; quantity: string }[];
+    variants: {
+      colorName: string;
+      sizeName: string;
+      quantity: string;
+      unlimited: boolean;
+    }[];
   }[];
   categoryIds: string[];
   sectionIds: string[];
@@ -65,6 +70,7 @@ export function mapProductToFormData(product: Product): ProductFormData {
         colorName: v.color.name,
         sizeName: v.size.name,
         quantity: String(v.quantity),
+        unlimited: Boolean(v.unlimited),
       })),
     })),
     categoryIds: product.categories.map((pc) => pc.categoryId),

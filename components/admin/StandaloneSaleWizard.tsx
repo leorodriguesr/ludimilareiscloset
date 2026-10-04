@@ -14,6 +14,7 @@ import { installmentValueEqualParts } from "@/lib/product-pricing";
 import {
   buildCartPieceSelections,
   emptyPieceSelections,
+  maxPurchasableQuantity,
   pieceSelectionsAreComplete,
   type PieceSelectionMap,
 } from "@/lib/product-piece-selection";
@@ -628,6 +629,20 @@ function OrderSummary({
 
 /* ─── Main wizard ────────────────────────────────────────────── */
 
+/** Teto do input quando a combinação tem estoque finito. Ilimitado não recebe max. */
+function finitePurchaseCap(
+  product: Pick<Product, "stockType" | "stockQuantity" | "pieces">,
+  selections: PieceSelectionMap
+): number | undefined {
+  const cap = maxPurchasableQuantity({
+    stockType: product.stockType,
+    stockQuantity: product.stockQuantity,
+    pieces: product.pieces,
+    selections,
+  });
+  return Number.isFinite(cap) ? cap : undefined;
+}
+
 export function StandaloneSaleWizard({
   products,
   onClose,
@@ -1095,11 +1110,19 @@ export function StandaloneSaleWizard({
   const canGoNext =
     step === 0
       ? lines.length > 0 &&
-        lines.every((l) =>
-          l.kind === "custom"
-            ? true
-            : pieceSelectionsAreComplete(l.product.pieces, l.selections)
-        )
+        lines.every((l) => {
+          if (l.kind === "custom") return true;
+          if (!pieceSelectionsAreComplete(l.product.pieces, l.selections)) return false;
+          return (
+            l.quantity <=
+            maxPurchasableQuantity({
+              stockType: l.product.stockType,
+              stockQuantity: l.product.stockQuantity,
+              pieces: l.product.pieces,
+              selections: l.selections,
+            })
+          );
+        })
       : step === 1
         ? fulfillmentType === "ARRANGED"
           ? arrangedMode !== null
@@ -1460,18 +1483,59 @@ export function StandaloneSaleWizard({
                                 </button>
                               </div>
 
+                              {line.kind === "catalog" && line.product.pieces.length > 0 && (
+                                <div className="border-t border-stone-100 pt-3">
+                                  <PieceSelector
+                                    pieces={line.product.pieces}
+                                    selections={line.selections}
+                                    onSelectionsChange={(next) => {
+                                      if (line.kind !== "catalog") return;
+                                      const cap = maxPurchasableQuantity({
+                                        stockType: line.product.stockType,
+                                        stockQuantity: line.product.stockQuantity,
+                                        pieces: line.product.pieces,
+                                        selections: next,
+                                      });
+                                      updateLine(idx, {
+                                        selections: next,
+                                        quantity:
+                                          cap > 0
+                                            ? Math.min(Math.max(1, line.quantity), cap)
+                                            : line.quantity,
+                                      });
+                                    }}
+                                  />
+                                </div>
+                              )}
+
                               <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2 sm:grid-cols-[6rem_minmax(0,12rem)] sm:gap-3">
                                 <div>
                                   <FieldLabel>Qtd</FieldLabel>
                                   <TextInput
                                     type="number"
                                     min={1}
-                                    value={line.quantity}
-                                    onChange={(e) =>
-                                      updateLine(idx, {
-                                        quantity: Math.max(1, Number(e.target.value) || 1),
-                                      })
+                                    max={
+                                      line.kind === "catalog"
+                                        ? finitePurchaseCap(line.product, line.selections)
+                                        : undefined
                                     }
+                                    value={line.quantity}
+                                    onChange={(e) => {
+                                      const next = Math.max(1, Number(e.target.value) || 1);
+                                      const cap =
+                                        line.kind === "catalog"
+                                          ? maxPurchasableQuantity({
+                                              stockType: line.product.stockType,
+                                              stockQuantity: line.product.stockQuantity,
+                                              pieces: line.product.pieces,
+                                              selections: line.selections,
+                                            })
+                                          : next;
+                                      updateLine(idx, {
+                                        quantity:
+                                          cap > 0 ? Math.min(Math.max(1, next), cap) : next,
+                                      });
+                                    }}
                                   />
                                 </div>
                                 <div>
@@ -1508,19 +1572,6 @@ export function StandaloneSaleWizard({
                                   </div>
                                 </div>
                               </div>
-
-                              {line.kind === "catalog" && line.product.pieces.length > 0 && (
-                                <div className="border-t border-stone-100 pt-3">
-                                  <FieldLabel>Variantes</FieldLabel>
-                                  <PieceSelector
-                                    pieces={line.product.pieces}
-                                    selections={line.selections}
-                                    onSelectionsChange={(next) =>
-                                      updateLine(idx, { selections: next })
-                                    }
-                                  />
-                                </div>
-                              )}
                             </div>
                           </div>
                         </li>

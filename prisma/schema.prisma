@@ -840,6 +840,8 @@ model PieceSize {
 model PieceVariant {
   id        String       @id @default(cuid())
   quantity  Int          @default(0)
+  /** Quando verdadeiro, a combinação não debita estoque. */
+  unlimited Boolean      @default(false)
   pieceId   String
   colorId   String
   sizeId    String

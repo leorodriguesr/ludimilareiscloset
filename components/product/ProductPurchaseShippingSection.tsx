@@ -3,7 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { ProductPurchaseActions } from "@/components/product/ProductPurchaseActions";
 import { ProductShippingQuote } from "@/components/product/ProductShippingQuote";
-import type { PieceSelectionMap } from "@/lib/product-piece-selection";
+import {
+  maxPurchasableQuantity,
+  OPEN_PURCHASE_QTY,
+  type PieceSelectionMap,
+} from "@/lib/product-piece-selection";
 import type { ProductPiece, StockType } from "@/lib/types";
 
 type Props = {
@@ -32,11 +36,16 @@ export function ProductPurchaseShippingSection(props: Props) {
   } = props;
 
   const maxQty = useMemo(() => {
-    if (stockType === "LIMITED") {
-      return Math.max(0, stockQuantity ?? 0);
-    }
-    return 99;
-  }, [stockType, stockQuantity]);
+    const available = maxPurchasableQuantity({
+      stockType,
+      stockQuantity,
+      pieces,
+      selections,
+    });
+    return Number.isFinite(available)
+      ? available
+      : OPEN_PURCHASE_QTY;
+  }, [stockType, stockQuantity, pieces, selections]);
 
   const [qty, setQty] = useState(1);
   const available = maxQty > 0;

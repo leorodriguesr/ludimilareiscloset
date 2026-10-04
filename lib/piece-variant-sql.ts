@@ -15,12 +15,14 @@ export function insertPieceVariantRow(
     colorId: string;
     sizeId: string;
     quantity: number;
+    unlimited?: boolean;
   }
 ): Promise<number> {
   const id = randomUUID();
+  const unlimited = args.unlimited ? 1 : 0;
   return tx.$executeRaw`
-    INSERT INTO "PieceVariant" ("id", "quantity", "pieceId", "colorId", "sizeId")
-    VALUES (${id}, ${args.quantity}, ${args.pieceId}, ${args.colorId}, ${args.sizeId})
+    INSERT INTO "PieceVariant" ("id", "quantity", "unlimited", "pieceId", "colorId", "sizeId")
+    VALUES (${id}, ${args.quantity}, ${unlimited}, ${args.pieceId}, ${args.colorId}, ${args.sizeId})
   `;
 }
 

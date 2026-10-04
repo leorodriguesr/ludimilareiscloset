@@ -6,6 +6,7 @@ import { quoteShippingForCartLines } from "@/lib/shipping/quote-cart";
 import { parseSuperfreteServiceId } from "@/lib/shipping/service-id";
 import { normalizePostalCode } from "@/lib/shipping/superfrete";
 import { resolveCheckoutShippingCharge } from "@/lib/config/checkout-shipping-charge";
+import { maxPurchasableQuantity } from "@/lib/product-piece-selection";
 import { resolveShippingProviderFromQuote } from "@/lib/shipping/providers";
 
 export type CheckoutLineInput = {
@@ -169,6 +170,20 @@ export async function createOrderFromCheckout(input: {
             take: 1,
             select: { url: true },
           },
+            pieces: {
+              select: {
+                id: true,
+                name: true,
+                variants: {
+                select: {
+                  quantity: true,
+                  unlimited: true,
+                  color: { select: { name: true } },
+                  size: { select: { name: true } },
+                },
+              },
+            },
+          },
         },
       });
 
@@ -180,7 +195,15 @@ export async function createOrderFromCheckout(input: {
       }
 
       if (product.stockType === StockType.LIMITED) {
-        const available = product.stockQuantity ?? 0;
+        const hasVariants = product.pieces.some((piece) => piece.variants.length > 0);
+        const available = hasVariants
+          ? maxPurchasableQuantity({
+              stockType: product.stockType,
+              stockQuantity: product.stockQuantity,
+              pieces: product.pieces,
+              cartSelections: line.pieceSelections,
+            })
+          : product.stockQuantity ?? 0;
         if (available < line.quantity) {
           throw new OrderCreateError(
             "INSUFFICIENT_STOCK",
