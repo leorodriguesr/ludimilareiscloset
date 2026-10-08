@@ -484,8 +484,8 @@ export function AdminPanel({
               Categorias da loja
             </h2>
             <p className="text-sm text-stone-500 mb-6">
-              As categorias aparecem como filtro na página inicial. As quatro
-              primeiras, em ordem alfabética, também entram com foto logo
+              As categorias aparecem como filtro na página inicial, na ordem
+              definida aqui. As quatro primeiras também entram com foto logo
               abaixo da primeira seção de produtos. Escolha essa foto em cada
               categoria.
             </p>

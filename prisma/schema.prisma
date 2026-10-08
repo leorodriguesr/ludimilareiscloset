@@ -735,6 +735,8 @@ model Category {
   id            String            @id @default(cuid())
   name          String
   slug          String            @unique
+  /** Posição na vitrine e no filtro. Menor número aparece primeiro. */
+  order         Int               @default(0)
   /** Foto escolhida no admin para o bloco de categorias da página inicial. */
   coverImageUrl String?
   createdAt     DateTime          @default(now())

@@ -25,6 +25,7 @@ export function CategoryManager({ onCategoriesChange }: CategoryManagerProps) {
   const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [savingCoverId, setSavingCoverId] = useState<string | null>(null);
+  const [movingId, setMovingId] = useState<string | null>(null);
 
   const fetchCategories = useCallback(async () => {
     const res = await fetch("/api/admin/category-covers");
@@ -57,6 +58,28 @@ export function CategoryManager({ onCategoriesChange }: CategoryManagerProps) {
       }
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleMove(id: string, direction: "up" | "down") {
+    const index = categories.findIndex((category) => category.id === id);
+    const swapIndex = direction === "up" ? index - 1 : index + 1;
+    if (index < 0 || swapIndex < 0 || swapIndex >= categories.length) return;
+
+    const next = [...categories];
+    const [item] = next.splice(index, 1);
+    next.splice(swapIndex, 0, item);
+    setCategories(next);
+    setMovingId(id);
+    try {
+      const res = await fetch("/api/admin/category-order", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: next.map((category) => category.id) }),
+      });
+      if (!res.ok) await fetchCategories();
+    } finally {
+      setMovingId(null);
     }
   }
 
@@ -153,14 +176,40 @@ export function CategoryManager({ onCategoriesChange }: CategoryManagerProps) {
                 className="rounded-xl border border-stone-200 bg-white p-4"
               >
                 <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-sm font-medium text-stone-900">{c.name}</p>
-                    <p className="text-xs text-stone-500 font-mono">{c.slug}</p>
-                    <p className="mt-1 text-xs text-stone-500">
-                      {index < 4
-                        ? "Aparece com foto na página inicial."
-                        : "Fica só no filtro. As quatro primeiras categorias, em ordem alfabética, entram na página inicial."}
-                    </p>
+                  <div className="flex items-start gap-3">
+                    <div className="flex flex-col gap-0.5 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => handleMove(c.id, "up")}
+                        disabled={index === 0 || movingId === c.id}
+                        className="rounded p-0.5 text-stone-400 hover:text-stone-700 disabled:opacity-20"
+                        aria-label={`Mover ${c.name} para cima`}
+                      >
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
+                          <path d="M8 4l6 6H2z" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleMove(c.id, "down")}
+                        disabled={index === categories.length - 1 || movingId === c.id}
+                        className="rounded p-0.5 text-stone-400 hover:text-stone-700 disabled:opacity-20"
+                        aria-label={`Mover ${c.name} para baixo`}
+                      >
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
+                          <path d="M8 12l6-6H2z" />
+                        </svg>
+                      </button>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-stone-900">{c.name}</p>
+                      <p className="text-xs text-stone-500 font-mono">{c.slug}</p>
+                      <p className="mt-1 text-xs text-stone-500">
+                        {index < 4
+                          ? "Aparece com foto na página inicial."
+                          : "Fica só no filtro. As quatro primeiras desta lista entram com foto na página inicial."}
+                      </p>
+                    </div>
                   </div>
                   <button
                     type="button"

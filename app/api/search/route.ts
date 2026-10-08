@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
     }),
     prisma.category.findMany({
       where: { name: { contains: q } },
-      orderBy: { name: "asc" },
+      orderBy: [{ order: "asc" }, { name: "asc" }],
       take: 5,
     }),
   ]);

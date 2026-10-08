@@ -17,7 +17,7 @@ async function nextAvailableSlug(baseSlug: string) {
 export async function GET() {
   try {
     const categories = await prisma.category.findMany({
-      orderBy: { name: "asc" },
+      orderBy: [{ order: "asc" }, { name: "asc" }],
     });
     return NextResponse.json(categories);
   } catch (error) {
@@ -53,8 +53,9 @@ export async function POST(request: NextRequest) {
 
   try {
     const slug = await nextAvailableSlug(base);
+    const maxOrder = await prisma.category.aggregate({ _max: { order: true } });
     const category = await prisma.category.create({
-      data: { name, slug },
+      data: { name, slug, order: (maxOrder._max.order ?? -1) + 1 },
     });
     return NextResponse.json(category, { status: 201 });
   } catch (error) {

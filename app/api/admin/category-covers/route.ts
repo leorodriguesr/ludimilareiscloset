@@ -13,7 +13,7 @@ export async function GET() {
 
   try {
     const categories = await prisma.category.findMany({
-      orderBy: { name: "asc" },
+      orderBy: [{ order: "asc" }, { name: "asc" }],
       include: {
         products: {
           where: { product: publicCatalogProductWhere },
@@ -53,6 +53,7 @@ export async function GET() {
           id: category.id,
           name: category.name,
           slug: category.slug,
+          order: category.order,
           coverImageUrl: category.coverImageUrl,
           photos,
         };

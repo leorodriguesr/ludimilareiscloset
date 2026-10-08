@@ -70,7 +70,7 @@ export default async function Home({ searchParams }: HomeProps) {
           }),
       prisma.storeSettings.findUnique({ where: { id: "default" } }),
       prisma.category.findMany({
-        orderBy: { name: "asc" },
+        orderBy: [{ order: "asc" }, { name: "asc" }],
         include: {
           products: {
             where: { product: publicCatalogProductWhere },

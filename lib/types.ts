@@ -2,6 +2,7 @@ export interface Category {
   id: string;
   name: string;
   slug: string;
+  order?: number;
   coverImageUrl?: string | null;
 }
 
