@@ -870,6 +870,17 @@ model StoreSettings {
   storeDeliveryFee     Float   @default(0)
 }
 
+/** Registro antigo dos vídeos do YouTube. A vitrine da home usa os arquivos em public/videos. */
+model ShowcaseVideo {
+  id        String   @id @default(cuid())
+  youtubeId String
+  sourceUrl String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([sortOrder])
+}
+
 /** Tokens OAuth do Melhor Envio (conta da loja). */
 model MelhorEnvioAuth {
   id                     String   @id @default("default")

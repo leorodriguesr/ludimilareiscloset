@@ -10,7 +10,7 @@ export function CartHeaderLink() {
     <button
       type="button"
       onClick={openCart}
-      className="relative flex h-9 w-9 items-center justify-center rounded-full text-stone-600 transition-colors hover:bg-stone-100 hover:text-stone-900"
+      className="relative flex h-9 w-9 items-center justify-center rounded-full text-stone-800 transition-colors hover:bg-[#F3E4DF] hover:text-[#8E5A64]"
       aria-label={
         showBadge
           ? `Abrir carrinho com ${itemCount} item(ns)`
@@ -21,7 +21,7 @@ export function CartHeaderLink() {
         className="h-5 w-5"
         fill="none"
         stroke="currentColor"
-        strokeWidth={1.75}
+        strokeWidth={1.5}
         viewBox="0 0 24 24"
         aria-hidden
       >
@@ -32,7 +32,7 @@ export function CartHeaderLink() {
         />
       </svg>
       {showBadge && (
-        <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-stone-900 px-1 text-[9px] font-semibold text-white">
+        <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#B5838D] px-1 text-[9px] font-semibold text-white">
           {itemCount > 99 ? "99+" : itemCount}
         </span>
       )}

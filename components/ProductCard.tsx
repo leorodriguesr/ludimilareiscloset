@@ -102,6 +102,8 @@ export function ProductCard({
   }
 
   const imageUrl = activeImage?.url ?? null;
+  const hoverImageUrl =
+    images.find((image) => image.url !== imageUrl)?.url ?? null;
 
   return (
     <div className="group flex flex-col">
@@ -119,7 +121,9 @@ export function ProductCard({
               loading={priority ? "eager" : "lazy"}
               decoding="async"
               fetchPriority={priority ? "high" : "low"}
-              className="h-full w-full object-cover object-center transition-transform duration-500 group-hover:scale-105"
+              className={`h-full w-full object-cover object-center transition-all duration-700 ease-out group-hover:scale-105 ${
+                hoverImageUrl ? "group-hover:opacity-0" : ""
+              }`}
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-stone-300">
@@ -128,6 +132,18 @@ export function ProductCard({
               </svg>
             </div>
           )}
+
+          {hoverImageUrl ? (
+            <img
+              src={cloudinaryImageUrl(hoverImageUrl, 720)}
+              alt=""
+              width={720}
+              height={960}
+              loading="lazy"
+              decoding="async"
+              className="absolute inset-0 h-full w-full scale-105 object-cover object-center opacity-0 transition-all duration-700 ease-out group-hover:scale-100 group-hover:opacity-100"
+            />
+          ) : null}
 
           {tag && (
             <span className="absolute left-0 top-3 bg-stone-900 px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-white">
@@ -216,6 +232,7 @@ export function ProductCard({
             )}
           </div>
         </Link>
+
       </div>
     </div>
   );

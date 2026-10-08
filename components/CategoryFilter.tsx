@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 interface Category {
@@ -17,6 +17,28 @@ export function CategoryFilter({ categories }: CategoryFilterProps) {
   const searchParams = useSearchParams();
   const active = searchParams.get("c");
   const prevActive = useRef<string | null>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const [pinned, setPinned] = useState(false);
+
+  useEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return;
+
+    const headerOffset = () =>
+      window.matchMedia("(min-width: 640px)").matches ? 64 : 56;
+
+    const update = () => {
+      setPinned(bar.getBoundingClientRect().top <= headerOffset() + 1);
+    };
+
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, []);
 
   useEffect(() => {
     if (active && active !== prevActive.current) {
@@ -32,8 +54,16 @@ export function CategoryFilter({ categories }: CategoryFilterProps) {
   if (categories.length === 0) return null;
 
   return (
-    <div className="sticky top-14 z-40 -mx-2 border-b border-stone-100 bg-white/95 backdrop-blur-sm min-[401px]:-mx-3 sm:-mx-4 sm:top-16">
-      <div className=" flex max-w-7xl items-center overflow-x-auto px-2 scrollbar-hide min-[401px]:px-3 sm:px-4 md:px-6">
+    <div ref={barRef} className="sticky top-14 z-40 h-0 sm:top-16">
+      <div
+        aria-hidden={!pinned}
+        className={`-mx-2 border-b border-stone-100 bg-white/95 backdrop-blur-sm transition-[opacity,transform,visibility] duration-300 ease-out min-[401px]:-mx-3 sm:-mx-4 ${
+          pinned
+            ? "visible translate-y-0 opacity-100"
+            : "pointer-events-none invisible -translate-y-2 opacity-0"
+        }`}
+      >
+        <div className="flex max-w-7xl items-center overflow-x-auto px-2 scrollbar-hide min-[401px]:px-3 sm:px-4 md:px-6">
         <Link
           href="/"
           scroll={false}
@@ -61,6 +91,7 @@ export function CategoryFilter({ categories }: CategoryFilterProps) {
             {cat.name}
           </Link>
         ))}
+        </div>
       </div>
     </div>
   );

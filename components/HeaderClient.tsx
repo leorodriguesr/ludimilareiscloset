@@ -15,10 +15,10 @@ interface Props {
 }
 
 const iconBtnClass =
-  "relative flex h-9 w-9 items-center justify-center rounded-full text-stone-600 transition-colors hover:bg-stone-100 hover:text-stone-900";
+  "relative flex h-9 w-9 items-center justify-center rounded-full text-stone-800 transition-colors hover:bg-[#F3E4DF] hover:text-[#8E5A64]";
 
 const badgeClass =
-  "absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-stone-900 px-1 text-[9px] font-semibold text-white";
+  "absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#B5838D] px-1 text-[9px] font-semibold text-white";
 
 export function HeaderClient({ loggedIn, accountHref, greetingName, avatarUrl }: Props) {
   const [searchOpen, setSearchOpen] = useState(false);
@@ -35,15 +35,14 @@ export function HeaderClient({ loggedIn, accountHref, greetingName, avatarUrl }:
   }, []);
 
   const logo = (
-    <Link
-      href="/"
-      className="group flex flex-col items-center leading-none transition-opacity hover:opacity-70 sm:items-start"
-    >
-      <span className="text-base font-extralight uppercase tracking-[0.22em] text-stone-900 sm:text-lg sm:tracking-[0.28em] md:tracking-[0.32em]">
+    <Link href="/" className="group flex flex-col items-center leading-none">
+      <span className="text-[15px] font-light uppercase tracking-[0.26em] text-stone-900 transition-colors group-hover:text-[#8E5A64] sm:text-lg sm:tracking-[0.32em]">
         Ludimila Reis
       </span>
-      <span className="mt-0.5 text-[10px] font-light uppercase tracking-[0.38em] text-stone-400">
+      <span className="mt-1 flex items-center gap-2 text-[9px] font-medium uppercase tracking-[0.46em] text-[#B5838D]">
+        <span className="h-px w-3 bg-[#B5838D]/80 sm:w-4" aria-hidden />
         Closet
+        <span className="h-px w-3 bg-[#B5838D]/80 sm:w-4" aria-hidden />
       </span>
     </Link>
   );
@@ -55,7 +54,7 @@ export function HeaderClient({ loggedIn, accountHref, greetingName, avatarUrl }:
       onClick={() => setSearchOpen(true)}
       className={iconBtnClass}
     >
-      <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
+      <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
       </svg>
     </button>
@@ -67,7 +66,7 @@ export function HeaderClient({ loggedIn, accountHref, greetingName, avatarUrl }:
       aria-label={`Favoritos${count > 0 ? ` (${count})` : ""}`}
       className={iconBtnClass}
     >
-      <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
+      <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12Z" />
       </svg>
       {count > 0 && (
@@ -80,7 +79,7 @@ export function HeaderClient({ loggedIn, accountHref, greetingName, avatarUrl }:
     <Link
       href="/minha-conta"
       aria-label={greetingName ? `Minha conta — ${greetingName}` : "Minha conta"}
-      className="flex h-9 items-center gap-2 rounded-full px-2 transition-colors hover:bg-stone-100 sm:px-3"
+      className="flex h-9 items-center gap-2 rounded-full px-2 transition-colors hover:bg-[#F3E4DF] sm:px-3"
     >
       <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-stone-900 text-white">
         {avatarUrl ? (
@@ -102,10 +101,10 @@ export function HeaderClient({ loggedIn, accountHref, greetingName, avatarUrl }:
     <Link
       href={accountHref}
       aria-label="Entrar"
-      className="flex h-9 w-9 items-center justify-center rounded-full text-stone-600 transition-colors hover:bg-stone-100 hover:text-stone-900 sm:h-auto sm:w-auto sm:rounded-none sm:px-1 sm:hover:bg-transparent"
+      className="flex h-9 w-9 items-center justify-center rounded-full text-stone-800 transition-colors hover:bg-[#F3E4DF] hover:text-[#8E5A64] sm:h-auto sm:w-auto sm:rounded-none sm:px-1 sm:hover:bg-transparent"
     >
       <UserNavIcon className="h-5 w-5 sm:hidden" />
-      <span className="hidden text-xs font-medium uppercase tracking-widest text-stone-500 underline decoration-stone-300 underline-offset-4 transition-colors hover:text-stone-900 hover:decoration-stone-900 sm:inline">
+      <span className="hidden text-[11px] font-medium uppercase tracking-[0.22em] text-stone-700 underline decoration-[#B5838D]/50 underline-offset-4 transition-colors hover:text-[#8E5A64] hover:decoration-[#8E5A64] sm:inline">
         Entrar
       </span>
     </Link>
@@ -113,36 +112,33 @@ export function HeaderClient({ loggedIn, accountHref, greetingName, avatarUrl }:
 
   return (
     <header
-      className={`sticky top-0 z-50 w-full min-w-0 border-b bg-white/90 backdrop-blur-md transition-[border-color,box-shadow] duration-200 ${
-        scrolled
-          ? "border-stone-200/80 shadow-sm"
-          : "border-stone-200 shadow-none"
+      className={`sticky top-0 z-50 w-full min-w-0 border-b border-[#E7D5D0] bg-[#FDFCFB]/95 backdrop-blur-md transition-shadow duration-200 ${
+        scrolled ? "shadow-[0_10px_28px_-20px_rgba(142,90,100,0.55)]" : "shadow-none"
       }`}
     >
-      <div className="mx-auto flex h-14 w-full min-w-0 max-w-7xl items-center px-4 sm:h-16 sm:px-6 md:px-8">
-        {/* Layout mobile: 3 colunas — esquerda, centro, direita */}
-        <div className="flex w-full items-center sm:hidden">
-          <div className="flex flex-1 items-center gap-0.5">
-            {searchBtn}
-            {favBtn}
-          </div>
-          {logo}
-          <div className="flex flex-1 items-center justify-end gap-0.5">
-            <CartHeaderLink />
-            {accountBtn}
-          </div>
+      <div className="mx-auto grid h-14 w-full min-w-0 max-w-7xl grid-cols-[1fr_auto_1fr] items-center px-4 sm:h-16 sm:px-6 md:px-8">
+        <div className="flex items-center gap-0.5">
+          <span className="lg:hidden">{searchBtn}</span>
+          <button
+            type="button"
+            onClick={() => setSearchOpen(true)}
+            className="hidden h-9 w-52 items-center gap-2 rounded-full border border-[#E7D5D0] bg-white px-3 text-left text-[12px] text-stone-400 transition-colors hover:border-[#B5838D] hover:text-[#8E5A64] lg:flex"
+          >
+            <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+            </svg>
+            Buscar seu look
+          </button>
+          <span className="lg:hidden">{favBtn}</span>
         </div>
 
-        {/* Layout desktop: logo à esquerda, ações à direita */}
-        <div className="hidden w-full items-center justify-between sm:flex">
-          {logo}
-          <nav className="flex items-center gap-0.5" aria-label="Ações">
-            {searchBtn}
-            {favBtn}
-            <CartHeaderLink />
-            {accountBtn}
-          </nav>
-        </div>
+        {logo}
+
+        <nav className="flex items-center justify-end gap-0.5" aria-label="Ações">
+          <span className="hidden lg:contents">{favBtn}</span>
+          <CartHeaderLink />
+          {accountBtn}
+        </nav>
       </div>
 
       {searchOpen && <SearchOverlay onClose={() => setSearchOpen(false)} />}
