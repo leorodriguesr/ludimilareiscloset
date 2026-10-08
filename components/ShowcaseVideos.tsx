@@ -53,17 +53,21 @@ export function ShowcaseVideos({ videos = showcaseVideos }: { videos?: readonly 
             type="button"
             aria-label="Vídeo anterior"
             onClick={() => setCenter((current) => (current - 1 + count) % count)}
-            className="absolute left-0 top-1/2 z-20 flex h-10 w-8 -translate-y-1/2 items-center justify-center text-2xl text-stone-700 transition-colors hover:text-stone-950"
+            className="absolute left-1 top-1/2 z-20 flex h-11 w-10 -translate-y-1/2 items-center justify-center text-[#B5838D] drop-shadow-[0_0_6px_rgba(255,255,255,0.95)] sm:left-0 sm:text-stone-700 sm:drop-shadow-none sm:hover:text-stone-950"
           >
-            ‹
+            <svg viewBox="0 0 20 20" aria-hidden className="h-7 w-7" fill="currentColor">
+              <path d="M12.8 4.2 7 10l5.8 5.8-1.4 1.4L4.2 10l7.2-7.2z" />
+            </svg>
           </button>
           <button
             type="button"
             aria-label="Próximo vídeo"
             onClick={() => setCenter((current) => (current + 1) % count)}
-            className="absolute right-0 top-1/2 z-20 flex h-10 w-8 -translate-y-1/2 items-center justify-center text-2xl text-stone-700 transition-colors hover:text-stone-950"
+            className="absolute right-1 top-1/2 z-20 flex h-11 w-10 -translate-y-1/2 items-center justify-center text-[#B5838D] drop-shadow-[0_0_6px_rgba(255,255,255,0.95)] sm:right-0 sm:text-stone-700 sm:drop-shadow-none sm:hover:text-stone-950"
           >
-            ›
+            <svg viewBox="0 0 20 20" aria-hidden className="h-7 w-7" fill="currentColor">
+              <path d="M7.2 4.2 13 10l-5.8 5.8 1.4 1.4L15.8 10 8.6 2.8z" />
+            </svg>
           </button>
         </>
       ) : null}

@@ -215,19 +215,15 @@ export function ProductCard({
                   <IconCard className="h-3.5 w-3.5 shrink-0 text-stone-400" />
                   <span className="text-xs font-semibold tabular-nums text-stone-800">
                     {installments}x {formatPrice(installmentEach)}
-                    <span className="font-normal text-stone-500"> sem juros </span>
-                    {showPix ? (
-                      <span className="hidden text-[11px] tabular-nums text-stone-400 sm:inline">
+                    {/* {showPix ? (
+                      <span className="text-[11px] font-normal tabular-nums text-stone-400">
+                        {" "}
                         ({formatPrice(price)})
                       </span>
-                    ) : null}
+                    ) : null} */}
+                    <span className="font-normal text-stone-500"> s/ juros</span>
                   </span>
                 </div>
-                {showPix ? (
-                  <p className="pl-5 text-[11px] tabular-nums text-stone-400 sm:hidden">
-                    ({formatPrice(price)})
-                  </p>
-                ) : null}
               </div>
             )}
           </div>
