@@ -110,8 +110,9 @@ export default async function Home({ searchParams }: HomeProps) {
       .flatMap((item) => item.product.images.map((image) => image.url))
       .filter((url): url is string => Boolean(url));
     const imageUrl =
-      candidates.find((url) => !usedCategoryImages.has(url)) ??
-      candidates[0] ??
+      category.coverImageUrl ||
+      candidates.find((url) => !usedCategoryImages.has(url)) ||
+      candidates[0] ||
       null;
     if (imageUrl) usedCategoryImages.add(imageUrl);
 
@@ -218,19 +219,12 @@ function HomeCatalog({
         <div key={block.key} className="space-y-16">
           <section>
             {block.label ? <SectionHeading label={block.label} /> : null}
-            {index === 0 ? (
-              <div className="-mx-2 flex gap-3 overflow-x-auto px-2 pb-2 scrollbar-hide sm:-mx-4 sm:px-4">
-                <ProductCards
-                  products={block.products}
-                  eagerCount={4}
-                  itemClassName="w-[72%] shrink-0 sm:w-[42%] lg:w-[24%]"
-                />
-              </div>
-            ) : (
-              <ProductGrid>
-                <ProductCards products={block.products} />
-              </ProductGrid>
-            )}
+            <ProductGrid>
+              <ProductCards
+                products={block.products}
+                eagerCount={index === 0 ? 4 : 0}
+              />
+            </ProductGrid>
           </section>
           {index === 0 && categories.length > 0 ? (
             <div className="-mx-2 sm:-mx-4">

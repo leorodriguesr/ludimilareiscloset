@@ -109,7 +109,7 @@ export function ProductCard({
     <div className="group flex flex-col">
       <Link href={`/products/${id}`}>
         {/* Imagem */}
-        <div className="relative aspect-[3/4] overflow-hidden bg-stone-100">
+        <div className="relative aspect-[3/4] overflow-hidden rounded-lg bg-stone-100">
           {imageUrl ? (
             <img
               src={cloudinaryImageUrl(imageUrl, 720)}

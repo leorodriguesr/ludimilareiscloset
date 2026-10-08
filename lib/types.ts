@@ -2,6 +2,7 @@ export interface Category {
   id: string;
   name: string;
   slug: string;
+  coverImageUrl?: string | null;
 }
 
 export interface Section {

@@ -732,12 +732,14 @@ model OrderItem {
 }
 
 model Category {
-  id        String            @id @default(cuid())
-  name      String
-  slug      String            @unique
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
-  products  ProductCategory[]
+  id            String            @id @default(cuid())
+  name          String
+  slug          String            @unique
+  /** Foto escolhida no admin para o bloco de categorias da página inicial. */
+  coverImageUrl String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  products      ProductCategory[]
 }
 
 model ProductCategory {

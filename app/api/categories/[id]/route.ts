@@ -4,6 +4,25 @@ import { prisma } from "@/lib/prisma";
 import { requireAdminApi } from "@/lib/require-admin-api";
 import { slugify } from "@/lib/slug";
 
+function parseCoverImageUrl(value: unknown): string | null | undefined | NextResponse {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "string") {
+    return NextResponse.json({ error: "Foto da categoria inválida." }, { status: 400 });
+  }
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      return NextResponse.json({ error: "Foto da categoria inválida." }, { status: 400 });
+    }
+  } catch {
+    return NextResponse.json({ error: "Foto da categoria inválida." }, { status: 400 });
+  }
+  return trimmed;
+}
+
 async function uniqueSlug(
   desired: string,
   excludeId: string
@@ -34,11 +53,13 @@ export async function PUT(
     return NextResponse.json({ error: "JSON inválido." }, { status: 400 });
   }
 
-  const b = body as { name?: unknown; slug?: unknown };
+  const b = body as { name?: unknown; slug?: unknown; coverImageUrl?: unknown };
   const name =
     typeof b.name === "string" && b.name.trim() ? b.name.trim() : undefined;
   const slugRaw =
     typeof b.slug === "string" && b.slug.trim() ? b.slug.trim() : undefined;
+  const coverImageUrl = parseCoverImageUrl(b.coverImageUrl);
+  if (coverImageUrl instanceof NextResponse) return coverImageUrl;
 
   try {
     const current = await prisma.category.findUnique({ where: { id } });
@@ -58,6 +79,7 @@ export async function PUT(
       data: {
         ...(name !== undefined && { name }),
         ...(slug !== undefined && { slug }),
+        ...(coverImageUrl !== undefined && { coverImageUrl }),
       },
     });
     return NextResponse.json(category);
