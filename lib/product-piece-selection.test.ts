@@ -45,4 +45,28 @@ describe("maxPurchasableQuantity", () => {
     });
     assert.equal(available, Number.POSITIVE_INFINITY);
   });
+
+  it("permite comprar combinação zerada quando o produto aceita encomenda", () => {
+    const available = maxPurchasableQuantity({
+      stockType: "LIMITED",
+      stockQuantity: 0,
+      allowBackorder: true,
+      pieces: [
+        {
+          id: "piece-1",
+          name: "Calça",
+          variants: [
+            {
+              quantity: 0,
+              unlimited: false,
+              color: { name: "Preto" },
+              size: { name: "M" },
+            },
+          ],
+        },
+      ],
+      selections: { "piece-1": { color: "Preto", size: "M" } },
+    });
+    assert.equal(available, 99);
+  });
 });

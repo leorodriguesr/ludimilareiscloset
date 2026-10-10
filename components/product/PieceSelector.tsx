@@ -15,12 +15,14 @@ interface PieceSelectorProps {
   pieces: ProductPiece[];
   selections?: PieceSelectionMap;
   onSelectionsChange?: (next: PieceSelectionMap) => void;
+  allowBackorder?: boolean;
 }
 
 export function PieceSelector({
   pieces,
   selections: controlledSelections,
   onSelectionsChange,
+  allowBackorder = false,
 }: PieceSelectorProps) {
   const isControlled =
     controlledSelections != null && onSelectionsChange != null;
@@ -90,7 +92,8 @@ export function PieceSelector({
         piece &&
         hasVariantMatrix(piece) &&
         color != null &&
-        qtyForCombination(piece, color, sizeName) === 0
+        qtyForCombination(piece, color, sizeName) === 0 &&
+        !allowBackorder
       ) {
         color = null;
       }
@@ -157,12 +160,14 @@ export function PieceSelector({
                       {piece.sizes.map((size) => {
                         // Só bloqueia se não houver estoque em nenhuma cor
                         const disabled =
+                          !allowBackorder &&
                           matrix &&
                           piece.colors.every(
                             (c) =>
                               qtyForCombination(piece, c.name, size.name) === 0
                           );
                         const conflictsSelectedColor =
+                          !allowBackorder &&
                           matrix &&
                           sel?.color != null &&
                           qtyForCombination(piece, sel.color, size.name) === 0;
@@ -211,6 +216,7 @@ export function PieceSelector({
                         const needsSizeFirst =
                           piece.sizes.length > 0 && !sel?.size;
                         const noStockAnySize =
+                          !allowBackorder &&
                           matrix &&
                           piece.sizes.every(
                             (s) =>
@@ -221,6 +227,7 @@ export function PieceSelector({
                               ) === 0
                           );
                         const noStockForSelectedSize =
+                          !allowBackorder &&
                           matrix &&
                           sel?.size != null &&
                           qtyForCombination(piece, color.name, sel.size) === 0;
@@ -262,7 +269,9 @@ export function PieceSelector({
                   sel?.size &&
                   qtyForCombination(piece, sel.color, sel.size) === 0 && (
                     <p className="text-sm text-stone-500 sm:text-xs">
-                      Indisponível nesta combinação.
+                      {allowBackorder
+                        ? "Disponível sob encomenda."
+                        : "Indisponível nesta combinação."}
                     </p>
                   )}
               </div>
@@ -285,12 +294,14 @@ export function PieceSelector({
                     <div className="flex flex-wrap gap-2.5 sm:gap-2">
                       {piece.sizes.map((size) => {
                         const disabled =
+                          !allowBackorder &&
                           matrix &&
                           piece.colors.every(
                             (c) =>
                               qtyForCombination(piece, c.name, size.name) === 0
                           );
                         const conflictsSelectedColor =
+                          !allowBackorder &&
                           matrix &&
                           sel?.color != null &&
                           qtyForCombination(piece, sel.color, size.name) === 0;
@@ -339,6 +350,7 @@ export function PieceSelector({
                         const needsSizeFirst =
                           piece.sizes.length > 0 && !sel?.size;
                         const noStockAnySize =
+                          !allowBackorder &&
                           matrix &&
                           piece.sizes.every(
                             (s) =>
@@ -349,6 +361,7 @@ export function PieceSelector({
                               ) === 0
                           );
                         const noStockForSelectedSize =
+                          !allowBackorder &&
                           matrix &&
                           sel?.size != null &&
                           qtyForCombination(piece, color.name, sel.size) === 0;
@@ -390,7 +403,9 @@ export function PieceSelector({
                   sel?.size &&
                   qtyForCombination(piece, sel.color, sel.size) === 0 && (
                     <p className="text-sm text-stone-500 sm:text-xs">
-                      Indisponível nesta combinação.
+                      {allowBackorder
+                        ? "Disponível sob encomenda."
+                        : "Indisponível nesta combinação."}
                     </p>
                   )}
               </>

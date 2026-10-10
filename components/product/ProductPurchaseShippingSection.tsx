@@ -19,6 +19,8 @@ type Props = {
   imageUrl: string;
   stockType: StockType;
   stockQuantity: number | null;
+  allowBackorder?: boolean;
+  restockLeadDays?: number | null;
   pieces?: ProductPiece[];
   selections?: PieceSelectionMap;
   /** Quando há peças, indica se tamanho/cor estão válidos para compra. */
@@ -30,6 +32,7 @@ export function ProductPurchaseShippingSection(props: Props) {
     productId,
     stockType,
     stockQuantity,
+    allowBackorder = false,
     pieces,
     selections,
     optionsComplete = true,
@@ -39,13 +42,14 @@ export function ProductPurchaseShippingSection(props: Props) {
     const available = maxPurchasableQuantity({
       stockType,
       stockQuantity,
+      allowBackorder,
       pieces,
       selections,
     });
     return Number.isFinite(available)
       ? available
       : OPEN_PURCHASE_QTY;
-  }, [stockType, stockQuantity, pieces, selections]);
+  }, [stockType, stockQuantity, allowBackorder, pieces, selections]);
 
   const [qty, setQty] = useState(1);
   const available = maxQty > 0;

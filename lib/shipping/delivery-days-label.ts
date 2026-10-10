@@ -36,6 +36,20 @@ export function formatDeliveryDaysLabel(
   return formatBusinessDaysRange(min, max) ?? "—";
 }
 
+/** Soma o prazo de reposição ao intervalo da transportadora. */
+export function withRestockLeadDays(
+  min: number,
+  max: number,
+  restockLeadDays: number
+): { min: number; max: number } {
+  const extra = Math.max(0, Math.floor(restockLeadDays));
+  if (extra <= 0) return { min, max };
+  return {
+    min: min > 0 ? min + extra : min,
+    max: max > 0 ? max + extra : max,
+  };
+}
+
 /** Rótulo para vitrine/checkout — deixa claro que o prazo é estimado. */
 export function formatEstimatedDeliveryLabel(
   min: number | null | undefined,

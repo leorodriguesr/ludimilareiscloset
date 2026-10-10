@@ -32,7 +32,11 @@ export type StartCheckoutPaymentInput = {
   email: string;
   userId: string | null;
   lines: CheckoutLineInput[];
-  shipping: { destinationCep: string; optionId: string };
+  shipping: {
+    destinationCep: string;
+    optionId: string;
+    acceptBackorder?: boolean;
+  };
   contact?: OrderContactInput;
   address?: OrderAddressInput;
   cpf?: string;

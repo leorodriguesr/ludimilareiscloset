@@ -10,6 +10,9 @@ export type NormalizedShippingOption = {
   /** Prazo em dias úteis (intervalo quando disponível). */
   deliveryDaysMin: number;
   deliveryDaysMax: number;
+  fulfillmentType?: "CARRIER" | "ARRANGED";
+  localMethod?: "STORE_DELIVERY" | "PICKUP";
+  description?: string;
   /** Pacotes retornados na cotação (Melhor Envio). */
   packages?: unknown[];
 };

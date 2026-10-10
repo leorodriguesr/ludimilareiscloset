@@ -2,7 +2,10 @@ import { StockType } from "@/app/generated/prisma/client";
 import type { CartPieceSelection } from "@/lib/cart/types";
 import { OrderCreateError } from "@/lib/orders/create-order";
 import { getAvailableStock } from "@/lib/orders/stock/availability";
-import { buildStockDemands } from "@/lib/orders/stock/build-demands";
+import {
+  buildDetailedStockDemands,
+  buildStockDemands,
+} from "@/lib/orders/stock/build-demands";
 import { orderStockReservationWhere } from "@/lib/orders/stock/reservation-scope";
 import { prisma } from "@/lib/prisma";
 
@@ -21,6 +24,30 @@ export type StockReservationLine = {
   pieceSelections?: CartPieceSelection[];
 };
 
+export type StockAllocationDetail = {
+  productId: string;
+  pieceVariantId: string | null;
+  pieceName: string | null;
+  colorName: string | null;
+  sizeName: string | null;
+  requestedQuantity: number;
+  stockQuantity: number;
+  backorderQuantity: number;
+};
+
+export type StockLineAllocation = {
+  lineIndex: number;
+  stockAllocatedQuantity: number;
+  backorderQuantity: number;
+  restockLeadDays: number | null;
+  details: StockAllocationDetail[];
+};
+
+export type ReserveStockOptions = {
+  /** Permite a falta apenas nos produtos que têm allowBackorder=true. */
+  acceptBackorder?: boolean;
+};
+
 export async function releaseStockReservations(
   tx: Pick<typeof prisma, "stockReservation">,
   orderId: string
@@ -34,35 +61,123 @@ export async function reserveStockForOrderLines(
   tx: ReservationTx,
   orderId: string,
   lines: StockReservationLine[],
-  now: Date = new Date()
-): Promise<void> {
-  const demands = await buildStockDemands(lines, tx);
+  now: Date = new Date(),
+  options: ReserveStockOptions = {}
+): Promise<StockLineAllocation[]> {
+  const demands = await buildDetailedStockDemands(lines, tx);
+  const plannedByKey = new Map<string, number>();
+  const reservationByKey = new Map<
+    string,
+    { productId: string; pieceVariantId: string | null; quantity: number }
+  >();
+  const detailsByLine = new Map<number, StockAllocationDetail[]>();
+  const leadDaysByLine = new Map<number, number>();
 
   for (const demand of demands) {
+    if (demand.unlimited) {
+      const rows = detailsByLine.get(demand.lineIndex) ?? [];
+      rows.push({
+        productId: demand.productId,
+        pieceVariantId: demand.pieceVariantId,
+        pieceName: demand.pieceName,
+        colorName: demand.colorName,
+        sizeName: demand.sizeName,
+        requestedQuantity: demand.quantity,
+        stockQuantity: demand.quantity,
+        backorderQuantity: 0,
+      });
+      detailsByLine.set(demand.lineIndex, rows);
+      continue;
+    }
+
+    const key = `${demand.productId}:${demand.pieceVariantId ?? ""}`;
     const available = await getAvailableStock(tx, {
       productId: demand.productId,
       pieceVariantId: demand.pieceVariantId,
       excludeOrderId: orderId,
       now,
     });
+    const remaining = Math.max(0, available - (plannedByKey.get(key) ?? 0));
+    const stockQuantity = Math.min(demand.quantity, remaining);
+    const backorderQuantity = demand.quantity - stockQuantity;
 
-    if (available < demand.quantity) {
+    if (backorderQuantity > 0 && !demand.allowBackorder) {
       throw new OrderCreateError(
         "INSUFFICIENT_STOCK",
         "Estoque insuficiente para a quantidade solicitada."
       );
     }
+    if (backorderQuantity > 0 && !options.acceptBackorder) {
+      throw new OrderCreateError(
+        "BACKORDER_CONFIRMATION_REQUIRED",
+        `${demand.productName} está em reposição. O prazo é de até ${
+          demand.restockLeadDays ?? 0
+        } dias úteis.`
+      );
+    }
+
+    plannedByKey.set(key, (plannedByKey.get(key) ?? 0) + stockQuantity);
+    if (stockQuantity > 0) {
+      const reservation = reservationByKey.get(key);
+      if (reservation) {
+        reservation.quantity += stockQuantity;
+      } else {
+        reservationByKey.set(key, {
+          productId: demand.productId,
+          pieceVariantId: demand.pieceVariantId,
+          quantity: stockQuantity,
+        });
+      }
+    }
+
+    const rows = detailsByLine.get(demand.lineIndex) ?? [];
+    rows.push({
+      productId: demand.productId,
+      pieceVariantId: demand.pieceVariantId,
+      pieceName: demand.pieceName,
+      colorName: demand.colorName,
+      sizeName: demand.sizeName,
+      requestedQuantity: demand.quantity,
+      stockQuantity,
+      backorderQuantity,
+    });
+    detailsByLine.set(demand.lineIndex, rows);
+    if (backorderQuantity > 0) {
+      leadDaysByLine.set(
+        demand.lineIndex,
+        Math.max(
+          leadDaysByLine.get(demand.lineIndex) ?? 0,
+          demand.restockLeadDays ?? 0
+        )
+      );
+    }
   }
 
-  if (demands.length === 0) return;
+  const reservations = [...reservationByKey.values()];
+  if (reservations.length > 0) {
+    await tx.stockReservation.createMany({
+      data: reservations.map((d) => ({
+        orderId,
+        productId: d.productId,
+        pieceVariantId: d.pieceVariantId,
+        quantity: d.quantity,
+      })),
+    });
+  }
 
-  await tx.stockReservation.createMany({
-    data: demands.map((d) => ({
-      orderId,
-      productId: d.productId,
-      pieceVariantId: d.pieceVariantId,
-      quantity: d.quantity,
-    })),
+  return lines.map((line, lineIndex) => {
+    const details = detailsByLine.get(lineIndex) ?? [];
+    const stockAllocatedQuantity =
+      details.length > 0
+        ? Math.min(...details.map((row) => row.stockQuantity))
+        : line.quantity;
+    return {
+      lineIndex,
+      stockAllocatedQuantity,
+      backorderQuantity: Math.max(0, line.quantity - stockAllocatedQuantity),
+      restockLeadDays: leadDaysByLine.get(lineIndex) || null,
+      details,
+    };
   });
 }
 

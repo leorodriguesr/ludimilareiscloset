@@ -15,6 +15,8 @@ export type ProductSummaryPanelProps = {
   coverImage: string;
   stockType: StockType;
   stockQuantity: number | null;
+  allowBackorder: boolean;
+  restockLeadDays: number | null;
   pieces: ProductPiece[];
 };
 
@@ -28,6 +30,8 @@ export function ProductSummaryPanel({
   coverImage,
   stockType,
   stockQuantity,
+  allowBackorder,
+  restockLeadDays,
   pieces,
 }: ProductSummaryPanelProps) {
   const showPixCard =
@@ -121,6 +125,8 @@ export function ProductSummaryPanel({
             coverImage={coverImage}
             stockType={stockType}
             stockQuantity={stockQuantity}
+            allowBackorder={allowBackorder}
+            restockLeadDays={restockLeadDays}
             pieces={pieces}
           />
         ) : (
@@ -133,6 +139,8 @@ export function ProductSummaryPanel({
             imageUrl={coverImage}
             stockType={stockType}
             stockQuantity={stockQuantity}
+            allowBackorder={allowBackorder}
+            restockLeadDays={restockLeadDays}
           />
         )}
       </div>

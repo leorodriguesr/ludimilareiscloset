@@ -719,6 +719,16 @@ model OrderItem {
   price     Float
   /** JSON: [{ pieceName, size, color }] — opções escolhidas por peça. */
   pieceSelectionsJson String?
+  /** Quantidade da linha atendida pelo estoque físico no momento da venda. */
+  stockAllocatedQuantity Int       @default(0)
+  /** Quantidade da linha que depende de reposição. */
+  backorderQuantity       Int       @default(0)
+  /** Prazo de reposição capturado do produto no momento da venda. */
+  restockLeadDaysSnapshot Int?
+  /** Detalhes por peça/variação: solicitado, estoque físico e reposição. */
+  stockAllocationJson     String?
+  /** Quando a reposição desta linha foi recebida pela loja. */
+  backorderReplenishedAt  DateTime?
   /** pending | paid */
   paymentStatus String    @default("pending")
   paidAt        DateTime?
@@ -787,6 +797,10 @@ model Product {
   videoUrl      String?
   stockType     StockType         @default(UNLIMITED)
   stockQuantity Int?
+  /** Permite vender além do estoque físico, usando primeiro o saldo disponível. */
+  allowBackorder Boolean           @default(false)
+  /** Prazo em dias úteis para repor uma combinação sem estoque. */
+  restockLeadDays Int?
   weightGrams   Int?
   lengthCm      Float?
   widthCm       Float?

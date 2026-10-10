@@ -7,6 +7,7 @@ import { normalizeAdminSaleLineInput } from "@/lib/admin-sale/pricing";
 import { hasPermission, PERMISSION } from "@/lib/auth/permissions";
 import { requirePermission } from "@/lib/auth/require-permission";
 import { PAYMENT_METHOD } from "@/lib/orders/constants";
+import { OrderCreateError } from "@/lib/orders/create-order";
 
 function parseDiscount(raw: unknown) {
   if (!raw || typeof raw !== "object") return undefined;
@@ -64,7 +65,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const result = await createAdminSale({
+  let result: Awaited<ReturnType<typeof createAdminSale>>;
+  try {
+    result = await createAdminSale({
     lines: lines.map((l) => {
       const row = l as Record<string, unknown>;
       return normalizeAdminSaleLineInput(row, parseDiscount(row.itemDiscount));
@@ -91,6 +94,7 @@ export async function POST(request: NextRequest) {
       fulfillmentType === FulfillmentType.ARRANGED
         ? parseArrangedMode(b.arrangedMode)
         : undefined,
+    acceptBackorder: b.acceptBackorder === true,
     deliveryNotes:
       typeof b.deliveryNotes === "string" ? b.deliveryNotes : undefined,
     internalNotes:
@@ -132,7 +136,16 @@ export async function POST(request: NextRequest) {
     paymentMethod,
     orderDiscount: parseDiscount(b.orderDiscount),
     createdByUserId: gate.userId,
-  });
+    });
+  } catch (error) {
+    if (error instanceof OrderCreateError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: 409 }
+      );
+    }
+    throw error;
+  }
 
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 400 });

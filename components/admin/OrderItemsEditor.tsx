@@ -37,6 +37,9 @@ export type EditableOrderItem = {
   productDescription?: string | null;
   productImageUrl?: string | null;
   paymentStatus?: string | null;
+  stockAllocatedQuantity?: number;
+  backorderQuantity?: number;
+  restockLeadDaysSnapshot?: number | null;
   product: {
     id: string;
     name: string;
@@ -170,12 +173,24 @@ export function OrderItemsEditor({
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/orders/${order.id}/items`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lines }),
-      });
-      const data = (await res.json()) as { error?: string };
+      const save = (acceptBackorder = false) =>
+        fetch(`/api/admin/orders/${order.id}/items`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lines, acceptBackorder }),
+        });
+      let res = await save();
+      let data = (await res.json()) as { error?: string; code?: string };
+      if (
+        !res.ok &&
+        data.code === "BACKORDER_CONFIRMATION_REQUIRED" &&
+        window.confirm(
+          `${data.error ?? "Há peças em reposição."}\n\nDeseja continuar com esse prazo?`
+        )
+      ) {
+        res = await save(true);
+        data = await res.json();
+      }
       if (!res.ok) {
         setError(data.error ?? "Não foi possível atualizar os itens.");
         return false;
@@ -268,7 +283,11 @@ export function OrderItemsEditor({
     if (!catalogDraft) return;
     if (
       catalogDraft.product.pieces.length > 0 &&
-      !pieceSelectionsAreComplete(catalogDraft.product.pieces, catalogDraft.selections)
+      !pieceSelectionsAreComplete(
+        catalogDraft.product.pieces,
+        catalogDraft.selections,
+        catalogDraft.product.allowBackorder
+      )
     ) {
       setError("Selecione cor e tamanho de cada peça.");
       return;
@@ -372,7 +391,11 @@ export function OrderItemsEditor({
     if (
       pieceProduct &&
       pieceProduct.pieces.length > 0 &&
-      !pieceSelectionsAreComplete(pieceProduct.pieces, pieceSelections)
+      !pieceSelectionsAreComplete(
+        pieceProduct.pieces,
+        pieceSelections,
+        pieceProduct.allowBackorder
+      )
     ) {
       setError("Selecione cor e tamanho de cada peça.");
       return;
@@ -570,6 +593,7 @@ export function OrderItemsEditor({
               <PieceSelector
                 pieces={pieceProduct.pieces}
                 selections={pieceSelections}
+                allowBackorder={pieceProduct.allowBackorder}
                 onSelectionsChange={setPieceSelections}
               />
             ) : customDraft.length > 0 ? (
@@ -658,7 +682,8 @@ export function OrderItemsEditor({
                       pieceProduct.pieces.length > 0 &&
                       !pieceSelectionsAreComplete(
                         pieceProduct.pieces,
-                        pieceSelections
+                        pieceSelections,
+                        pieceProduct.allowBackorder
                       )
                   )
                 }
@@ -793,6 +818,7 @@ export function OrderItemsEditor({
                 <PieceSelector
                   pieces={catalogDraft.product.pieces}
                   selections={catalogDraft.selections}
+                  allowBackorder={catalogDraft.product.allowBackorder}
                   onSelectionsChange={(next) =>
                     setCatalogDraft((prev) =>
                       prev ? { ...prev, selections: next } : prev
@@ -807,7 +833,8 @@ export function OrderItemsEditor({
                   (catalogDraft.product.pieces.length > 0 &&
                     !pieceSelectionsAreComplete(
                       catalogDraft.product.pieces,
-                      catalogDraft.selections
+                      catalogDraft.selections,
+                      catalogDraft.product.allowBackorder
                     ))
                 }
                 onClick={() => void confirmCatalogDraft()}

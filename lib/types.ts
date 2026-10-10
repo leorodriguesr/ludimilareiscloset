@@ -78,6 +78,8 @@ export interface Product {
   videoUrl: string | null;
   stockType: StockType;
   stockQuantity: number | null;
+  allowBackorder: boolean;
+  restockLeadDays: number | null;
   weightGrams: number | null;
   lengthCm: number | null;
   widthCm: number | null;

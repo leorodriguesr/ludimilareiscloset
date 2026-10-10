@@ -4,6 +4,7 @@ import {
   OrderSource,
   PaymentChannel,
 } from "@/app/generated/prisma/client";
+import { randomUUID } from "node:crypto";
 import {
   arrangedDeliveryLabel,
   type ArrangedDeliveryMode,
@@ -77,6 +78,7 @@ export type CreateAdminSaleInput = {
   /** Entrega a combinar: valor informado pelo staff. */
   arrangedShippingAmount?: number;
   arrangedMode?: ArrangedDeliveryMode;
+  acceptBackorder?: boolean;
   deliveryNotes?: string;
   internalNotes?: string;
   customerData: "now" | "later";
@@ -375,6 +377,7 @@ export async function createAdminSale(
     );
     const nextOrderNumber = (maxRow[0]?.max ?? 0) + 1;
 
+    const itemIds = pricing.lines.map(() => randomUUID());
     const order = await tx.order.create({
       data: {
         orderNumber: nextOrderNumber,
@@ -457,7 +460,8 @@ export async function createAdminSale(
             : null,
         expiresAt: new Date(Date.now() + ORDER_PENDING_TTL_MS),
         items: {
-          create: pricing.lines.map((line) => ({
+          create: pricing.lines.map((line, index) => ({
+            id: itemIds[index],
             productId: line.productId,
             productName: line.productName,
             productDescription: line.productDescription,
@@ -514,14 +518,26 @@ export async function createAdminSale(
         quantity: l.quantity,
         price: l.unitPrice,
         pieceSelections: l.pieceSelections,
+        itemId: itemIds[pricing.lines.indexOf(l)],
       }));
+
+    const acceptBackorder =
+      input.fulfillmentType === FulfillmentType.CARRIER ||
+      input.acceptBackorder === true;
+    let allocations: Awaited<ReturnType<typeof reserveStockForOrderLines>> = [];
 
     if (input.paymentAlreadyPaid) {
       const { reserveStockForOrderLines, commitStockReservations } = await import(
         "@/lib/orders/stock/reservation"
       );
       if (stockLines.length > 0) {
-        await reserveStockForOrderLines(tx, order.id, stockLines);
+        allocations = await reserveStockForOrderLines(
+          tx,
+          order.id,
+          stockLines,
+          new Date(),
+          { acceptBackorder }
+        );
         await commitStockReservations(tx, order.id);
       }
       const { cashLedgerIdempotencyKey } = await import(
@@ -538,7 +554,27 @@ export async function createAdminSale(
         idempotencyKey: cashLedgerIdempotencyKey("sale", order.id),
       });
     } else if (stockLines.length > 0) {
-      await reserveStockForOrderLines(tx, order.id, stockLines);
+      allocations = await reserveStockForOrderLines(
+        tx,
+        order.id,
+        stockLines,
+        new Date(),
+        { acceptBackorder }
+      );
+    }
+
+    for (const allocation of allocations) {
+      const stockLine = stockLines[allocation.lineIndex];
+      if (!stockLine) continue;
+      await tx.orderItem.update({
+        where: { id: stockLine.itemId },
+        data: {
+          stockAllocatedQuantity: allocation.stockAllocatedQuantity,
+          backorderQuantity: allocation.backorderQuantity,
+          restockLeadDaysSnapshot: allocation.restockLeadDays,
+          stockAllocationJson: JSON.stringify(allocation.details),
+        },
+      });
     }
 
     return order;

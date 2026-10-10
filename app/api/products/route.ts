@@ -115,6 +115,20 @@ export async function POST(request: NextRequest) {
     stockQuantity =
       Number.isFinite(q) && q >= 0 ? Math.floor(q) : 0;
   }
+  const allowBackorder = b.allowBackorder === true;
+  const restockLeadDaysRaw = Number(b.restockLeadDays);
+  const restockLeadDays = allowBackorder
+    ? Math.floor(restockLeadDaysRaw)
+    : null;
+  if (
+    allowBackorder &&
+    (!Number.isFinite(restockLeadDaysRaw) || (restockLeadDays ?? 0) < 1)
+  ) {
+    return NextResponse.json(
+      { error: "Informe um prazo de reposição válido." },
+      { status: 400 }
+    );
+  }
 
   const visibleOnSite =
     b.visibleOnSite === false ||
@@ -276,6 +290,22 @@ export async function POST(request: NextRequest) {
     pieceCreates.push({ name: pieceName, colors, sizes, variants });
   }
 
+  if (
+    allowBackorder &&
+    (stockType !== StockType.LIMITED ||
+      pieceCreates.some((piece) =>
+        piece.variants.some((variant) => variant.unlimited)
+      ))
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Venda sob encomenda exige estoque finito em todas as variações.",
+      },
+      { status: 400 }
+    );
+  }
+
   try {
     const product = await prisma.$transaction(async (tx) => {
       const sectionOrders =
@@ -298,6 +328,8 @@ export async function POST(request: NextRequest) {
           videoUrl,
           stockType,
           stockQuantity,
+          allowBackorder,
+          restockLeadDays,
           visibleOnSite,
           weightGrams,
           lengthCm,

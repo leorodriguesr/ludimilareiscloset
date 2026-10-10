@@ -16,6 +16,8 @@ export interface ProductFormData {
   videoUrl: string | null;
   stockType: "UNLIMITED" | "LIMITED";
   stockQuantity: number | null;
+  allowBackorder: boolean;
+  restockLeadDays: number | null;
   weightGrams: number | null;
   lengthCm: number | null;
   widthCm: number | null;
@@ -50,6 +52,8 @@ export function mapProductToFormData(product: Product): ProductFormData {
     videoUrl: product.videoUrl,
     stockType: product.stockType,
     stockQuantity: product.stockQuantity,
+    allowBackorder: product.allowBackorder,
+    restockLeadDays: product.restockLeadDays,
     weightGrams: product.weightGrams,
     lengthCm: product.lengthCm,
     widthCm: product.widthCm,

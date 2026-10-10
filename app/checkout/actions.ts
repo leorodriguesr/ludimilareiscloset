@@ -16,7 +16,7 @@ import { cpfDigits, cpfValidationError } from "@/lib/validation/cpf";
 
 export type PlaceOrderState =
   | StartCheckoutPaymentSuccess
-  | { ok: false; error: string };
+  | { ok: false; error: string; code?: string };
 
 /** Atualiza nome, telefone e CPF do usuário logado no checkout. */
 export async function updateUserCheckoutContactAction(input: {
@@ -49,7 +49,11 @@ export async function placeOrderAction(input: {
   /** Obrigatório para guest; logado pode omitir (usa e-mail da conta). */
   email?: string;
   lines: CheckoutLineInput[];
-  shipping: { destinationCep: string; optionId: string };
+  shipping: {
+    destinationCep: string;
+    optionId: string;
+    acceptBackorder?: boolean;
+  };
   contact?: OrderContactInput;
   address?: OrderAddressInput;
   cpf?: string;
@@ -93,7 +97,7 @@ export async function placeOrderAction(input: {
     });
   } catch (e) {
     if (e instanceof OrderCreateError) {
-      return { ok: false, error: e.message };
+      return { ok: false, error: e.message, code: e.code };
     }
     console.error("[placeOrderAction]", e);
     return { ok: false, error: "Não foi possível processar o pedido." };

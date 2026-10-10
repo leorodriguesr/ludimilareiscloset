@@ -9,7 +9,7 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 /** Incremente após `prisma generate` que adiciona/altera campos usados em runtime. */
-const PRISMA_SCHEMA_GENERATION = 20261008170;
+const PRISMA_SCHEMA_GENERATION = 20261010143;
 
 const connection = resolveDbConnection();
 

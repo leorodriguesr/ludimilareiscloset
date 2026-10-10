@@ -74,6 +74,8 @@ interface ProductData {
   videoUrl: string | null;
   stockType: "UNLIMITED" | "LIMITED";
   stockQuantity: number | null;
+  allowBackorder: boolean;
+  restockLeadDays: number | null;
   weightGrams: number | null;
   lengthCm: number | null;
   widthCm: number | null;
@@ -206,12 +208,14 @@ function VariantStockField({
   unlimited,
   onQuantity,
   onUnlimited,
+  unlimitedDisabled = false,
 }: {
   label: string;
   quantity: string;
   unlimited: boolean;
   onQuantity: (value: string) => void;
   onUnlimited: (unlimited: boolean) => void;
+  unlimitedDisabled?: boolean;
 }) {
   return (
     <div className="flex items-center justify-center gap-1">
@@ -229,10 +233,11 @@ function VariantStockField({
       <button
         type="button"
         onClick={() => onUnlimited(!unlimited)}
+        disabled={unlimitedDisabled}
         aria-pressed={unlimited}
         aria-label={unlimited ? `${label}: ilimitado` : `${label}: marcar como ilimitado`}
         title="Ilimitado"
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border text-base leading-none ${
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border text-base leading-none disabled:cursor-not-allowed disabled:opacity-30 ${
           unlimited
             ? "border-stone-900 bg-stone-900 text-white"
             : "border-stone-300 bg-white text-stone-500 hover:border-stone-900 hover:text-stone-900"
@@ -288,6 +293,14 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
   >({});
   const [visibleOnSite, setVisibleOnSite] = useState(
     initialData?.visibleOnSite ?? true
+  );
+  const [allowBackorder, setAllowBackorder] = useState(
+    initialData?.allowBackorder ?? false
+  );
+  const [restockLeadDays, setRestockLeadDays] = useState(
+    initialData?.restockLeadDays != null
+      ? String(initialData.restockLeadDays)
+      : ""
   );
 
   const isEditing = !!initialData?.id;
@@ -504,6 +517,8 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
     setImages([]);
     setPieces([]);
     setVisibleOnSite(true);
+    setAllowBackorder(false);
+    setRestockLeadDays("");
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -538,6 +553,15 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
       const namedPieces = pieces.filter((p) => p.name.trim());
       const { stockType, stockQuantity } =
         computeProductStockFromPieces(namedPieces);
+      const restockDays = Math.floor(Number(restockLeadDays));
+      if (
+        allowBackorder &&
+        (!Number.isFinite(restockDays) || restockDays < 1)
+      ) {
+        setLoading(false);
+        window.alert("Informe o prazo de reposição em dias úteis.");
+        return;
+      }
 
       const icTrim = form.installmentCount.trim();
       let installmentPayload: number | null = null;
@@ -564,6 +588,8 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
         videoUrl: form.videoUrl.trim() || null,
         stockType,
         stockQuantity,
+        allowBackorder,
+        restockLeadDays: allowBackorder ? restockDays : null,
         weightGrams: form.weightGrams.trim() === "" ? null : form.weightGrams,
         lengthCm: form.lengthCm.trim() === "" ? null : form.lengthCm,
         widthCm: form.widthCm.trim() === "" ? null : form.widthCm,
@@ -996,6 +1022,56 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
             + Adicionar peça
           </button>
         </div>
+        <div className="rounded-lg border border-stone-200 bg-stone-50 p-4">
+          <label className="flex cursor-pointer items-start gap-2.5">
+            <input
+              type="checkbox"
+              checked={allowBackorder}
+              onChange={(event) => {
+                const checked = event.target.checked;
+                setAllowBackorder(checked);
+                if (checked) {
+                  setPieces((current) =>
+                    current.map((piece) => ({
+                      ...piece,
+                      variants: piece.variants.map((variant) => ({
+                        ...variant,
+                        unlimited: false,
+                      })),
+                    }))
+                  );
+                }
+              }}
+              className="mt-0.5 h-4 w-4 rounded border-stone-300 accent-stone-900"
+            />
+            <span>
+              <span className="block text-sm font-semibold text-stone-900">
+                Venda sob encomenda
+              </span>
+              <span className="mt-1 block text-xs text-stone-500">
+                Usa primeiro o estoque físico e permite repor a quantidade que
+                faltar. Vale para todas as cores e tamanhos.
+              </span>
+            </span>
+          </label>
+          {allowBackorder ? (
+            <div className="mt-4 max-w-xs">
+              <label className={LABEL_CLASS}>
+                Prazo de reposição (dias úteis) *
+              </label>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                required
+                value={restockLeadDays}
+                onChange={(event) => setRestockLeadDays(event.target.value)}
+                className={INPUT_CLASS}
+                placeholder="Ex.: 3"
+              />
+            </div>
+          ) : null}
+        </div>
         <p className={HELPER_CLASS}>
           Para cada peça, marque os tamanhos e as cores. Em seguida use a
           tabela para informar quantas unidades existem de cada combinação
@@ -1250,6 +1326,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
                                 label={`Quantidade ${piece.name || "peça"} ${s.name}`}
                                 quantity={cell?.quantity ?? "0"}
                                 unlimited={cell?.unlimited ?? false}
+                                unlimitedDisabled={allowBackorder}
                                 onQuantity={(value) =>
                                   updateVariantQty(
                                     pi,
@@ -1330,6 +1407,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
                                   label={`Quantidade ${piece.name || "peça"} ${c.name} ${s.name}`}
                                   quantity={cell?.quantity ?? "0"}
                                   unlimited={cell?.unlimited ?? false}
+                                  unlimitedDisabled={allowBackorder}
                                   onQuantity={(value) =>
                                     updateVariantQty(pi, c.name, s.name, value)
                                   }

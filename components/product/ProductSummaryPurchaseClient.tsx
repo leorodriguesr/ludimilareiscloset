@@ -19,6 +19,8 @@ type Props = {
   coverImage: string;
   stockType: StockType;
   stockQuantity: number | null;
+  allowBackorder: boolean;
+  restockLeadDays: number | null;
   pieces: ProductPiece[];
 };
 
@@ -37,7 +39,11 @@ export function ProductSummaryPurchaseClient({
     setSelections(emptyPieceSelections(pieces));
   }, [pieceKey]);
 
-  const optionsComplete = pieceSelectionsAreComplete(pieces, selections);
+  const optionsComplete = pieceSelectionsAreComplete(
+    pieces,
+    selections,
+    purchase.allowBackorder
+  );
 
   return (
     <>
@@ -49,6 +55,7 @@ export function ProductSummaryPurchaseClient({
           pieces={pieces}
           selections={selections}
           onSelectionsChange={setSelections}
+          allowBackorder={purchase.allowBackorder}
         />
       </div>
 

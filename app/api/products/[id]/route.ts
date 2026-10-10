@@ -48,6 +48,8 @@ export async function PUT(
     videoUrl,
     stockType: stockTypeRaw,
     stockQuantity: stockQtyRaw,
+    allowBackorder: allowBackorderRaw,
+    restockLeadDays: restockLeadDaysRaw,
     visibleOnSite: visibleOnSiteRaw,
     weightGrams: weightRaw,
     lengthCm: lenRaw,
@@ -124,6 +126,42 @@ export async function PUT(
           visibleOnSiteRaw === "0" ||
           visibleOnSiteRaw === "false"
         );
+      }
+
+      if (allowBackorderRaw !== undefined) {
+        const allowBackorder = allowBackorderRaw === true;
+        updateData.allowBackorder = allowBackorder;
+        if (allowBackorder) {
+          const days = Math.floor(Number(restockLeadDaysRaw));
+          if (!Number.isFinite(days) || days < 1) {
+            throw new Error("INVALID_RESTOCK_LEAD_DAYS");
+          }
+          const requestedLimited = stockTypeRaw === StockType.LIMITED;
+          const hasUnlimitedVariant = Array.isArray(pieces)
+            ? pieces.some(
+                (piece) =>
+                  piece &&
+                  typeof piece === "object" &&
+                  Array.isArray(
+                    (piece as { variants?: unknown[] }).variants
+                  ) &&
+                  (piece as { variants: unknown[] }).variants.some(
+                    (variant) =>
+                      variant &&
+                      typeof variant === "object" &&
+                      (variant as { unlimited?: unknown }).unlimited === true
+                  )
+              )
+            : (await tx.pieceVariant.count({
+                where: { piece: { productId: id }, unlimited: true },
+              })) > 0;
+          if (!requestedLimited || hasUnlimitedVariant) {
+            throw new Error("BACKORDER_REQUIRES_LIMITED_STOCK");
+          }
+          updateData.restockLeadDays = days;
+        } else {
+          updateData.restockLeadDays = null;
+        }
       }
 
       if (stockTypeRaw !== undefined) {
@@ -247,6 +285,24 @@ export async function PUT(
 
     return NextResponse.json(product);
   } catch (e) {
+    if (e instanceof Error && e.message === "INVALID_RESTOCK_LEAD_DAYS") {
+      return NextResponse.json(
+        { error: "Informe um prazo de reposição válido." },
+        { status: 400 }
+      );
+    }
+    if (
+      e instanceof Error &&
+      e.message === "BACKORDER_REQUIRES_LIMITED_STOCK"
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Venda sob encomenda exige estoque finito em todas as variações.",
+        },
+        { status: 400 }
+      );
+    }
     if (e instanceof Error && e.message === "INVALID_INSTALLMENTS") {
       return NextResponse.json(
         { error: "Parcelas deve ser entre 1 e 24, ou vazio." },

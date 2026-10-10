@@ -34,6 +34,7 @@ interface ProductCardProps {
   colors?: Color[];
   /** Nome da primeira peça — usado para bater a foto pela cor dessa peça. */
   colorPieceName?: string | null;
+  backorderOnly?: boolean;
   priority?: boolean;
 }
 
@@ -66,6 +67,7 @@ export function ProductCard({
   tag,
   colors = [],
   colorPieceName = null,
+  backorderOnly = false,
   priority = false,
 }: ProductCardProps) {
   const showPix =
@@ -149,6 +151,11 @@ export function ProductCard({
               {tag}
             </span>
           )}
+          {backorderOnly ? (
+            <span className="absolute bottom-3 left-3 rounded-full bg-white/90 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-stone-700 shadow-sm backdrop-blur">
+              Sob encomenda
+            </span>
+          ) : null}
         </div>
       </Link>
 

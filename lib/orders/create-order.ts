@@ -26,6 +26,7 @@ export type CreateOrderResult = {
 export type OrderShippingInput = {
   destinationCep: string;
   optionId: string;
+  acceptBackorder?: boolean;
 };
 
 export type OrderContactInput = {

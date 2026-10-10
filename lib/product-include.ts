@@ -31,6 +31,12 @@ export const productListInclude = {
     orderBy: { id: "asc" as const },
     include: {
       colors: true,
+      variants: {
+        select: {
+          quantity: true,
+          unlimited: true,
+        },
+      },
     },
   },
   categories: {

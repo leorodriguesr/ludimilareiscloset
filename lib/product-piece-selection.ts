@@ -63,10 +63,12 @@ type StockPiece = {
 export function maxPurchasableQuantity(input: {
   stockType?: string | null;
   stockQuantity?: number | null;
+  allowBackorder?: boolean;
   pieces?: StockPiece[];
   selections?: PieceSelectionMap;
   cartSelections?: CartPieceSelection[];
 }): number {
+  if (input.allowBackorder) return OPEN_PURCHASE_QTY;
   const pieces = (input.pieces ?? []).filter((piece) => piece.variants.length > 0);
   if (pieces.length === 0) {
     if (input.stockType === "LIMITED") {
@@ -139,7 +141,8 @@ export function pieceSelectionMapFromCart(
 /** Exige tamanho/cor quando o produto oferece opções; bloqueia combinação sem estoque. */
 export function pieceSelectionsAreComplete(
   pieces: ProductPiece[],
-  selections: PieceSelectionMap
+  selections: PieceSelectionMap,
+  allowBackorder = false
 ): boolean {
   for (const p of pieces) {
     const s = selections[p.id];
@@ -152,7 +155,8 @@ export function pieceSelectionsAreComplete(
       hasVariantMatrix(p) &&
       s.color &&
       s.size &&
-      qtyForCombination(p, s.color, s.size) === 0
+      qtyForCombination(p, s.color, s.size) === 0 &&
+      !allowBackorder
     ) {
       return false;
     }

@@ -1,11 +1,13 @@
 "use client";
 
 import React from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import Link from "next/link";
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -28,7 +30,10 @@ import type { NormalizedShippingOption } from "@/lib/shipping/types";
 import type { CartPieceSelection } from "@/lib/cart/types";
 import { useStoreSettings } from "@/lib/hooks/use-store-settings";
 import { checkFreeShipping } from "@/lib/shipping/free-shipping";
-import { formatEstimatedDeliveryLabel } from "@/lib/shipping/delivery-days-label";
+import {
+  formatEstimatedDeliveryLabel,
+  withRestockLeadDays,
+} from "@/lib/shipping/delivery-days-label";
 import {
   ADDRESS_COMPLEMENT_MAX_LENGTH,
   ADDRESS_NUMBER_MAX_LENGTH,
@@ -46,6 +51,7 @@ type ShippingData = {
   optionId: string; optionLabel: string; optionPrice: number; deliveryLabel: string;
   /** True quando a opção selecionada é a mais barata e o carrinho tem frete grátis. */
   optionIsFree?: boolean;
+  backorderAccepted?: boolean;
 };
 type PaymentMethod = "pix" | "card" | null;
 type PixData = {
@@ -79,8 +85,14 @@ const cpfFmt = (v: string) => {
   if (d.length <= 9) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6)}`;
   return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
 };
-const daysLabel = (o: NormalizedShippingOption) =>
-  formatEstimatedDeliveryLabel(o.deliveryDaysMin, o.deliveryDaysMax);
+const daysLabel = (o: NormalizedShippingOption, restockLeadDays = 0) => {
+  const adjusted = withRestockLeadDays(
+    o.deliveryDaysMin,
+    o.deliveryDaysMax,
+    o.fulfillmentType === "ARRANGED" ? 0 : restockLeadDays
+  );
+  return formatEstimatedDeliveryLabel(adjusted.min, adjusted.max);
+};
 function rankHighlights(opts: NormalizedShippingOption[]) {
   if (!opts.length) return { cheapestIds: new Set<string>(), fastestIds: new Set<string>() };
   const minP = Math.min(...opts.map((o) => o.price));
@@ -490,7 +502,7 @@ function ContactStep({
 }: {
   loggedIn: boolean; initialEmail: string;
   data: ContactData; onChange: (d: ContactData) => void; onNext: () => void;
-  registerSubmit: (fn: () => Promise<void>) => void;
+  registerSubmit?: (fn: () => Promise<void>) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -526,7 +538,7 @@ function ContactStep({
   }, [loggedIn, data, onNext]);
 
   // Register submit fn for mobile bottom bar
-  useEffect(() => { registerSubmit(handleNext); }, [registerSubmit, handleNext]);
+  useEffect(() => { registerSubmit?.(handleNext); }, [registerSubmit, handleNext]);
 
   return (
     <div className="space-y-5">
@@ -610,13 +622,35 @@ function ContactStep({
 
 // ─── Step: Entrega ────────────────────────────────────────────────────────────
 
+type RestockPromptItem = {
+  key: string;
+  productName: string;
+  image: string;
+  pieceName: string | null;
+  colorName: string | null;
+  sizeName: string | null;
+  quantity: number;
+  restockLeadDays: number | null;
+};
+
+function restockLeadLabel(days: number | null): string {
+  const value = days ?? 0;
+  return value === 1 ? "1 dia útil" : `${value} dias úteis`;
+}
+
 function DeliveryStep({
   lines, data, onChange, onNext, onBack, registerSubmit, subtotal,
 }: {
-  lines: { productId: string; quantity: number }[];
+  lines: {
+    productId: string;
+    quantity: number;
+    name: string;
+    image: string;
+    pieceSelections?: CartPieceSelection[];
+  }[];
   data: ShippingData; onChange: (d: ShippingData) => void;
   onNext: () => void; onBack: () => void;
-  registerSubmit: (fn: () => Promise<void>) => void;
+  registerSubmit?: (fn: () => Promise<void>) => void;
   subtotal: number;
 }) {
   const { settings } = useStoreSettings();
@@ -628,18 +662,28 @@ function DeliveryStep({
   const [shippingError, setShippingError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(data.optionId || null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [checkingStock, setCheckingStock] = useState(false);
+  const [restockPrompt, setRestockPrompt] = useState<RestockPromptItem[] | null>(null);
+  const [restockExtraDays, setRestockExtraDays] = useState(0);
+  const shippingGroupId = useId();
 
   const abortRef = useRef<AbortController | null>(null);
   const debRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { cheapestIds, fastestIds } = useMemo(() => rankHighlights(options ?? []), [options]);
 
-  // Quando frete grátis, ordena opções do mais barato para o mais caro
+  // Retirada e entregador da loja ficam antes das transportadoras.
   const freeShippingResult = settings ? checkFreeShipping(settings, subtotal) : null;
   const isFreeShipping = freeShippingResult?.isFree ?? false;
   const displayOptions = useMemo(() => {
     if (!options) return null;
-    if (isFreeShipping) return [...options].sort((a, b) => a.price - b.price);
-    return options;
+    const localRank = (id: string) =>
+      id === "local:pickup" ? 0 : id === "local:store_delivery" ? 1 : 2;
+    return [...options].sort((a, b) => {
+      const rank = localRank(a.id) - localRank(b.id);
+      if (rank !== 0) return rank;
+      if (isFreeShipping && localRank(a.id) === 2) return a.price - b.price;
+      return 0;
+    });
   }, [options, isFreeShipping]);
 
   const lookupCep = useCallback(async (digits: string) => {
@@ -680,18 +724,55 @@ function DeliveryStep({
 
   useEffect(() => {
     if (!options?.length) return;
-    // Quando frete grátis, pré-seleciona o mais barato (primeiro após ordenação)
+    // Frete grátis se aplica somente às opções de transportadora.
     const first = isFreeShipping
-      ? [...options].sort((a, b) => a.price - b.price)[0]
+      ? ([...options]
+          .filter((option) => option.fulfillmentType !== "ARRANGED")
+          .sort((a, b) => a.price - b.price)[0] ?? options[0])
       : (options.find((o) => cheapestIds.has(o.id)) ?? options[0]);
     if (!selectedId || !options.some((o) => o.id === selectedId)) setSelectedId(first?.id ?? null);
   }, [options, cheapestIds, selectedId, isFreeShipping]);
 
   useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/stock/backorder-check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            lines: lines.map((line) => ({
+              productId: line.productId,
+              quantity: line.quantity,
+              pieceSelections: line.pieceSelections,
+            })),
+          }),
+        });
+        const stock = (await response.json()) as {
+          shortages?: Array<{ restockLeadDays: number | null }>;
+        };
+        if (cancelled || !response.ok) return;
+        const extra = (stock.shortages ?? []).reduce(
+          (max, row) => Math.max(max, row.restockLeadDays ?? 0),
+          0
+        );
+        setRestockExtraDays(extra);
+      } catch {
+        if (!cancelled) setRestockExtraDays(0);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [lines]);
+
+  useEffect(() => {
     if (!selectedId || !options?.length) return;
     const o = options.find((x) => x.id === selectedId); if (!o) return;
     const cheapestId = isFreeShipping
-      ? [...options].sort((a, b) => a.price - b.price)[0]?.id
+      ? [...options]
+          .filter((option) => option.fulfillmentType !== "ARRANGED")
+          .sort((a, b) => a.price - b.price)[0]?.id
       : null;
     const optionIsFree = isFreeShipping && o.id === cheapestId;
     onChange({
@@ -699,16 +780,22 @@ function DeliveryStep({
       optionId: o.id,
       optionLabel: `${o.carrierName} — ${o.serviceName}`,
       optionPrice: o.price,
-      deliveryLabel: daysLabel(o),
+      deliveryLabel:
+        o.fulfillmentType === "ARRANGED"
+          ? (o.description ?? "Prazo combinado com a loja")
+          : daysLabel(o, restockExtraDays),
       optionIsFree,
+      backorderAccepted:
+        o.id === data.optionId ? data.backorderAccepted : false,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, options, isFreeShipping]);
+  }, [selectedId, options, isFreeShipping, restockExtraDays]);
 
   const handleNext = useCallback(async () => {
     if (cepDigits.length !== 8) { setFormError("Informe um CEP válido."); return; }
-    if (!data.street.trim()) { setFormError("Informe a rua/logradouro."); return; }
-    if (!data.number.trim()) { setFormError("Informe o número."); return; }
+    const pickup = selectedId === "local:pickup";
+    if (!pickup && !data.street.trim()) { setFormError("Informe a rua/logradouro."); return; }
+    if (!pickup && !data.number.trim()) { setFormError("Informe o número."); return; }
     if (data.number.trim().length > ADDRESS_NUMBER_MAX_LENGTH) {
       setFormError(`Número: no máximo ${ADDRESS_NUMBER_MAX_LENGTH} caracteres.`);
       return;
@@ -721,10 +808,89 @@ function DeliveryStep({
     }
     if (!data.city.trim() || !data.state.trim()) { setFormError("Informe cidade e estado."); return; }
     if (!selectedId) { setFormError("Selecione uma opção de frete."); return; }
+    const storeFulfillment =
+      selectedId === "local:pickup" || selectedId === "local:store_delivery";
+    if (storeFulfillment && !data.backorderAccepted) {
+      setCheckingStock(true);
+      try {
+        const response = await fetch("/api/stock/backorder-check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            lines: lines.map((line) => ({
+              productId: line.productId,
+              quantity: line.quantity,
+              pieceSelections: line.pieceSelections,
+            })),
+          }),
+        });
+        const stock = (await response.json()) as {
+          error?: string;
+          blocked?: Array<{ productName: string }>;
+          shortages?: Array<{
+            productId: string;
+            productName: string;
+            pieceName: string | null;
+            colorName: string | null;
+            sizeName: string | null;
+            quantity: number;
+            restockLeadDays: number | null;
+          }>;
+        };
+        if (!response.ok) {
+          setFormError(stock.error ?? "Não foi possível consultar o estoque.");
+          return;
+        }
+        if (stock.blocked?.length) {
+          setFormError(
+            `${stock.blocked[0]!.productName} não possui estoque disponível.`
+          );
+          return;
+        }
+        if (stock.shortages?.length) {
+          setRestockPrompt(
+            stock.shortages.map((row, index) => {
+              const line = lines.find(
+                (item) =>
+                  item.productId === row.productId &&
+                  (item.pieceSelections ?? []).some(
+                    (selection) =>
+                      (row.pieceName == null ||
+                        selection.pieceName === row.pieceName) &&
+                      (row.colorName == null ||
+                        selection.color === row.colorName) &&
+                      (row.sizeName == null || selection.size === row.sizeName)
+                  )
+              ) ?? lines.find((item) => item.productId === row.productId);
+              return {
+                key: `${row.productId}-${row.pieceName ?? ""}-${row.colorName ?? ""}-${row.sizeName ?? ""}-${index}`,
+                productName: row.productName || line?.name || "Produto",
+                image: line?.image ?? "",
+                pieceName: row.pieceName,
+                colorName: row.colorName,
+                sizeName: row.sizeName,
+                quantity: row.quantity,
+                restockLeadDays: row.restockLeadDays,
+              };
+            })
+          );
+          return;
+        }
+      } finally {
+        setCheckingStock(false);
+      }
+    }
     setFormError(null); onNext();
-  }, [cepDigits.length, data, selectedId, onNext]);
+  }, [cepDigits.length, data, selectedId, onNext, lines, onChange]);
 
-  useEffect(() => { registerSubmit(handleNext); }, [registerSubmit, handleNext]);
+  const confirmRestock = useCallback(() => {
+    onChange({ ...data, backorderAccepted: true });
+    setRestockPrompt(null);
+    setFormError(null);
+    onNext();
+  }, [data, onChange, onNext]);
+
+  useEffect(() => { registerSubmit?.(handleNext); }, [registerSubmit, handleNext]);
 
   return (
     <div className="space-y-5">
@@ -762,7 +928,7 @@ function DeliveryStep({
         <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-500">CEP</label>
         <div className="relative">
           <input type="text" inputMode="numeric" autoComplete="postal-code" placeholder="00000-000"
-            value={cepMask(cepDigits)} onChange={(e) => { const d = onlyDigits(e.target.value); setCepDigits(d); onChange({ ...data, cep: d }); if (d.length < 8) { setOptions(null); setShippingError(null); } }}
+            value={cepMask(cepDigits)} onChange={(e) => { const d = onlyDigits(e.target.value); setCepDigits(d); onChange({ ...data, cep: d, backorderAccepted: false }); if (d.length < 8) { setOptions(null); setShippingError(null); } }}
             className={inputCls} />
           {loadingCep && <span className="absolute right-3.5 top-1/2 -translate-y-1/2"><span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-stone-200 border-t-stone-700" /></span>}
         </div>
@@ -852,12 +1018,26 @@ function DeliveryStep({
             {!loadingShipping && displayOptions?.length ? (
               <ul className="divide-y divide-stone-100">
                 {displayOptions.map((o, idx) => {
-                  const isFree = isFreeShipping && idx === 0;
-                  const id = `ship-${idx}-${o.id}`; const sel = selectedId === o.id;
+                  const carrierOptions = displayOptions.filter(
+                    (option) => option.fulfillmentType !== "ARRANGED"
+                  );
+                  const cheapestCarrierId = [...carrierOptions].sort(
+                    (a, b) => a.price - b.price
+                  )[0]?.id;
+                  const isFree =
+                    isFreeShipping &&
+                    o.fulfillmentType !== "ARRANGED" &&
+                    o.id === cheapestCarrierId;
+                  const id = `${shippingGroupId}-ship-${idx}-${o.id}`;
+                  const sel = selectedId === o.id;
+                  const deadline =
+                    o.fulfillmentType === "ARRANGED"
+                      ? (o.description ?? "Prazo combinado com a loja")
+                      : `Previsão: ${daysLabel(o, restockExtraDays)}`;
                   return (
                     <li key={id}>
-                      <label htmlFor={id} className={`flex cursor-pointer items-center gap-3 px-4 py-3.5 transition-colors ${sel ? "bg-stone-50" : "hover:bg-stone-50/50"}`}>
-                        <input id={id} type="radio" name="ship-opt" checked={sel} onChange={() => setSelectedId(o.id)} className="mt-0.5 shrink-0 accent-stone-900" />
+                      <label htmlFor={id} onClick={() => setSelectedId(o.id)} className={`flex cursor-pointer items-center gap-3 px-4 py-3.5 transition-colors ${sel ? "bg-stone-50" : "hover:bg-stone-50/50"}`}>
+                        <input id={id} type="radio" name={shippingGroupId} checked={sel} onChange={() => setSelectedId(o.id)} className="mt-0.5 shrink-0 accent-stone-900" />
                         {/* Esquerda: nome + prazo */}
                         <div className="min-w-0 flex-1">
                           <p className={`text-sm font-medium leading-snug ${sel ? "text-stone-900" : "text-stone-700"}`}>
@@ -868,7 +1048,7 @@ function DeliveryStep({
                             <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                             </svg>
-                            <span>{daysLabel(o)}</span>
+                            <span>{deadline}</span>
                           </div>
                         </div>
                         {/* Direita: preço */}
@@ -904,11 +1084,95 @@ function DeliveryStep({
           className="flex items-center gap-1.5 rounded-xl border border-stone-200 px-5 py-3 text-sm font-medium text-stone-600 transition hover:bg-stone-50">
           Voltar
         </button>
-        <button type="button" onClick={handleNext}
-          className="flex flex-1 items-center justify-center rounded-xl bg-stone-900 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800">
-          Confirmar endereço
+        <button type="button" onClick={handleNext} disabled={checkingStock}
+          className="flex flex-1 items-center justify-center rounded-xl bg-stone-900 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800 disabled:opacity-60">
+          {checkingStock ? "Consultando estoque…" : "Confirmar endereço"}
         </button>
       </div>
+
+      {restockPrompt &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[80] flex items-end justify-center p-0 sm:items-center sm:p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="restock-prompt-title"
+          >
+            <button
+              type="button"
+              className="absolute inset-0 bg-stone-900/50 backdrop-blur-sm"
+              aria-label="Fechar"
+              onClick={() => setRestockPrompt(null)}
+            />
+            <div className="relative flex max-h-[min(90vh,40rem)] w-full max-w-md flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl">
+              <button
+                type="button"
+                onClick={() => setRestockPrompt(null)}
+                className="absolute right-3 top-3 rounded-full p-1.5 text-stone-400 transition hover:bg-stone-100 hover:text-stone-700"
+                aria-label="Fechar"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                </svg>
+              </button>
+              <div className="border-b border-stone-100 px-5 py-4 pr-12">
+                <h2 id="restock-prompt-title" className="text-base font-semibold text-stone-900">
+                  Peça em reposição
+                </h2>
+                <p className="mt-1 text-sm text-stone-500">
+                  Confirme o prazo para seguir com a entrega.
+                </p>
+              </div>
+              <ul className="space-y-4 overflow-y-auto px-5 py-4">
+                {restockPrompt.map((item) => {
+                  const variation = [
+                    item.sizeName ? `Tam. ${item.sizeName}` : null,
+                    item.colorName ? `Cor ${item.colorName}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ");
+                  return (
+                    <li key={item.key} className="flex gap-3">
+                      <div className="relative h-20 w-16 shrink-0 overflow-hidden rounded-lg bg-stone-100">
+                        {item.image ? (
+                          <Image src={item.image} alt="" fill className="object-cover" sizes="64px" />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-[10px] text-stone-400">—</div>
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-stone-900">{item.productName}</p>
+                        {item.pieceName && (
+                          <p className="mt-0.5 text-xs text-stone-500">{item.pieceName}</p>
+                        )}
+                        {variation && (
+                          <p className="mt-0.5 text-xs text-stone-500">{variation}</p>
+                        )}
+                        <p className="mt-2 text-sm leading-relaxed text-stone-700">
+                          Este produto está em reposição. Vamos precisar de{" "}
+                          <span className="font-semibold text-stone-900">
+                            {restockLeadLabel(item.restockLeadDays)}
+                          </span>{" "}
+                          para realizar a entrega.
+                        </p>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="border-t border-stone-100 px-5 py-4">
+                <button
+                  type="button"
+                  onClick={confirmRestock}
+                  className="flex w-full items-center justify-center rounded-xl bg-stone-900 py-3 text-sm font-semibold text-white transition hover:bg-stone-800"
+                >
+                  Confirmar
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
@@ -1560,7 +1824,17 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, initia
   }, [contact, shipping, step, paymentMethod, contactDone, deliveryDone]);
 
   const lines = useMemo(() => items.map((i) => ({ lineId: i.lineId, productId: i.productId, quantity: i.quantity, name: i.name, price: i.price, pixPrice: i.pixPrice, installmentCount: i.installmentCount, image: i.image, pieceSelections: i.pieceSelections })), [items]);
-  const shippingLines = useMemo(() => lines.map((l) => ({ productId: l.productId, quantity: l.quantity })), [lines]);
+  const shippingLines = useMemo(
+    () =>
+      lines.map((line) => ({
+        productId: line.productId,
+        quantity: line.quantity,
+        name: line.name,
+        image: line.image,
+        pieceSelections: line.pieceSelections,
+      })),
+    [lines]
+  );
   const subtotal = useMemo(() => lines.reduce((a, l) => a + l.price * l.quantity, 0), [lines]);
 
   function navigate(to: number, direction: "fwd" | "bwd") {
@@ -1579,10 +1853,14 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, initia
     setSubmitError(null);
     setPriceUpdatedNotice(null);
     startTransition(async () => {
-      const res = await placeOrderAction({
+      const orderInput = {
         email: loggedIn ? undefined : contact.email.trim(),
         lines: lines.map((l) => ({ productId: l.productId, quantity: l.quantity, ...(l.pieceSelections?.length ? { pieceSelections: l.pieceSelections } : {}) })),
-        shipping: { destinationCep: shipping.cep, optionId: shipping.optionId },
+        shipping: {
+          destinationCep: shipping.cep,
+          optionId: shipping.optionId,
+          acceptBackorder: shipping.backorderAccepted === true,
+        },
         contact: {
           name: contact.name.trim().slice(0, CUSTOMER_NAME_MAX_LENGTH) || undefined,
           phone: contact.phone.replace(/\D/g, "") || undefined,
@@ -1603,7 +1881,23 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, initia
           state: shipping.state.trim() || undefined,
         },
         paymentMethod,
-      });
+      };
+      let res = await placeOrderAction(orderInput);
+      if (
+        !res.ok &&
+        res.code === "BACKORDER_CONFIRMATION_REQUIRED" &&
+        window.confirm(
+          `${res.error}\n\nDeseja continuar a compra com esse prazo?`
+        )
+      ) {
+        res = await placeOrderAction({
+          ...orderInput,
+          shipping: {
+            ...orderInput.shipping,
+            acceptBackorder: true,
+          },
+        });
+      }
       if (!res.ok) { setSubmitError(res.error); return; }
       if (res.priceUpdated) {
         setPriceUpdatedNotice("O valor da sua compra foi atualizado.");
@@ -1817,13 +2111,12 @@ export function CheckoutClient({ initialEmail, initialName, initialPhone, initia
               <div key={animKey} className={dir === "fwd" ? "ck-fwd" : "ck-bwd"}>
                 {step === 1 && (
                   <ContactStep loggedIn={loggedIn} initialEmail={initialEmail}
-                    data={contact} onChange={setContact} registerSubmit={registerSubmit}
+                    data={contact} onChange={setContact}
                     onNext={() => { setContactDone(true); navigate(2, "fwd"); }} />
                 )}
                 {step === 2 && (
                   <DeliveryStep lines={shippingLines} data={shipping} onChange={setShipping}
                     subtotal={subtotal}
-                    registerSubmit={registerSubmit}
                     onNext={() => { setDeliveryDone(true); navigate(3, "fwd"); }}
                     onBack={() => { setContactDone(false); navigate(1, "bwd"); }} />
                 )}

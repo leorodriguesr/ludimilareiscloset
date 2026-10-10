@@ -1,4 +1,9 @@
-import { DiscountMode, OrderSource } from "@/app/generated/prisma/client";
+import {
+  DiscountMode,
+  FulfillmentType,
+  OrderSource,
+} from "@/app/generated/prisma/client";
+import { randomUUID } from "node:crypto";
 import {
   normalizeAdminSaleLineInput,
   resolveAdminSalePricing,
@@ -61,25 +66,29 @@ function parseLines(raw: unknown, allowEmpty: boolean): AdminSaleLineInput[] {
 }
 
 function stockLinesFromPricing(
-  lines: Awaited<ReturnType<typeof resolveAdminSalePricing>>["lines"]
+  lines: Awaited<ReturnType<typeof resolveAdminSalePricing>>["lines"],
+  itemIds: string[] = []
 ) {
-  return lines
-    .filter(
-      (l): l is typeof l & { productId: string } =>
-        typeof l.productId === "string" && l.productId.length > 0
-    )
-    .map((l) => ({
-      productId: l.productId,
-      quantity: l.quantity,
-      price: l.unitPrice,
-      pieceSelections: l.pieceSelections,
-    }));
+  return lines.flatMap((line, index) =>
+    typeof line.productId === "string" && line.productId.length > 0
+      ? [
+          {
+            productId: line.productId,
+            quantity: line.quantity,
+            price: line.unitPrice,
+            pieceSelections: line.pieceSelections,
+            itemId: itemIds[index] ?? null,
+          },
+        ]
+      : []
+  );
 }
 
 export async function replaceAdminSaleItems(input: {
   orderId: string;
   lines: unknown;
   actorUserId: string;
+  acceptBackorder?: boolean;
 }): Promise<{ paymentRegenerated: boolean; pendingAmount: number }> {
   const order = await prisma.order.findUnique({
     where: { id: input.orderId },
@@ -151,8 +160,10 @@ export async function replaceAdminSaleItems(input: {
     await prisma.$transaction(async (tx) => {
       await releaseStockReservations(tx, order.id);
       await tx.orderItem.deleteMany({ where: { orderId: order.id } });
+      const itemIds = pricing.lines.map(() => randomUUID());
       await tx.orderItem.createMany({
-        data: pricing.lines.map((line) => ({
+        data: pricing.lines.map((line, index) => ({
+          id: itemIds[index],
           orderId: order.id,
           productId: line.productId,
           productName: line.productName,
@@ -192,9 +203,32 @@ export async function replaceAdminSaleItems(input: {
         });
       }
 
-      const stock = stockLinesFromPricing(pricing.lines);
+      const stock = stockLinesFromPricing(pricing.lines, itemIds);
       if (stock.length > 0) {
-        await reserveStockForOrderLines(tx, order.id, stock);
+        const allocations = await reserveStockForOrderLines(
+          tx,
+          order.id,
+          stock,
+          new Date(),
+          {
+          acceptBackorder:
+            order.fulfillmentType === FulfillmentType.CARRIER ||
+            input.acceptBackorder === true,
+          }
+        );
+        for (const allocation of allocations) {
+          const itemId = stock[allocation.lineIndex]?.itemId;
+          if (!itemId) continue;
+          await tx.orderItem.update({
+            where: { id: itemId },
+            data: {
+              stockAllocatedQuantity: allocation.stockAllocatedQuantity,
+              backorderQuantity: allocation.backorderQuantity,
+              restockLeadDaysSnapshot: allocation.restockLeadDays,
+              stockAllocationJson: JSON.stringify(allocation.details),
+            },
+          });
+        }
       }
     });
 
@@ -304,8 +338,10 @@ export async function replaceAdminSaleItems(input: {
       });
     }
 
+    const itemIds = pricing.lines.map(() => randomUUID());
     await tx.orderItem.createMany({
-      data: pricing.lines.map((line) => ({
+      data: pricing.lines.map((line, index) => ({
+        id: itemIds[index],
         orderId: order.id,
         productId: line.productId,
         productName: line.productName,
@@ -336,9 +372,32 @@ export async function replaceAdminSaleItems(input: {
     });
 
     await releaseStockReservations(tx, order.id);
-    const stock = stockLinesFromPricing(pricing.lines);
+    const stock = stockLinesFromPricing(pricing.lines, itemIds);
     if (stock.length > 0) {
-      await reserveStockForOrderLines(tx, order.id, stock);
+      const allocations = await reserveStockForOrderLines(
+        tx,
+        order.id,
+        stock,
+        new Date(),
+        {
+          acceptBackorder:
+            order.fulfillmentType === FulfillmentType.CARRIER ||
+            input.acceptBackorder === true,
+        }
+      );
+      for (const allocation of allocations) {
+        const itemId = stock[allocation.lineIndex]?.itemId;
+        if (!itemId) continue;
+        await tx.orderItem.update({
+          where: { id: itemId },
+          data: {
+            stockAllocatedQuantity: allocation.stockAllocatedQuantity,
+            backorderQuantity: allocation.backorderQuantity,
+            restockLeadDaysSnapshot: allocation.restockLeadDays,
+            stockAllocationJson: JSON.stringify(allocation.details),
+          },
+        });
+      }
     }
   });
 

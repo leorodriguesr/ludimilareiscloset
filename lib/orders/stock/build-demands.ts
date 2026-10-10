@@ -1,5 +1,4 @@
 import { StockType } from "@/app/generated/prisma/client";
-import type { CartPieceSelection } from "@/lib/cart/types";
 import { OrderCreateError } from "@/lib/orders/create-order";
 import type { StockReservationLine } from "@/lib/orders/stock/reservation";
 
@@ -9,14 +8,28 @@ export type StockDemand = {
   quantity: number;
 };
 
+export type DetailedStockDemand = StockDemand & {
+  lineIndex: number;
+  productName: string;
+  allowBackorder: boolean;
+  restockLeadDays: number | null;
+  pieceName: string | null;
+  colorName: string | null;
+  sizeName: string | null;
+  unlimited: boolean;
+};
+
 type VariantReader = {
   product: {
     findUnique: (args: {
       where: { id: string };
       select: {
         id: true;
+        name: true;
         stockType: true;
         stockQuantity: true;
+        allowBackorder: true;
+        restockLeadDays: true;
         pieces: {
           select: {
             name: true;
@@ -34,8 +47,11 @@ type VariantReader = {
       };
     }) => Promise<{
       id: string;
+      name: string;
       stockType: StockType;
       stockQuantity: number | null;
+      allowBackorder: boolean;
+      restockLeadDays: number | null;
       pieces: {
         name: string;
         variants: {
@@ -88,14 +104,32 @@ export async function buildStockDemands(
   db: VariantReader
 ): Promise<StockDemand[]> {
   const map = new Map<string, StockDemand>();
+  const detailed = await buildDetailedStockDemands(lines, db);
+  for (const demand of detailed) {
+    if (demand.unlimited) continue;
+    mergeDemand(map, demand);
+  }
+  return [...map.values()];
+}
 
-  for (const line of lines) {
+/** Demandas sem agrupamento, preservando a linha e a variação para registrar reposição. */
+export async function buildDetailedStockDemands(
+  lines: StockReservationLine[],
+  db: VariantReader
+): Promise<DetailedStockDemand[]> {
+  const out: DetailedStockDemand[] = [];
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex]!;
     const product = await db.product.findUnique({
       where: { id: line.productId },
       select: {
         id: true,
+        name: true,
         stockType: true,
         stockQuantity: true,
+        allowBackorder: true,
+        restockLeadDays: true,
         pieces: {
           select: {
             name: true,
@@ -121,6 +155,19 @@ export async function buildStockDemands(
     }
 
     if (product.stockType === StockType.UNLIMITED) {
+      out.push({
+        lineIndex,
+        productId: product.id,
+        productName: product.name,
+        pieceVariantId: null,
+        quantity: line.quantity,
+        allowBackorder: false,
+        restockLeadDays: null,
+        pieceName: null,
+        colorName: null,
+        sizeName: null,
+        unlimited: true,
+      });
       continue;
     }
 
@@ -148,23 +195,37 @@ export async function buildStockDemands(
             "Combinação de tamanho/cor indisponível."
           );
         }
-        if (variant.unlimited) continue;
-
-        mergeDemand(map, {
+        out.push({
+          lineIndex,
           productId: product.id,
+          productName: product.name,
           pieceVariantId: variant.id,
           quantity: line.quantity,
+          allowBackorder: product.allowBackorder,
+          restockLeadDays: product.restockLeadDays,
+          pieceName: piece.name,
+          colorName: variant.color.name,
+          sizeName: variant.size.name,
+          unlimited: variant.unlimited,
         });
       }
       continue;
     }
 
-    mergeDemand(map, {
+    out.push({
+      lineIndex,
       productId: product.id,
+      productName: product.name,
       pieceVariantId: null,
       quantity: line.quantity,
+      allowBackorder: product.allowBackorder,
+      restockLeadDays: product.restockLeadDays,
+      pieceName: null,
+      colorName: null,
+      sizeName: null,
+      unlimited: false,
     });
   }
 
-  return [...map.values()];
+  return out;
 }

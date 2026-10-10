@@ -19,6 +19,7 @@ import { resolveActiveShippingProvider } from "@/lib/shipping/resolve-active-pro
 import { SHIPPING_PROVIDERS } from "@/lib/shipping/providers";
 import { calculateShippingMelhorEnvio } from "@/lib/shipping/melhor-envio/quote";
 import { ShippingQuoteError } from "@/lib/shipping/types";
+import { localShippingOptions } from "@/lib/shipping/local-delivery";
 
 function readOriginPostalCode(): string {
   const origin = (process.env.SHIPPING_ORIGIN_POSTAL_CODE ?? "").replace(/\D/g, "");
@@ -95,16 +96,35 @@ export async function quoteShippingForCartLines(
   const dest = normalizePostalCode(destinationCep);
   if (!dest) throw new Error("INVALID_CEP");
 
+  const localOptions = await localShippingOptions(dest);
   const mocked = await quoteMock();
-  if (mocked) return mocked;
+  if (mocked) {
+    return { ...mocked, options: [...mocked.options, ...localOptions] };
+  }
 
   const pkg = await buildCartShippingPackage(lines);
-  return finalizeLiveQuote(
-    dest,
-    pkg.products,
-    pkg.insuranceDeclared,
-    pkg.useInsurance
-  );
+  try {
+    const quote = await finalizeLiveQuote(
+      dest,
+      pkg.products,
+      pkg.insuranceDeclared,
+      pkg.useInsurance
+    );
+    return { ...quote, options: [...quote.options, ...localOptions] };
+  } catch (error) {
+    if (localOptions.length > 0) {
+      return {
+        options: localOptions,
+        idealPackage: {
+          weightKg: pkg.weightGrams / 1_000,
+          heightCm: pkg.heightCm,
+          widthCm: pkg.widthCm,
+          lengthCm: pkg.lengthCm,
+        },
+      };
+    }
+    throw error;
+  }
 }
 
 async function quoteBuiltPackage(

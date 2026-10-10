@@ -27,6 +27,12 @@ import {
 } from "@/lib/shipping/service-id";
 import type { NormalizedShippingOption } from "@/lib/shipping/types";
 import { normalizePostalCode } from "@/lib/shipping/superfrete";
+import { isLocalShippingOption } from "@/lib/shipping/local-delivery";
+import { withRestockLeadDays } from "@/lib/shipping/delivery-days-label";
+import {
+  listBackorderGaps,
+  maxAllowedRestockLeadDays,
+} from "@/lib/orders/stock/backorder-gaps";
 
 export type MergedCheckoutLine = {
   productId: string;
@@ -72,12 +78,14 @@ export type PreparedOrderRecalculation = {
   shippingDeliveryDaysMax: number | null;
   shippingLabel: string;
   shippingServiceId: number | null;
-  shippingProvider: ShippingProvider;
+  shippingProvider: ShippingProvider | null;
   shippingQuotePackagesJson: string | null;
   packageHeightCm: number | null;
   packageWidthCm: number | null;
   packageLengthCm: number | null;
   packageWeightKg: number | null;
+  fulfillmentType: "CARRIER" | "ARRANGED";
+  acceptBackorder: boolean;
   chosenOption: NormalizedShippingOption;
 };
 
@@ -257,6 +265,8 @@ function buildPreparedFromStoredShipping(input: {
     packageWidthCm: input.stored.packageWidthCm,
     packageLengthCm: input.stored.packageLengthCm,
     packageWeightKg: input.stored.packageWeightKg,
+    fulfillmentType: "CARRIER",
+    acceptBackorder: true,
     chosenOption,
   };
 }
@@ -265,6 +275,12 @@ async function withChargedShipping(
   prepared: PreparedOrderRecalculation,
   options: Array<{ id: string; price: number }>
 ): Promise<PreparedOrderRecalculation> {
+  if (prepared.fulfillmentType === "ARRANGED") {
+    return {
+      ...prepared,
+      shippingAmount: prepared.shippingQuotedPrice,
+    };
+  }
   const [settings, products] = await Promise.all([
     prisma.storeSettings.findUnique({
       where: { id: "default" },
@@ -355,13 +371,33 @@ export async function prepareOrderRecalculation(
   }
 
   const ideal = quoteResult.idealPackage;
-  const shippingProvider = resolveShippingProviderFromQuote({
-    optionId: input.shipping.optionId,
-    quoteProvider: quoteResult.provider,
-  });
   const shippingQuotePackagesJson = Array.isArray(chosen.packages)
     ? JSON.stringify(chosen.packages)
     : null;
+  const fulfillmentType = isLocalShippingOption(input.shipping.optionId)
+    ? "ARRANGED"
+    : "CARRIER";
+  const restockExtraDays =
+    fulfillmentType === "CARRIER"
+      ? maxAllowedRestockLeadDays(await listBackorderGaps(mergedLines))
+      : 0;
+  const adjustedDeliveryDays = withRestockLeadDays(
+    chosen.deliveryDaysMin,
+    chosen.deliveryDaysMax,
+    restockExtraDays
+  );
+  const quotedOption = {
+    ...chosen,
+    deliveryDaysMin: adjustedDeliveryDays.min,
+    deliveryDaysMax: adjustedDeliveryDays.max,
+  };
+  const shippingProvider =
+    fulfillmentType === "CARRIER"
+      ? resolveShippingProviderFromQuote({
+          optionId: input.shipping.optionId,
+          quoteProvider: quoteResult.provider,
+        })
+      : null;
 
   return withChargedShipping({
     mergedLines,
@@ -369,9 +405,13 @@ export async function prepareOrderRecalculation(
     shippingAmount: Math.round(chosen.price * 100) / 100,
     shippingQuotedPrice: Math.round(chosen.price * 100) / 100,
     shippingDeliveryDaysMin:
-      chosen.deliveryDaysMin > 0 ? Math.floor(chosen.deliveryDaysMin) : null,
+      quotedOption.deliveryDaysMin > 0
+        ? Math.floor(quotedOption.deliveryDaysMin)
+        : null,
     shippingDeliveryDaysMax:
-      chosen.deliveryDaysMax > 0 ? Math.floor(chosen.deliveryDaysMax) : null,
+      quotedOption.deliveryDaysMax > 0
+        ? Math.floor(quotedOption.deliveryDaysMax)
+        : null,
     shippingLabel: `${chosen.carrierName} — ${chosen.serviceName}`,
     shippingServiceId:
       chosen.serviceId ?? parseSuperfreteServiceId(input.shipping.optionId),
@@ -381,7 +421,10 @@ export async function prepareOrderRecalculation(
     packageWidthCm: ideal?.widthCm ?? null,
     packageLengthCm: ideal?.lengthCm ?? null,
     packageWeightKg: ideal?.weightKg ?? null,
-    chosenOption: chosen,
+    fulfillmentType,
+    acceptBackorder:
+      fulfillmentType === "CARRIER" || input.shipping.acceptBackorder === true,
+    chosenOption: quotedOption,
   }, quoteResult.options);
 }
 
@@ -513,16 +556,19 @@ export async function persistRecalculatedOrder(
 
   await tx.orderItem.deleteMany({ where: { orderId } });
 
-  await reserveStockForOrderLines(
+  const allocations = await reserveStockForOrderLines(
     tx,
     orderId,
     totals.lines,
-    input.lastRecalculatedAt
+    input.lastRecalculatedAt,
+    { acceptBackorder: prepared.acceptBackorder }
   );
 
   if (totals.lines.length > 0) {
     await tx.orderItem.createMany({
-      data: totals.lines.map((r) => ({
+      data: totals.lines.map((r, index) => {
+        const allocation = allocations[index];
+        return {
         orderId,
         productId: r.productId,
         productName: r.productName,
@@ -538,7 +584,15 @@ export async function persistRecalculatedOrder(
         pieceSelectionsJson: r.pieceSelections?.length
           ? JSON.stringify(r.pieceSelections)
           : null,
-      })),
+        stockAllocatedQuantity:
+          allocation?.stockAllocatedQuantity ?? r.quantity,
+        backorderQuantity: allocation?.backorderQuantity ?? 0,
+        restockLeadDaysSnapshot: allocation?.restockLeadDays ?? null,
+        stockAllocationJson: allocation
+          ? JSON.stringify(allocation.details)
+          : null,
+        };
+      }),
     });
   }
 
@@ -575,6 +629,7 @@ export async function persistRecalculatedOrder(
       "packageWeightKg" = ?,
       "shippingProvider" = ?,
       "shippingQuotePackagesJson" = ?,
+      "fulfillmentType" = ?,
       "updatedAt" = datetime('now')
     WHERE "id" = ?`,
     prepared.shippingAmount,
@@ -599,6 +654,7 @@ export async function persistRecalculatedOrder(
     prepared.packageWeightKg,
     prepared.shippingProvider,
     prepared.shippingQuotePackagesJson,
+    prepared.fulfillmentType,
     orderId
   );
 }

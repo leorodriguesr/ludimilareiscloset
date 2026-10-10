@@ -4,6 +4,7 @@ import {
   replaceAdminSaleItems,
 } from "@/lib/admin-sale/replace-admin-sale-items";
 import { requireStaffApi } from "@/lib/auth/require-staff-api";
+import { OrderCreateError } from "@/lib/orders/create-order";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -27,17 +28,29 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     body && typeof body === "object"
       ? (body as Record<string, unknown>).lines
       : undefined;
+  const acceptBackorder = Boolean(
+    body &&
+    typeof body === "object" &&
+    (body as Record<string, unknown>).acceptBackorder === true
+  );
 
   try {
     const result = await replaceAdminSaleItems({
       orderId: id.trim(),
       lines,
       actorUserId: gate.userId,
+      acceptBackorder,
     });
     return NextResponse.json({ ok: true, ...result });
   } catch (e) {
     if (e instanceof AdminSaleItemsError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
+    }
+    if (e instanceof OrderCreateError) {
+      return NextResponse.json(
+        { error: e.message, code: e.code },
+        { status: 409 }
+      );
     }
     console.error("[PUT /api/admin/orders/:id/items]", e);
     return NextResponse.json(

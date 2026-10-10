@@ -56,6 +56,8 @@ export default async function ProductPage({ params }: ProductPageProps) {
             coverImage={coverImage}
             stockType={product.stockType}
             stockQuantity={product.stockQuantity}
+            allowBackorder={product.allowBackorder}
+            restockLeadDays={product.restockLeadDays}
             pieces={product.pieces}
           />
 

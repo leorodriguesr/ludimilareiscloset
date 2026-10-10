@@ -259,7 +259,12 @@ type ProductCardData = {
   installmentCount: number | null;
   images: { url: string; order: number; colorName: string | null }[];
   tag: string | null;
-  pieces: { name: string; colors: { id: string; name: string; hex: string | null }[] }[];
+  allowBackorder: boolean;
+  pieces: {
+    name: string;
+    colors: { id: string; name: string; hex: string | null }[];
+    variants: { quantity: number; unlimited: boolean }[];
+  }[];
 };
 
 function ProductCards({
@@ -275,6 +280,13 @@ function ProductCards({
     <>
       {products.map((product, index) => {
         const { pieceName, colors } = firstPieceColors(product.pieces);
+        const variants = product.pieces.flatMap((piece) => piece.variants);
+        const backorderOnly =
+          product.allowBackorder &&
+          variants.length > 0 &&
+          variants.every(
+            (variant) => !variant.unlimited && variant.quantity <= 0
+          );
         return (
           <div key={product.id} className={itemClassName}>
             <ProductCard
@@ -288,6 +300,7 @@ function ProductCards({
               tag={product.tag}
               colors={colors}
               colorPieceName={pieceName}
+              backorderOnly={backorderOnly}
             />
           </div>
         );

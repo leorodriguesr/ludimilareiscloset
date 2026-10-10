@@ -16,6 +16,7 @@ import {
   emptyPieceSelections,
   maxPurchasableQuantity,
   pieceSelectionsAreComplete,
+  qtyForCombination,
   type PieceSelectionMap,
 } from "@/lib/product-piece-selection";
 import type { Product } from "@/lib/types";
@@ -90,12 +91,19 @@ type Props = {
   onCreated: () => void;
 };
 
-const STEPS = [
+const WIZARD_STEPS = [
+  { id: "delivery", label: "Entrega", hint: "Escolha a modalidade" },
   { id: "products", label: "Produtos", hint: "Itens da venda" },
-  { id: "delivery", label: "Entrega", hint: "Frete ou combinar" },
+  { id: "shipping", label: "Frete", hint: "Calcular o frete" },
   { id: "customer", label: "Cliente", hint: "Dados e endereço" },
   { id: "payment", label: "Pagamento", hint: "Forma e totais" },
 ] as const;
+
+function stepsForSale(fulfillmentType: "CARRIER" | "ARRANGED") {
+  return fulfillmentType === "CARRIER"
+    ? WIZARD_STEPS
+    : WIZARD_STEPS.filter((step) => step.id !== "shipping");
+}
 
 type ArrangedMode = "store_delivery" | "pickup" | "uber";
 
@@ -631,16 +639,43 @@ function OrderSummary({
 
 /** Teto do input quando a combinação tem estoque finito. Ilimitado não recebe max. */
 function finitePurchaseCap(
-  product: Pick<Product, "stockType" | "stockQuantity" | "pieces">,
+  product: Pick<
+    Product,
+    "stockType" | "stockQuantity" | "allowBackorder" | "pieces"
+  >,
   selections: PieceSelectionMap
 ): number | undefined {
   const cap = maxPurchasableQuantity({
     stockType: product.stockType,
     stockQuantity: product.stockQuantity,
+    allowBackorder: product.allowBackorder,
     pieces: product.pieces,
     selections,
   });
   return Number.isFinite(cap) ? cap : undefined;
+}
+
+function catalogShippingDelayNotices(line: WizardCatalogLine): string[] {
+  if (!line.product.allowBackorder) return [];
+  const days = line.product.restockLeadDays ?? 0;
+  const message = `O prazo para o envio da peça é de ${days} dias.`;
+  const matrixPieces = line.product.pieces.filter(
+    (piece) => piece.variants.length > 0
+  );
+  if (matrixPieces.length === 0) {
+    return line.product.stockType === "LIMITED" &&
+      (line.product.stockQuantity ?? 0) < line.quantity
+      ? [message]
+      : [];
+  }
+  return matrixPieces.flatMap((piece) => {
+    const selection = line.selections[piece.id];
+    if (!selection?.color || !selection.size) return [];
+    if (qtyForCombination(piece, selection.color, selection.size) >= line.quantity) {
+      return [];
+    }
+    return [`${message}`];
+  });
 }
 
 export function StandaloneSaleWizard({
@@ -697,6 +732,12 @@ export function StandaloneSaleWizard({
   }>({ pix: null, card: null });
   const [loadingQuote, setLoadingQuote] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [acceptBackorder, setAcceptBackorder] = useState(false);
+  const steps = stepsForSale(fulfillmentType);
+  const stepId = steps[step]?.id ?? "delivery";
+  useEffect(() => {
+    setStep((current) => Math.min(current, Math.max(0, steps.length - 1)));
+  }, [steps.length]);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{
     orderNumber: number;
@@ -944,7 +985,9 @@ export function StandaloneSaleWizard({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Erro ao cotar frete.");
-      const options = (data.options ?? []) as NormalizedShippingOption[];
+      const options = ((data.options ?? []) as NormalizedShippingOption[]).filter(
+        (option) => option.fulfillmentType !== "ARRANGED"
+      );
       setShippingOptions(options);
       const preferred =
         isFreeShipping && options.length
@@ -966,10 +1009,7 @@ export function StandaloneSaleWizard({
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch("/api/admin/sales", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const payload = {
           lines: linesPayload(),
           fulfillmentType,
           carrierShipping:
@@ -997,11 +1037,22 @@ export function StandaloneSaleWizard({
           paymentAlreadyPaid: canMarkAlreadyPaid && paymentAlreadyPaid,
           paymentMethod,
           orderDiscount: buildDiscountPayload(orderDiscount),
+      };
+      const res = await fetch("/api/admin/sales", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          acceptBackorder:
+            fulfillmentType === "CARRIER" || acceptBackorder,
         }),
       });
-      const data = await res.json();
+      const data = (await res.json()) as {
+        error?: string;
+        [key: string]: unknown;
+      };
       if (!res.ok) throw new Error(data.error ?? "Erro ao criar venda.");
-      setResult(data);
+      setResult(data as NonNullable<typeof result>);
       onCreated();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao criar venda.");
@@ -1108,28 +1159,53 @@ export function StandaloneSaleWizard({
   ]);
 
   const canGoNext =
-    step === 0
-      ? lines.length > 0 &&
-        lines.every((l) => {
-          if (l.kind === "custom") return true;
-          if (!pieceSelectionsAreComplete(l.product.pieces, l.selections)) return false;
-          return (
-            l.quantity <=
-            maxPurchasableQuantity({
-              stockType: l.product.stockType,
-              stockQuantity: l.product.stockQuantity,
-              pieces: l.product.pieces,
-              selections: l.selections,
-            })
-          );
-        })
-      : step === 1
-        ? fulfillmentType === "ARRANGED"
-          ? arrangedMode !== null
-          : Boolean(selectedShippingId)
-        : step === 2
-          ? customerStepComplete
-          : paymentMethod != null;
+    stepId === "delivery"
+      ? fulfillmentType === "CARRIER" || arrangedMode !== null
+      : stepId === "products"
+        ? lines.length > 0 &&
+          lines.every((l) => {
+            if (l.kind === "custom") return true;
+            if (
+              !pieceSelectionsAreComplete(
+                l.product.pieces,
+                l.selections,
+                l.product.allowBackorder
+              )
+            ) return false;
+            return (
+              l.quantity <=
+              maxPurchasableQuantity({
+                stockType: l.product.stockType,
+                stockQuantity: l.product.stockQuantity,
+                allowBackorder: l.product.allowBackorder,
+                pieces: l.product.pieces,
+                selections: l.selections,
+              })
+            );
+          })
+        : stepId === "shipping"
+          ? Boolean(selectedShippingId)
+          : stepId === "customer"
+            ? customerStepComplete
+            : paymentMethod != null;
+
+  function continueWizard() {
+    if (stepId === "products") {
+      const notices = lines.flatMap((line) =>
+        line.kind === "catalog" ? catalogShippingDelayNotices(line) : []
+      );
+      if (notices.length > 0) {
+        const confirmed = window.confirm(
+          `${notices.join("\n")}\n\nDeseja continuar a criação da venda?`
+        );
+        if (!confirmed) return;
+        setAcceptBackorder(true);
+      } else {
+        setAcceptBackorder(false);
+      }
+    }
+    setStep((current) => current + 1);
+  }
 
   /* ─── Success screen ───────────────────────────────────────── */
 
@@ -1237,7 +1313,7 @@ export function StandaloneSaleWizard({
           <div className="min-w-0 pr-3">
             <h2 className="truncate text-base font-semibold text-stone-900 sm:text-lg">Nova venda avulsa</h2>
             <p className="mt-0.5 truncate text-xs text-stone-500 sm:text-sm">
-              {STEPS[step].label} · {step + 1}/{STEPS.length}
+              {steps[step]?.label} · {step + 1}/{steps.length}
             </p>
           </div>
           <button
@@ -1255,10 +1331,10 @@ export function StandaloneSaleWizard({
         {/* Timeline de etapas */}
         <div className="shrink-0 border-b border-stone-100 bg-stone-50/80 px-3 py-3 sm:px-6">
           <ol className="flex w-full items-start gap-0 overflow-x-auto overscroll-x-contain p-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {STEPS.map((s, i) => {
+            {steps.map((s, i) => {
               const active = i === step;
               const done = i < step;
-              const isLast = i === STEPS.length - 1;
+              const isLast = i === steps.length - 1;
               return (
                 <li key={s.id} className="flex min-w-0 flex-1 items-start">
                   <div className="flex w-full min-w-[4.5rem] flex-col items-center gap-1.5 sm:min-w-0">
@@ -1339,8 +1415,76 @@ export function StandaloneSaleWizard({
               </div>
             )}
 
-            {/* Step 0 — Produtos */}
-            {step === 0 && (
+            {/* Step 0 — Modalidade de entrega */}
+            {stepId === "delivery" && (
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-stone-900">
+                    Como será feita a entrega?
+                  </h3>
+                  <p className="mt-1 text-xs text-stone-500">
+                    Essa escolha define como o estoque sob encomenda será
+                    tratado ao adicionar os produtos.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <CheckboxOption
+                    checked={fulfillmentType === "CARRIER"}
+                    onChange={() => {
+                      setFulfillmentType("CARRIER");
+                      setArrangedMode(null);
+                    }}
+                    label="Transportadora"
+                    description="Produtos sob encomenda podem ser vendidos sem limitar ao estoque atual"
+                  />
+                  <CheckboxOption
+                    checked={fulfillmentType === "ARRANGED"}
+                    onChange={() => {
+                      setFulfillmentType("ARRANGED");
+                      setSelectedShippingId("");
+                      setShippingOptions([]);
+                    }}
+                    label="Entrega a combinar"
+                    description="Entregador da loja, retirada ou Uber; falta de estoque exige confirmação"
+                  />
+                </div>
+                {fulfillmentType === "ARRANGED" ? (
+                  <div className="rounded-xl border border-stone-200 p-4">
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-stone-400">
+                      Modalidade
+                    </p>
+                    <div className="space-y-2">
+                      {(
+                        [
+                          ["store_delivery", "Entregador da loja"],
+                          ["pickup", "Retirada na loja"],
+                          ["uber", "Uber"],
+                        ] as const
+                      ).map(([value, label]) => (
+                        <CheckboxOption
+                          key={value}
+                          checked={arrangedMode === value}
+                          onChange={() => setArrangedMode(value)}
+                          label={label}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                <div>
+                  <FieldLabel optional>Observações da entrega</FieldLabel>
+                  <TextArea
+                    rows={2}
+                    placeholder="Ex.: Entregar após 18h, retirar na portaria…"
+                    value={deliveryNotes}
+                    onChange={(e) => setDeliveryNotes(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Step 1 — Produtos */}
+            {stepId === "products" && (
               <div className="space-y-5">
                 <section className="space-y-3">
                   <div>
@@ -1434,11 +1578,6 @@ export function StandaloneSaleWizard({
                                       <p className="text-sm font-medium leading-snug text-stone-900 sm:text-[15px]">
                                         {line.product.name}
                                       </p>
-                                      {line.product.description ? (
-                                        <p className="mt-0.5 line-clamp-2 text-xs text-stone-500">
-                                          {line.product.description}
-                                        </p>
-                                      ) : null}
                                       <ProductPrices
                                         product={line.product}
                                         quantity={line.quantity}
@@ -1488,11 +1627,13 @@ export function StandaloneSaleWizard({
                                   <PieceSelector
                                     pieces={line.product.pieces}
                                     selections={line.selections}
+                                    allowBackorder={line.product.allowBackorder}
                                     onSelectionsChange={(next) => {
                                       if (line.kind !== "catalog") return;
                                       const cap = maxPurchasableQuantity({
                                         stockType: line.product.stockType,
                                         stockQuantity: line.product.stockQuantity,
+                                        allowBackorder: line.product.allowBackorder,
                                         pieces: line.product.pieces,
                                         selections: next,
                                       });
@@ -1505,6 +1646,14 @@ export function StandaloneSaleWizard({
                                       });
                                     }}
                                   />
+                                  {catalogShippingDelayNotices(line).map((notice) => (
+                                    <p
+                                      key={notice}
+                                      className="mt-3 text-sm font-medium text-red-600"
+                                    >
+                                      {notice}
+                                    </p>
+                                  ))}
                                 </div>
                               )}
 
@@ -1527,6 +1676,7 @@ export function StandaloneSaleWizard({
                                           ? maxPurchasableQuantity({
                                               stockType: line.product.stockType,
                                               stockQuantity: line.product.stockQuantity,
+                                              allowBackorder: line.product.allowBackorder,
                                               pieces: line.product.pieces,
                                               selections: line.selections,
                                             })
@@ -1592,32 +1742,9 @@ export function StandaloneSaleWizard({
               </div>
             )}
 
-            {/* Step 1 — Entrega */}
-            {step === 1 && (
+            {/* Step 2 — Frete */}
+            {stepId === "shipping" && (
               <div className="space-y-6">
-                <div className="space-y-2">
-                  <CheckboxOption
-                    checked={fulfillmentType === "CARRIER"}
-                    onChange={() => {
-                      setFulfillmentType("CARRIER");
-                      setArrangedMode(null);
-                    }}
-                    label="Transportadora"
-                    description="Cotação SuperFrete com valor real"
-                  />
-                  <CheckboxOption
-                    checked={fulfillmentType === "ARRANGED"}
-                    onChange={() => {
-                      setFulfillmentType("ARRANGED");
-                      setSelectedShippingId("");
-                      setShippingOptions([]);
-                    }}
-                    label="Entrega a combinar"
-                    description="Entregador da loja, retirada ou Uber"
-                  />
-                </div>
-
-                {fulfillmentType === "CARRIER" ? (
                   <div className="space-y-4 rounded-xl border border-stone-200 p-5">
                     {settings?.freeShippingEnabled && freeShippingResult ? (
                       isFreeShipping ? (
@@ -1739,45 +1866,10 @@ export function StandaloneSaleWizard({
                       </div>
                     )}
                   </div>
-                ) : (
-                  <div className="space-y-3 rounded-xl border border-stone-200 p-5">
-                    <FieldLabel>Tipo de entrega</FieldLabel>
-                    <div className="space-y-2">
-                      <CheckboxOption
-                        checked={arrangedMode === "store_delivery"}
-                        onChange={() => setArrangedMode("store_delivery")}
-                        label="Entregador da loja"
-                        description="Frete a combinar"
-                      />
-                      <CheckboxOption
-                        checked={arrangedMode === "pickup"}
-                        onChange={() => setArrangedMode("pickup")}
-                        label="Retirada"
-                      />
-                      <CheckboxOption
-                        checked={arrangedMode === "uber"}
-                        onChange={() => setArrangedMode("uber")}
-                        label="Uber"
-                        description="Frete a combinar"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                <div>
-                  <FieldLabel>Observações da entrega</FieldLabel>
-                  <TextArea
-                    rows={2}
-                    placeholder="Ex.: Entregar após 18h, retirar na portaria…"
-                    value={deliveryNotes}
-                    onChange={(e) => setDeliveryNotes(e.target.value)}
-                  />
-                </div>
               </div>
             )}
 
-            {/* Step 2 — Cliente */}
-            {step === 2 && (
+            {stepId === "customer" && (
               <div className="space-y-6">
                 <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
                   <CustomerSearchSelect
@@ -2036,8 +2128,8 @@ export function StandaloneSaleWizard({
               </div>
             )}
 
-            {/* Step 3 — Pagamento */}
-            {step === 3 && (
+            {/* Step 4 — Pagamento */}
+            {stepId === "payment" && (
               <div className="space-y-6">
                 {canMarkAlreadyPaid ? (
                   <div className="space-y-2">
@@ -2195,11 +2287,11 @@ export function StandaloneSaleWizard({
           >
             Voltar
           </button>
-          {step < STEPS.length - 1 ? (
+          {step < steps.length - 1 ? (
             <button
               type="button"
               disabled={!canGoNext}
-              onClick={() => setStep((s) => s + 1)}
+              onClick={continueWizard}
               className="ml-auto rounded-lg bg-sky-100 px-4 py-2 text-sm font-semibold text-sky-900 ring-1 ring-sky-200/80 transition-colors hover:bg-sky-200 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Continuar
