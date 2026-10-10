@@ -72,7 +72,7 @@ interface ProductData {
   description: string;
   fabric: string;
   tag: string;
-  videoUrl: string | null;
+  videoUrls: string[];
   stockType: "UNLIMITED" | "LIMITED";
   stockQuantity: number | null;
   allowBackorder: boolean;
@@ -268,13 +268,15 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
     description: initialData?.description ?? "",
     fabric: initialData?.fabric ?? "",
     tag: initialData?.tag ?? "",
-    videoUrl: initialData?.videoUrl ?? "",
     weightGrams:
       initialData?.weightGrams != null ? String(initialData.weightGrams) : "",
     lengthCm: initialData?.lengthCm != null ? String(initialData.lengthCm) : "",
     widthCm: initialData?.widthCm != null ? String(initialData.widthCm) : "",
     heightCm: initialData?.heightCm != null ? String(initialData.heightCm) : "",
   });
+  const [videoUrls, setVideoUrls] = useState<string[]>(() =>
+    initialData?.videoUrls?.length ? [...initialData.videoUrls] : [""]
+  );
   const [categoryIds, setCategoryIds] = useState<string[]>(
     initialData?.categoryIds ?? []
   );
@@ -509,12 +511,12 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
       description: "",
       fabric: "",
       tag: "",
-      videoUrl: "",
       weightGrams: "",
       lengthCm: "",
       widthCm: "",
       heightCm: "",
     });
+    setVideoUrls([""]);
     setCategoryIds([]);
     setSectionIds([]);
     setImages([]);
@@ -589,7 +591,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
         description: form.description || null,
         fabric: form.fabric.trim() || null,
         tag: form.tag || null,
-        videoUrl: form.videoUrl.trim() || null,
+        videoUrls: videoUrls.map((url) => url.trim()).filter(Boolean),
         stockType,
         stockQuantity,
         allowBackorder,
@@ -781,15 +783,50 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
         <h3 className={SECTION_TITLE_CLASS}>Mídia e vitrine</h3>
       <div>
         <label className={LABEL_CLASS}>
-          Link do vídeo (YouTube, Vimeo ou outro)
+          Vídeos (YouTube, Vimeo ou outro)
         </label>
-        <input
-          type="url"
-          value={form.videoUrl}
-          onChange={(e) => setForm({ ...form, videoUrl: e.target.value })}
-          className={INPUT_CLASS}
-          placeholder="https://..."
-        />
+        <p className={`${HELPER_CLASS} mb-2`}>
+          Adicione quantos links quiser. Eles aparecem na galeria do produto.
+        </p>
+        <div className="space-y-2">
+          {videoUrls.map((url, index) => (
+            <div key={index} className="flex items-center gap-2">
+              <input
+                type="url"
+                value={url}
+                onChange={(e) =>
+                  setVideoUrls((current) =>
+                    current.map((item, itemIndex) =>
+                      itemIndex === index ? e.target.value : item
+                    )
+                  )
+                }
+                className={INPUT_CLASS}
+                placeholder="https://..."
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  setVideoUrls((current) =>
+                    current.length === 1
+                      ? [""]
+                      : current.filter((_, itemIndex) => itemIndex !== index)
+                  )
+                }
+                className="shrink-0 rounded-lg border border-stone-200 px-3 py-2.5 text-xs font-semibold text-stone-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+              >
+                Remover
+              </button>
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => setVideoUrls((current) => [...current, ""])}
+          className="mt-2 rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-semibold text-stone-700 transition hover:border-stone-900 hover:text-stone-900"
+        >
+          Adicionar vídeo
+        </button>
       </div>
 
       <div>

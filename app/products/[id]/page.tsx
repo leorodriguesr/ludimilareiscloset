@@ -3,6 +3,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { productFullInclude } from "@/lib/product-include";
 import { ProductMediaGallery } from "@/components/product/ProductMediaGallery";
+import { productVideoUrls } from "@/lib/product-videos";
 import { ProductSummaryPanel } from "@/components/product/ProductSummaryPanel";
 
 export const revalidate = 60;
@@ -41,7 +42,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
             <ProductMediaGallery
               images={product.images}
               productName={product.name}
-              videoUrl={product.videoUrl}
+              videoUrls={productVideoUrls(product)}
             />
           </div>
         </div>

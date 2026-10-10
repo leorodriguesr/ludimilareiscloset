@@ -812,12 +812,23 @@ model Product {
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
   images        ProductImage[]
+  videos        ProductVideo[]
   pieces        ProductPiece[]
   categories    ProductCategory[]
   sections      ProductSection[]
   orderItems        OrderItem[]
   favorites         Favorite[]
   stockReservations StockReservation[]
+}
+
+model ProductVideo {
+  id        String  @id @default(cuid())
+  url       String
+  order     Int     @default(0)
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, order])
 }
 
 model ProductImage {

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { nextOrdersForSections } from "@/lib/admin/section-product-order";
 import { productFullInclude } from "@/lib/product-include";
 import { requireAdminRole } from "@/lib/auth/require-staff-api";
+import { normalizeVideoUrls } from "@/lib/product-videos";
 
 export async function GET(request: NextRequest) {
   try {
@@ -102,10 +103,12 @@ export async function POST(request: NextRequest) {
     pixPrice = px;
   }
 
-  const videoUrl =
-    typeof b.videoUrl === "string" && b.videoUrl.trim()
-      ? b.videoUrl.trim()
-      : null;
+  const videoUrls = Array.isArray(b.videoUrls)
+    ? normalizeVideoUrls(b.videoUrls)
+    : typeof b.videoUrl === "string" && b.videoUrl.trim()
+      ? [b.videoUrl.trim()]
+      : [];
+  const videoUrl = videoUrls[0] ?? null;
 
   const stockType =
     b.stockType === StockType.LIMITED ? StockType.LIMITED : StockType.UNLIMITED;
@@ -341,6 +344,13 @@ export async function POST(request: NextRequest) {
           heightCm,
           ...(imageCreates.length > 0
             ? { images: { create: imageCreates } }
+            : {}),
+          ...(videoUrls.length > 0
+            ? {
+                videos: {
+                  create: videoUrls.map((url, order) => ({ url, order })),
+                },
+              }
             : {}),
           categories:
             categoryIds.length > 0

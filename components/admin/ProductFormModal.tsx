@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { productVideoUrls } from "@/lib/product-videos";
 import { isProductVisibleOnSite, type Product } from "@/lib/types";
 import { ProductForm } from "./ProductForm";
 
@@ -14,7 +15,7 @@ export interface ProductFormData {
   description: string;
   fabric: string;
   tag: string;
-  videoUrl: string | null;
+  videoUrls: string[];
   stockType: "UNLIMITED" | "LIMITED";
   stockQuantity: number | null;
   allowBackorder: boolean;
@@ -51,7 +52,7 @@ export function mapProductToFormData(product: Product): ProductFormData {
     description: product.description ?? "",
     fabric: product.fabric ?? "",
     tag: product.tag ?? "",
-    videoUrl: product.videoUrl,
+    videoUrls: productVideoUrls(product),
     stockType: product.stockType,
     stockQuantity: product.stockQuantity,
     allowBackorder: product.allowBackorder,

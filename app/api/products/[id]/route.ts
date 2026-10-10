@@ -6,6 +6,7 @@ import { syncProductPieces } from "@/lib/admin/sync-product-pieces";
 import { prisma } from "@/lib/prisma";
 import { productFullInclude } from "@/lib/product-include";
 import { requireAdminRole } from "@/lib/auth/require-staff-api";
+import { normalizeVideoUrls } from "@/lib/product-videos";
 
 export async function GET(
   _request: NextRequest,
@@ -47,6 +48,7 @@ export async function PUT(
     fabric,
     tag,
     videoUrl,
+    videoUrls,
     stockType: stockTypeRaw,
     stockQuantity: stockQtyRaw,
     allowBackorder: allowBackorderRaw,
@@ -117,11 +119,23 @@ export async function PUT(
         updateData.tag = tag ? String(tag) : null;
       }
 
-      if (videoUrl !== undefined) {
-        updateData.videoUrl =
-          typeof videoUrl === "string" && videoUrl.trim()
-            ? videoUrl.trim()
-            : null;
+      if (videoUrls !== undefined || videoUrl !== undefined) {
+        const nextVideos = Array.isArray(videoUrls)
+          ? normalizeVideoUrls(videoUrls)
+          : typeof videoUrl === "string" && videoUrl.trim()
+            ? [videoUrl.trim()]
+            : [];
+        updateData.videoUrl = nextVideos[0] ?? null;
+        await tx.productVideo.deleteMany({ where: { productId: id } });
+        if (nextVideos.length > 0) {
+          await tx.productVideo.createMany({
+            data: nextVideos.map((url, order) => ({
+              url,
+              order,
+              productId: id,
+            })),
+          });
+        }
       }
 
       if (visibleOnSiteRaw !== undefined) {

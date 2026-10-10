@@ -3,22 +3,36 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { findBestImageIndex } from "@/lib/image-color-bindings";
 import { cloudinaryImageUrl } from "@/lib/images/cloudinary-url";
-import { getVideoEmbedInfo } from "@/lib/video-embed";
+import { getVideoEmbedInfo, playbackEmbedUrl } from "@/lib/video-embed";
 
 export type ProductMediaImage = { url: string; colorName?: string | null };
 
 type MediaItem =
   | { kind: "image"; url: string }
-  | { kind: "video"; embedUrl: string | null; originalUrl: string };
+  | {
+      kind: "video";
+      provider: "youtube" | "vimeo" | "external";
+      embedUrl: string | null;
+      originalUrl: string;
+    };
 
 function buildMediaItems(
   images: ProductMediaImage[],
-  videoUrl: string | null | undefined
+  videoUrls: string[]
 ): MediaItem[] {
   const items: MediaItem[] = images.map((img) => ({ kind: "image", url: img.url }));
-  if (videoUrl?.trim()) {
-    const info = getVideoEmbedInfo(videoUrl);
-    if (info) items.push({ kind: "video", embedUrl: info.embedUrl, originalUrl: info.originalUrl });
+  for (const videoUrl of videoUrls) {
+    const trimmed = videoUrl.trim();
+    if (!trimmed) continue;
+    const info = getVideoEmbedInfo(trimmed);
+    if (info) {
+      items.push({
+        kind: "video",
+        provider: info.provider,
+        embedUrl: info.embedUrl,
+        originalUrl: info.originalUrl,
+      });
+    }
   }
   return items;
 }
@@ -28,11 +42,13 @@ function MediaSlide({
   label,
   load,
   priority,
+  playing,
 }: {
   item: MediaItem;
   label: string;
   load: boolean;
   priority?: boolean;
+  playing?: boolean;
 }) {
   if (item.kind === "image") {
     if (!load) {
@@ -55,14 +71,24 @@ function MediaSlide({
     );
   }
   if (item.embedUrl) {
+    const src = playing
+      ? playbackEmbedUrl({
+          provider: item.provider,
+          embedUrl: item.embedUrl,
+          originalUrl: item.originalUrl,
+        })
+      : null;
+    if (!src) {
+      return <div className="h-full w-full bg-black" aria-hidden />;
+    }
     return (
-      <div className="relative h-full w-full bg-black">
+      <div className="relative h-full w-full overflow-hidden bg-black">
         <iframe
           title={label}
-          src={item.embedUrl}
-          className="h-full w-full border-0"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowFullScreen
+          src={src}
+          className="pointer-events-none absolute left-1/2 top-1/2 h-[140%] w-[140%] -translate-x-1/2 -translate-y-1/2 border-0"
+          allow="autoplay; encrypted-media; picture-in-picture"
+          tabIndex={-1}
         />
       </div>
     );
@@ -86,17 +112,34 @@ type ProductMediaGalleryProps = {
   images: ProductMediaImage[];
   productName: string;
   videoUrl?: string | null;
+  videoUrls?: string[];
 };
 
-export function ProductMediaGallery({ images, productName, videoUrl }: ProductMediaGalleryProps) {
-  const mediaItems = useMemo(() => buildMediaItems(images, videoUrl), [images, videoUrl]);
+export function ProductMediaGallery({
+  images,
+  productName,
+  videoUrl,
+  videoUrls,
+}: ProductMediaGalleryProps) {
+  const resolvedVideoUrls =
+    videoUrls && videoUrls.length > 0
+      ? videoUrls
+      : videoUrl?.trim()
+        ? [videoUrl]
+        : [];
+  const mediaItems = useMemo(
+    () => buildMediaItems(images, resolvedVideoUrls),
+    [images, resolvedVideoUrls]
+  );
   const total = mediaItems.length;
 
   const [isDesktop, setIsDesktop] = useState(false);
+  const [layoutReady, setLayoutReady] = useState(false);
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 1024px)");
     const update = () => setIsDesktop(mq.matches);
     update();
+    setLayoutReady(true);
     mq.addEventListener("change", update);
     return () => mq.removeEventListener("change", update);
   }, []);
@@ -208,6 +251,7 @@ export function ProductMediaGallery({ images, productName, videoUrl }: ProductMe
                       label={`${productName} — foto ${i + 1}`}
                       load={i >= currentIndex - 1 && i <= currentIndex + 2}
                       priority={i === currentIndex || i === currentIndex + 1}
+                      playing={layoutReady && isDesktop}
                     />
                   </div>
                 </div>
@@ -233,6 +277,7 @@ export function ProductMediaGallery({ images, productName, videoUrl }: ProductMe
                   label={`${productName} — foto ${i + 1}`}
                   load={Math.abs(i - currentIndex) <= 1}
                   priority={i === currentIndex}
+                  playing={layoutReady && !isDesktop}
                 />
               </div>
             ))}

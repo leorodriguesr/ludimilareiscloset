@@ -77,6 +77,7 @@ export interface Product {
   fabric: string | null;
   tag: string | null;
   videoUrl: string | null;
+  videos?: { id: string; url: string; order: number }[];
   stockType: StockType;
   stockQuantity: number | null;
   allowBackorder: boolean;

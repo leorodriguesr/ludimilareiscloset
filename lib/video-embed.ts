@@ -57,3 +57,38 @@ export function getVideoEmbedInfo(rawUrl: string): VideoEmbedInfo | null {
     originalUrl: url,
   };
 }
+
+/** URL do iframe para a vitrine: sem controles, logo ou sugestões, em loop. */
+export function playbackEmbedUrl(info: VideoEmbedInfo): string | null {
+  if (!info.embedUrl) return null;
+  const embed = new URL(info.embedUrl);
+
+  if (info.provider === "youtube") {
+    const videoId = embed.pathname.split("/").filter(Boolean).pop() ?? "";
+    embed.searchParams.set("autoplay", "1");
+    embed.searchParams.set("mute", "1");
+    embed.searchParams.set("controls", "0");
+    embed.searchParams.set("modestbranding", "1");
+    embed.searchParams.set("rel", "0");
+    embed.searchParams.set("iv_load_policy", "3");
+    embed.searchParams.set("fs", "0");
+    embed.searchParams.set("disablekb", "1");
+    embed.searchParams.set("playsinline", "1");
+    embed.searchParams.set("cc_load_policy", "0");
+    embed.searchParams.set("loop", "1");
+    if (videoId) embed.searchParams.set("playlist", videoId);
+  }
+
+  if (info.provider === "vimeo") {
+    embed.searchParams.set("autoplay", "1");
+    embed.searchParams.set("muted", "1");
+    embed.searchParams.set("background", "1");
+    embed.searchParams.set("loop", "1");
+    embed.searchParams.set("autopause", "0");
+    embed.searchParams.set("title", "0");
+    embed.searchParams.set("byline", "0");
+    embed.searchParams.set("portrait", "0");
+  }
+
+  return embed.toString();
+}
