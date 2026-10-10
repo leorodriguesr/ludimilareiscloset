@@ -70,6 +70,7 @@ interface ProductData {
   pixPrice: number | null;
   costPrice: number | null;
   description: string;
+  fabric: string;
   tag: string;
   videoUrl: string | null;
   stockType: "UNLIMITED" | "LIMITED";
@@ -265,6 +266,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
     costPrice:
       initialData?.costPrice != null ? String(initialData.costPrice) : "",
     description: initialData?.description ?? "",
+    fabric: initialData?.fabric ?? "",
     tag: initialData?.tag ?? "",
     videoUrl: initialData?.videoUrl ?? "",
     weightGrams:
@@ -505,6 +507,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
       installmentCount: "",
       costPrice: "",
       description: "",
+      fabric: "",
       tag: "",
       videoUrl: "",
       weightGrams: "",
@@ -584,6 +587,7 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
         pixPrice: pixParsed,
         costPrice: costParsed,
         description: form.description || null,
+        fabric: form.fabric.trim() || null,
         tag: form.tag || null,
         videoUrl: form.videoUrl.trim() || null,
         stockType,
@@ -854,6 +858,20 @@ export function ProductForm({ initialData, onSuccess }: ProductFormProps) {
             ))}
           </div>
         )}
+      </div>
+
+      <div>
+        <label className={LABEL_CLASS}>
+          Tecido
+        </label>
+        <input
+          type="text"
+          value={form.fabric}
+          maxLength={80}
+          onChange={(e) => setForm({ ...form, fabric: e.target.value })}
+          className={INPUT_CLASS}
+          placeholder="Nome do tecido"
+        />
       </div>
 
       <div>

@@ -74,6 +74,7 @@ export interface Product {
   pixPrice: number | null;
   costPrice: number | null;
   description: string | null;
+  fabric: string | null;
   tag: string | null;
   videoUrl: string | null;
   stockType: StockType;

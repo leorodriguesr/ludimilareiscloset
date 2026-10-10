@@ -4,7 +4,7 @@ import { insertPieceVariantRow } from "@/lib/piece-variant-sql";
 import { prisma } from "@/lib/prisma";
 import { nextOrdersForSections } from "@/lib/admin/section-product-order";
 import { productFullInclude } from "@/lib/product-include";
-import { requireAdminApi } from "@/lib/require-admin-api";
+import { requireAdminRole } from "@/lib/auth/require-staff-api";
 
 export async function GET(request: NextRequest) {
   try {
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const gate = await requireAdminApi();
+  const gate = await requireAdminRole();
   if (gate instanceof NextResponse) return gate;
 
   let body: unknown;
@@ -322,6 +322,10 @@ export async function POST(request: NextRequest) {
           description:
             typeof b.description === "string" && b.description.trim()
               ? b.description.trim()
+              : null,
+          fabric:
+            typeof b.fabric === "string" && b.fabric.trim()
+              ? b.fabric.trim().slice(0, 80)
               : null,
           tag:
             typeof b.tag === "string" && b.tag.trim() ? b.tag.trim() : null,

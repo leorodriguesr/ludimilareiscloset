@@ -4,10 +4,10 @@ import {
   getDashboardMetrics,
   parseDashboardDateRange,
 } from "@/lib/admin/dashboard-metrics";
-import { requireStaffApi } from "@/lib/auth/require-staff-api";
+import { requireAdminRole } from "@/lib/auth/require-staff-api";
 
 export async function GET(request: NextRequest) {
-  const gate = await requireStaffApi();
+  const gate = await requireAdminRole();
   if (gate instanceof NextResponse) return gate;
 
   const { searchParams } = request.nextUrl;

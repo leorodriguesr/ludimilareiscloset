@@ -37,3 +37,15 @@ export async function requireStaffApi(): Promise<
 
   return { userId: row.id, role: row.role };
 }
+
+/** Apenas o perfil Admin. Gestor recebe 403. */
+export async function requireAdminRole(): Promise<
+  NextResponse | StaffSession
+> {
+  const gate = await requireStaffApi();
+  if (gate instanceof NextResponse) return gate;
+  if (gate.role !== UserRole.ADMIN) {
+    return NextResponse.json({ error: "Sem permissão." }, { status: 403 });
+  }
+  return gate;
+}

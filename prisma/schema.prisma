@@ -793,6 +793,8 @@ model Product {
   pixPrice      Float?
   costPrice     Float?
   description   String?
+  /** Nome do tecido informado no cadastro. */
+  fabric        String?
   tag           String?
   videoUrl      String?
   stockType     StockType         @default(UNLIMITED)

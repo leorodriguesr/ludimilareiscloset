@@ -12,6 +12,7 @@ export interface ProductFormData {
   pixPrice: number | null;
   costPrice: number | null;
   description: string;
+  fabric: string;
   tag: string;
   videoUrl: string | null;
   stockType: "UNLIMITED" | "LIMITED";
@@ -48,6 +49,7 @@ export function mapProductToFormData(product: Product): ProductFormData {
     pixPrice: product.pixPrice,
     costPrice: product.costPrice,
     description: product.description ?? "",
+    fabric: product.fabric ?? "",
     tag: product.tag ?? "",
     videoUrl: product.videoUrl,
     stockType: product.stockType,

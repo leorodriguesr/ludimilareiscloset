@@ -5,7 +5,7 @@ import { sectionRowsForProduct } from "@/lib/admin/section-product-order";
 import { syncProductPieces } from "@/lib/admin/sync-product-pieces";
 import { prisma } from "@/lib/prisma";
 import { productFullInclude } from "@/lib/product-include";
-import { requireAdminApi } from "@/lib/require-admin-api";
+import { requireAdminRole } from "@/lib/auth/require-staff-api";
 
 export async function GET(
   _request: NextRequest,
@@ -31,7 +31,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const gate = await requireAdminApi();
+  const gate = await requireAdminRole();
   if (gate instanceof NextResponse) return gate;
 
   const { id } = await params;
@@ -44,6 +44,7 @@ export async function PUT(
     installmentCount: installmentCountRaw,
     costPrice,
     description,
+    fabric,
     tag,
     videoUrl,
     stockType: stockTypeRaw,
@@ -107,6 +108,10 @@ export async function PUT(
         updateData.description = description
           ? String(description)
           : null;
+      }
+      if (fabric !== undefined) {
+        const name = typeof fabric === "string" ? fabric.trim().slice(0, 80) : "";
+        updateData.fabric = name || null;
       }
       if (tag !== undefined) {
         updateData.tag = tag ? String(tag) : null;
@@ -351,7 +356,7 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const gate = await requireAdminApi();
+  const gate = await requireAdminRole();
   if (gate instanceof NextResponse) return gate;
 
   const { id } = await params;

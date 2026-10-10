@@ -1,9 +1,14 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { formatPrice } from "@/lib/format";
-import { isSizeOnlyColorName } from "@/lib/piece-size-only-color";
+import { colorSwatchStyle } from "@/lib/color-swatch";
+import {
+  isSizeOnlyColorName,
+  isSizeOnlyPiece,
+} from "@/lib/piece-size-only-color";
 import { installmentValueEqualParts } from "@/lib/product-pricing";
 import { isProductVisibleOnSite, type Product } from "@/lib/types";
 import {
@@ -119,61 +124,183 @@ function LabelledChips({
   );
 }
 
-function StatTile({
-  label,
-  value,
-  tone = "neutral",
-}: {
-  label: string;
-  value: string;
-  tone?: "neutral" | "warning" | "success";
-}) {
-  const tones = {
-    neutral: "border-stone-200 bg-stone-50/70",
-    warning: "border-stone-200 bg-stone-50/70",
-    success: "border-stone-200 bg-stone-50/70",
-  };
+function stockCellLabel(quantity: number, unlimited: boolean | undefined): string {
+  if (unlimited) return "∞";
+  return String(quantity);
+}
 
-  const valueTones = {
-    neutral: "text-stone-900",
-    warning: "text-stone-700",
-    success: "text-stone-900",
-  };
+function ProductCardGallery({
+  images,
+  alt,
+  children,
+}: {
+  images: { url: string }[];
+  alt: string;
+  children?: ReactNode;
+}) {
+  const [index, setIndex] = useState(0);
+  const count = images.length;
+  const current = count === 0 ? 0 : ((index % count) + count) % count;
+  const url = images[current]?.url;
+
+  function step(delta: number) {
+    setIndex((value) => value + delta);
+  }
 
   return (
-    <div className={`rounded-lg border px-2 py-1.5 ${tones[tone]}`}>
-      <p className="text-[9px] font-bold uppercase tracking-wide text-stone-400">
-        {label}
-      </p>
-      <p
-        className={`mt-0.5 text-[11px] font-bold leading-tight ${valueTones[tone]}`}
-      >
-        {value}
-      </p>
+    <div className="relative w-40 shrink-0 self-stretch overflow-hidden bg-stone-100 sm:w-44">
+      {url ? (
+        <img
+          src={url}
+          alt={alt}
+          className="h-full min-h-[9.5rem] w-full object-cover"
+        />
+      ) : (
+        <div className="flex h-full min-h-[9.5rem] items-center justify-center px-1 text-center text-[9px] font-medium leading-tight text-stone-400">
+          Sem foto
+        </div>
+      )}
+      {children}
+      {count > 1 ? (
+        <>
+          <button
+            type="button"
+            aria-label="Foto anterior"
+            onClick={() => step(-1)}
+            className="absolute left-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 text-stone-800 shadow-sm ring-1 ring-stone-200/80 transition hover:bg-white"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2.25} viewBox="0 0 24 24" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            aria-label="Próxima foto"
+            onClick={() => step(1)}
+            className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 text-stone-800 shadow-sm ring-1 ring-stone-200/80 transition hover:bg-white"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2.25} viewBox="0 0 24 24" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+            </svg>
+          </button>
+        </>
+      ) : null}
     </div>
   );
 }
 
-function countProductVariants(product: Product): number {
-  return product.pieces.reduce((sum, piece) => sum + piece.variants.length, 0);
-}
-
-function countProductColors(product: Product): number {
-  const names = new Set<string>();
-  for (const piece of product.pieces) {
-    for (const color of piece.colors) {
-      if (isSizeOnlyColorName(color.name)) continue;
-      names.add(color.name);
-    }
+function ProductStockTables({ product }: { product: Product }) {
+  const pieces = product.pieces.filter(
+    (piece) => piece.sizes.length > 0 && piece.variants.length > 0
+  );
+  if (pieces.length === 0) {
+    return (
+      <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+        <p className="border-b border-stone-100 bg-stone-50 px-3 py-2 text-[11px] font-semibold text-stone-800">
+          Quantidade em estoque (cor × tamanho)
+        </p>
+        <p className="px-3 py-2.5 text-[11px] text-stone-400">Sem grade cadastrada</p>
+      </div>
+    );
   }
-  return names.size;
-}
 
-function marginPercent(price: number, cost: number): number | null {
-  if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(cost)) {
-    return null;
-  }
-  return Math.round(((price - cost) / price) * 100);
+  return (
+    <div className="space-y-2">
+      {pieces.map((piece) => {
+        const sizeOnly = isSizeOnlyPiece(piece);
+        const colors = piece.colors.filter((color) => !isSizeOnlyColorName(color.name));
+        return (
+          <div
+            key={piece.id}
+            className="overflow-x-auto rounded-xl border border-stone-200 bg-white shadow-sm"
+          >
+            <p className="border-b border-stone-100 bg-stone-50 px-3 py-2 text-[11px] font-semibold text-stone-800">
+            {pieces.length > 1 ? `${piece.name} · ` : ""}
+              {sizeOnly
+                ? "Estoque por tamanho"
+                : "Estoque (cor × tamanho)"}
+            </p>
+            {sizeOnly ? (
+              <table className="w-full min-w-[180px] border-collapse text-center text-[11px]">
+                <thead>
+                  <tr>
+                    <th className="border-b border-r border-stone-100 bg-stone-50/90 p-1.5 text-left font-medium text-stone-500">
+                      Tamanho
+                    </th>
+                    <th className="border-b border-stone-100 p-1.5 font-medium text-stone-800">Qtd.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {piece.sizes.map((size) => {
+                    const cell = piece.variants.find(
+                      (variant) =>
+                        isSizeOnlyColorName(variant.color.name) &&
+                        variant.size.name === size.name
+                    );
+                    return (
+                      <tr key={size.id}>
+                        <th className="border-b border-r border-stone-100 bg-stone-50/80 p-1.5 text-left font-medium text-stone-800">
+                          {size.name}
+                        </th>
+                        <td className="border-b border-stone-50 p-1.5 font-semibold tabular-nums text-stone-900">
+                          {stockCellLabel(cell?.quantity ?? 0, cell?.unlimited)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <table className="w-full min-w-[220px] border-collapse text-center text-[11px]">
+                <thead>
+                  <tr>
+                    <th className="border-b border-r border-stone-100 bg-stone-50/90 p-1.5 font-medium text-stone-500">
+                      Tam / Cor
+                    </th>
+                    {colors.map((color) => (
+                      <th key={color.id} className="border-b border-stone-100 p-1.5 font-medium text-stone-800">
+                        <span className="inline-flex flex-col items-center gap-1">
+                          <span
+                            className="h-3 w-3 rounded-full border border-stone-200"
+                            style={colorSwatchStyle(color.hex)}
+                          />
+                          {color.name}
+                        </span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {piece.sizes.map((size) => (
+                    <tr key={size.id}>
+                      <th className="border-b border-r border-stone-100 bg-stone-50/80 p-1.5 font-medium text-stone-800">
+                        {size.name}
+                      </th>
+                      {colors.map((color) => {
+                        const cell = piece.variants.find(
+                          (variant) =>
+                            variant.color.name === color.name &&
+                            variant.size.name === size.name
+                        );
+                        return (
+                          <td
+                            key={color.id}
+                            className="border-b border-stone-50 p-1.5 font-semibold tabular-nums text-stone-900"
+                          >
+                            {stockCellLabel(cell?.quantity ?? 0, cell?.unlimited)}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export function ProductList({
@@ -182,6 +309,7 @@ export function ProductList({
   emptyKind = "catalog",
   searchQuery = "",
 }: ProductListProps) {
+  const { isAdmin } = useAuth();
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -255,52 +383,14 @@ export function ProductList({
     <>
       <div className="grid gap-8 sm:grid-cols-2">
         {list.map((product) => {
-          const coverImage = product.images[0]?.url;
           const categories = product.categories.map((pc) => pc.category.name);
           const sections = (product.sections ?? []).map((ps) => ps.section.name);
-          const variants = product.pieces.flatMap((piece) => piece.variants);
-          const hasUnlimitedVariant = variants.some((variant) => variant.unlimited);
-          const limitedUnits = variants
-            .filter((variant) => !variant.unlimited)
-            .reduce((sum, variant) => sum + variant.quantity, 0);
-          const stockQty =
-            variants.length > 0 ? limitedUnits : product.stockQuantity ?? 0;
-          const isLimited = variants.length > 0
-            ? !hasUnlimitedVariant
-            : product.stockType === "LIMITED";
-          const stockLabel = hasUnlimitedVariant
-            ? stockQty > 0
-              ? `${stockQty} + ∞`
-              : "∞"
-            : isLimited
-              ? `${stockQty} un.`
-              : "∞";
-          const variantCount = countProductVariants(product);
-          const colorCount = countProductColors(product);
-          const margin =
-            product.costPrice != null
-              ? marginPercent(product.price, product.costPrice)
-              : null;
-          const lowStock = isLimited && stockQty > 0 && stockQty <= 3;
-          const outOfStock = isLimited && stockQty === 0;
-
           return (
             <article
               key={product.id}
               className="flex overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm transition-shadow hover:shadow-md"
             >
-              <div className="relative w-40 shrink-0 self-stretch overflow-hidden bg-stone-100 sm:w-44">
-                {coverImage ? (
-                  <img
-                    src={coverImage}
-                    alt={product.name}
-                    className="h-full min-h-[9.5rem] w-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-full min-h-[9.5rem] items-center justify-center px-1 text-center text-[9px] font-medium leading-tight text-stone-400">
-                    Sem foto
-                  </div>
-                )}
+              <ProductCardGallery images={product.images} alt={product.name}>
                 <div className="absolute left-1.5 top-1.5 flex max-w-[calc(100%-0.75rem)] flex-col gap-1">
                   {!isProductVisibleOnSite(product.visibleOnSite) ? (
                     <span className="truncate rounded-md bg-amber-500/95 px-1.5 py-0.5 text-[8px] font-bold uppercase text-white">
@@ -313,12 +403,7 @@ export function ProductList({
                     </span>
                   ) : null}
                 </div>
-                {product.images.length > 1 ? (
-                  <span className="absolute bottom-1.5 right-1.5 rounded-md bg-black/50 px-1 py-px text-[8px] font-semibold text-white">
-                    +{product.images.length - 1}
-                  </span>
-                ) : null}
-              </div>
+              </ProductCardGallery>
 
               <div className="flex min-w-0 flex-1 flex-col gap-2.5 p-3">
                 <div>
@@ -332,40 +417,25 @@ export function ProductList({
 
                 <ProductListPricing product={product} />
 
-                <div className="grid grid-cols-3 gap-1.5">
-                  <StatTile
-                    label="Estoque"
-                    value={stockLabel}
-                    tone={
-                      outOfStock || lowStock
-                        ? "warning"
-                        : isLimited
-                          ? "neutral"
-                          : "success"
-                    }
-                  />
-                  <StatTile
-                    label="Grade"
-                    value={
-                      variantCount > 0
-                        ? `${variantCount} var.`
-                        : product.pieces.length > 0
-                          ? `${product.pieces.length} peç.`
-                          : "—"
-                    }
-                  />
-                  <StatTile
-                    label="Fotos"
-                    value={String(product.images.length)}
-                  />
+                <ProductStockTables product={product} />
+
+                <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+                  <p className="border-b border-stone-100 bg-stone-50 px-3 py-2 text-[11px] font-semibold text-stone-800">
+                    Tecido
+                  </p>
+                  <p className="px-3 py-2.5 text-[11px] text-stone-700">
+                    {product.fabric?.trim() || "Não informado"}
+                  </p>
                 </div>
 
-                {colorCount > 0 && (
-                  <p className="text-[10px] text-stone-500">
-                    <span className="font-semibold text-stone-400">Cores:</span>{" "}
-                    {colorCount}
+                <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+                  <p className="border-b border-stone-100 bg-stone-50 px-3 py-2 text-[11px] font-semibold text-stone-800">
+                    Pode vender sem estoque?
                   </p>
-                )}
+                  <p className="px-3 py-2.5 text-[11px] text-stone-700">
+                    {product.allowBackorder ? "Sim" : "Não"}
+                  </p>
+                </div>
 
                 <LabelledChips
                   label="Categorias"
@@ -379,22 +449,7 @@ export function ProductList({
                   emptyText="Fora da home"
                 />
 
-                {product.costPrice != null && (
-                  <div className="rounded-lg border border-stone-200 bg-stone-50/60 px-2 py-1.5">
-                    <p className="text-[9px] font-bold uppercase tracking-wide text-stone-400">
-                      Uso interno
-                    </p>
-                    <p className="mt-0.5 text-[11px] text-stone-700">
-                      Custo {formatPrice(product.costPrice)}
-                      {margin != null && (
-                        <span className="ml-1.5 font-medium text-stone-500">
-                          · margem {margin}%
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                )}
-
+                {isAdmin && (
                 <div className="mt-auto grid grid-cols-2 gap-1.5 border-t border-stone-100 pt-2.5">
                   <button
                     type="button"
@@ -412,6 +467,7 @@ export function ProductList({
                     {deletingId === product.id ? "Excluindo…" : "Excluir"}
                   </button>
                 </div>
+                )}
               </div>
             </article>
           );

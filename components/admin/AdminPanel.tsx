@@ -176,23 +176,18 @@ export function AdminPanel({
   const [bannerUrl, setBannerUrl] = useState("");
   const [bannerMobileUrl, setBannerMobileUrl] = useState("");
   const [activeSection, setActiveSection] = useState<AdminSection>(() => {
-    if (typeof window === "undefined") return "dashboard";
+    const fallback: AdminSection = canAccessAdminSection(initialRole, "dashboard")
+      ? "dashboard"
+      : "products";
+    if (typeof window === "undefined") return fallback;
     const section = new URLSearchParams(window.location.search).get("section");
-    const allowed: AdminSection[] = [
-      "dashboard",
-      "products",
-      "sections",
-      "categories",
-      "banner",
-      "sales",
-      "shipping",
-      "exchanges",
-      "settings",
-      "users",
-    ];
-    return allowed.includes(section as AdminSection)
-      ? (section as AdminSection)
-      : "dashboard";
+    if (
+      section &&
+      canAccessAdminSection(initialRole, section as AdminSection)
+    ) {
+      return section as AdminSection;
+    }
+    return fallback;
   });
   const [showProductModal, setShowProductModal] = useState(false);
   const [showOrderModal, setShowOrderModal] = useState(false);
@@ -243,9 +238,9 @@ export function AdminPanel({
   useEffect(() => {
     if (authLoading && !role) return;
     if (!allowedSections.has(activeSection)) {
-      setActiveSection("dashboard");
+      setActiveSection(navGroups[0]?.items[0]?.id ?? "products");
     }
-  }, [allowedSections, activeSection, authLoading, role]);
+  }, [allowedSections, activeSection, authLoading, role, navGroups]);
 
   return (
     <div className="min-h-screen bg-stone-50">
@@ -304,7 +299,7 @@ export function AdminPanel({
       </aside>
 
       <main className="min-w-0 px-4 py-8 md:ml-56 md:px-10 ">
-        {activeSection === "dashboard" && (
+        {activeSection === "dashboard" && canAccessAdminSection(role, "dashboard") && (
           <section>
             <DashboardManager canViewCash={role === "ADMIN"} />
           </section>
@@ -399,6 +394,7 @@ export function AdminPanel({
                   </svg>
                   Ordenação
                 </button>
+                {role === "ADMIN" && (
                 <button
                   type="button"
                   onClick={() => setShowProductModal(true)}
@@ -420,6 +416,7 @@ export function AdminPanel({
                   </svg>
                   Adicionar produto
                 </button>
+                )}
               </div>
             </div>
 
@@ -434,11 +431,13 @@ export function AdminPanel({
               searchQuery={productSearchQuery.trim()}
             />
 
+            {role === "ADMIN" && (
             <ProductFormModal
               open={showProductModal}
               onClose={() => setShowProductModal(false)}
               onSuccess={fetchProducts}
             />
+            )}
             <SectionProductOrderModal
               open={showOrderModal}
               onClose={() => setShowOrderModal(false)}

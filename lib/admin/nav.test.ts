@@ -13,9 +13,11 @@ describe("visibleAdminNavGroups", () => {
     assert.deepEqual(titles, ["Operação"]);
   });
 
-  it("esconde trocas da operação do gestor", () => {
+  it("esconde trocas e o dashboard da operação do gestor", () => {
     const operacao = visibleAdminNavGroups("GESTOR")[0];
     assert.ok(operacao.items.every((item) => item.id !== "exchanges"));
+    assert.ok(operacao.items.every((item) => item.id !== "dashboard"));
+    assert.ok(operacao.items.some((item) => item.id === "products"));
   });
 });
 
@@ -27,5 +29,7 @@ describe("canAccessAdminSection", () => {
     assert.equal(canAccessAdminSection("ADMIN", "settings"), true);
     assert.equal(canAccessAdminSection("GESTOR", "exchanges"), false);
     assert.equal(canAccessAdminSection("ADMIN", "exchanges"), true);
+    assert.equal(canAccessAdminSection("GESTOR", "dashboard"), false);
+    assert.equal(canAccessAdminSection("ADMIN", "dashboard"), true);
   });
 });

@@ -45,7 +45,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
   },
 ];
 
-/** Gestor opera o dia a dia; vitrine, loja e trocas ficam só com o admin. */
+/** Gestor opera o dia a dia; dashboard, vitrine, loja e trocas ficam só com o admin. */
 export function visibleAdminNavGroups(
   role: AppRole | null
 ): AdminNavGroup[] {
@@ -53,7 +53,9 @@ export function visibleAdminNavGroups(
   return ADMIN_NAV_GROUPS.filter((group) => group.title === "Operação").map(
     (group) => ({
       ...group,
-      items: group.items.filter((item) => item.id !== "exchanges"),
+      items: group.items.filter(
+        (item) => item.id !== "exchanges" && item.id !== "dashboard"
+      ),
     })
   );
 }
