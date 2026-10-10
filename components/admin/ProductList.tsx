@@ -220,9 +220,9 @@ function ProductStockTables({ product }: { product: Product }) {
                 ? "Estoque por tamanho"
                 : "Estoque (cor × tamanho)"}
             </p>
-            <div className="stock-table-scroll overflow-x-scroll">
+            <div className="stock-table-scroll overflow-x-auto">
             {sizeOnly ? (
-              <table className="w-max border-collapse whitespace-nowrap text-center text-[11px]">
+              <table className="w-full min-w-max border-collapse whitespace-nowrap text-center text-[11px]">
                 <thead>
                   <tr>
                     <th className="sticky left-0 z-10 whitespace-nowrap border-b border-r border-stone-100 bg-stone-50 p-1.5 font-medium text-stone-500">
@@ -252,7 +252,7 @@ function ProductStockTables({ product }: { product: Product }) {
                 </tbody>
               </table>
             ) : (
-              <table className="w-max border-collapse whitespace-nowrap text-center text-[11px]">
+              <table className="w-full min-w-max border-collapse whitespace-nowrap text-center text-[11px]">
                 <thead>
                   <tr>
                     <th className="sticky left-0 z-10 whitespace-nowrap border-b border-r border-stone-100 bg-stone-50 p-1.5 font-medium text-stone-500">
@@ -260,7 +260,7 @@ function ProductStockTables({ product }: { product: Product }) {
                     </th>
                     {colors.map((color) => (
                       <th key={color.id} className="whitespace-nowrap border-b border-stone-100 p-1.5 font-medium text-stone-800">
-                        <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                        <span className="inline-flex flex-col items-center gap-1 whitespace-nowrap">
                           <span
                             className="h-3 w-3 shrink-0 rounded-full border border-stone-200"
                             style={colorSwatchStyle(color.hex)}
