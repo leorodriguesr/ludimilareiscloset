@@ -212,7 +212,7 @@ function ProductStockTables({ product }: { product: Product }) {
         return (
           <div
             key={piece.id}
-            className="overflow-x-auto rounded-xl border border-stone-200 bg-white shadow-sm"
+            className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm"
           >
             <p className="border-b border-stone-100 bg-stone-50 px-3 py-2 text-[11px] font-semibold text-stone-800">
             {pieces.length > 1 ? `${piece.name} · ` : ""}
@@ -220,14 +220,15 @@ function ProductStockTables({ product }: { product: Product }) {
                 ? "Estoque por tamanho"
                 : "Estoque (cor × tamanho)"}
             </p>
+            <div className="stock-table-scroll overflow-x-scroll">
             {sizeOnly ? (
-              <table className="w-full min-w-[180px] border-collapse text-center text-[11px]">
+              <table className="w-max border-collapse whitespace-nowrap text-center text-[11px]">
                 <thead>
                   <tr>
-                    <th className="border-b border-r border-stone-100 bg-stone-50/90 p-1.5 text-left font-medium text-stone-500">
+                    <th className="sticky left-0 z-10 whitespace-nowrap border-b border-r border-stone-100 bg-stone-50 p-1.5 font-medium text-stone-500">
                       Tamanho
                     </th>
-                    <th className="border-b border-stone-100 p-1.5 font-medium text-stone-800">Qtd.</th>
+                    <th className="whitespace-nowrap border-b border-stone-100 p-1.5 font-medium text-stone-800">Qtd.</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -239,10 +240,10 @@ function ProductStockTables({ product }: { product: Product }) {
                     );
                     return (
                       <tr key={size.id}>
-                        <th className="border-b border-r border-stone-100 bg-stone-50/80 p-1.5 text-left font-medium text-stone-800">
+                        <th className="sticky left-0 z-10 whitespace-nowrap border-b border-r border-stone-100 bg-stone-50 p-1.5 font-medium text-stone-800">
                           {size.name}
                         </th>
-                        <td className="border-b border-stone-50 p-1.5 font-semibold tabular-nums text-stone-900">
+                        <td className="whitespace-nowrap border-b border-stone-50 p-1.5 font-semibold tabular-nums text-stone-900">
                           {stockCellLabel(cell?.quantity ?? 0, cell?.unlimited)}
                         </td>
                       </tr>
@@ -251,17 +252,17 @@ function ProductStockTables({ product }: { product: Product }) {
                 </tbody>
               </table>
             ) : (
-              <table className="w-full min-w-[220px] border-collapse text-center text-[11px]">
+              <table className="w-max border-collapse whitespace-nowrap text-center text-[11px]">
                 <thead>
                   <tr>
-                    <th className="border-b border-r border-stone-100 bg-stone-50/90 p-1.5 font-medium text-stone-500">
+                    <th className="sticky left-0 z-10 whitespace-nowrap border-b border-r border-stone-100 bg-stone-50 p-1.5 font-medium text-stone-500">
                       Tam / Cor
                     </th>
                     {colors.map((color) => (
-                      <th key={color.id} className="border-b border-stone-100 p-1.5 font-medium text-stone-800">
-                        <span className="inline-flex flex-col items-center gap-1">
+                      <th key={color.id} className="whitespace-nowrap border-b border-stone-100 p-1.5 font-medium text-stone-800">
+                        <span className="inline-flex items-center gap-1 whitespace-nowrap">
                           <span
-                            className="h-3 w-3 rounded-full border border-stone-200"
+                            className="h-3 w-3 shrink-0 rounded-full border border-stone-200"
                             style={colorSwatchStyle(color.hex)}
                           />
                           {color.name}
@@ -273,7 +274,7 @@ function ProductStockTables({ product }: { product: Product }) {
                 <tbody>
                   {piece.sizes.map((size) => (
                     <tr key={size.id}>
-                      <th className="border-b border-r border-stone-100 bg-stone-50/80 p-1.5 font-medium text-stone-800">
+                      <th className="sticky left-0 z-10 whitespace-nowrap border-b border-r border-stone-100 bg-stone-50 p-1.5 font-medium text-stone-800">
                         {size.name}
                       </th>
                       {colors.map((color) => {
@@ -285,7 +286,7 @@ function ProductStockTables({ product }: { product: Product }) {
                         return (
                           <td
                             key={color.id}
-                            className="border-b border-stone-50 p-1.5 font-semibold tabular-nums text-stone-900"
+                            className="whitespace-nowrap border-b border-stone-50 p-1.5 font-semibold tabular-nums text-stone-900"
                           >
                             {stockCellLabel(cell?.quantity ?? 0, cell?.unlimited)}
                           </td>
@@ -296,6 +297,7 @@ function ProductStockTables({ product }: { product: Product }) {
                 </tbody>
               </table>
             )}
+            </div>
           </div>
         );
       })}
@@ -381,6 +383,23 @@ export function ProductList({
 
   return (
     <>
+      <style>{`
+        .stock-table-scroll {
+          scrollbar-width: thin;
+          scrollbar-color: #a8a29e #f5f5f4;
+        }
+        .stock-table-scroll::-webkit-scrollbar {
+          height: 8px;
+          -webkit-appearance: none;
+        }
+        .stock-table-scroll::-webkit-scrollbar-thumb {
+          background: #a8a29e;
+          border-radius: 999px;
+        }
+        .stock-table-scroll::-webkit-scrollbar-track {
+          background: #f5f5f4;
+        }
+      `}</style>
       <div className="grid gap-8 sm:grid-cols-2">
         {list.map((product) => {
           const categories = product.categories.map((pc) => pc.category.name);
