@@ -1,6 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import { AdminModal } from "@/components/admin/AdminModal";
 
@@ -26,6 +35,8 @@ function normalizeSearch(value: string): string {
     .replace(/\p{Diacritic}/gu, "");
 }
 
+type OrderView = "mobile" | "desktop";
+
 function moveItem<T>(list: T[], from: number, to: number): T[] {
   if (from === to || from < 0 || from >= list.length) return list;
   const next = [...list];
@@ -46,11 +57,32 @@ export function SectionProductOrderModal({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draft, setDraft] = useState<SectionProductOrderItem[]>([]);
   const [query, setQuery] = useState("");
+  const [view, setView] = useState<OrderView>("mobile");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [overId, setOverId] = useState<string | null>(null);
+  const [ghost, setGhost] = useState<{
+    imageUrl: string | null;
+    width: number;
+    height: number;
+  } | null>(null);
+  const dragRef = useRef<{
+    id: string;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    x: number;
+    y: number;
+    offsetX: number;
+    offsetY: number;
+    active: boolean;
+  } | null>(null);
+  const overRef = useRef<string | null>(null);
+  const ghostRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const positionsRef = useRef<Map<string, DOMRect>>(new Map());
+  const flipTokenRef = useRef(0);
 
   const active = sections.find((section) => section.id === activeId) ?? null;
   const dirty =
@@ -97,6 +129,7 @@ export function SectionProductOrderModal({
   useEffect(() => {
     if (!open) return;
     setQuery("");
+    setView("mobile");
     void load();
   }, [open, load]);
 
@@ -129,28 +162,155 @@ export function SectionProductOrderModal({
     setActiveId(id);
   }
 
-  function moveTo(from: number, to: number) {
-    setDraft((prev) => moveItem(prev, from, to));
+  function placeGhost(x: number, y: number) {
+    const drag = dragRef.current;
+    const node = ghostRef.current;
+    if (!drag || !node) return;
+    node.style.transformOrigin = `${drag.offsetX}px ${drag.offsetY}px`;
+    node.style.transform = `translate3d(${x - drag.offsetX}px, ${y - drag.offsetY}px, 0) scale(1.04)`;
   }
 
-  function applyPosition(from: number, raw: string) {
-    const parsed = Number.parseInt(raw, 10);
-    if (!Number.isFinite(parsed)) return;
-    moveTo(from, parsed - 1);
+  function clearDrag() {
+    dragRef.current = null;
+    overRef.current = null;
+    setDraggingId(null);
+    setGhost(null);
   }
 
-  function onDrop(targetId: string) {
-    if (!draggingId || draggingId === targetId) {
-      setDraggingId(null);
-      setOverId(null);
+  function hitProductId(x: number, y: number): string | null {
+    return (
+      document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-order-id]")
+        ?.dataset.orderId ?? null
+    );
+  }
+
+  function shiftTo(fromId: string, targetId: string) {
+    if (targetId === fromId) {
+      overRef.current = fromId;
       return;
     }
-    const from = draft.findIndex((item) => item.id === draggingId);
-    const to = draft.findIndex((item) => item.id === targetId);
-    moveTo(from, to);
-    setDraggingId(null);
-    setOverId(null);
+    if (targetId === overRef.current) return;
+    overRef.current = targetId;
+    setDraft((prev) => {
+      const from = prev.findIndex((item) => item.id === fromId);
+      const to = prev.findIndex((item) => item.id === targetId);
+      return moveItem(prev, from, to);
+    });
   }
+
+  function onPointerDown(event: ReactPointerEvent<HTMLDivElement>, id: string) {
+    if (event.button !== 0) return;
+    dragRef.current = {
+      id,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      x: event.clientX,
+      y: event.clientY,
+      offsetX: 0,
+      offsetY: 0,
+      active: false,
+    };
+  }
+
+  function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || drag.active) return;
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (dx * dx + dy * dy < 36) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    drag.active = true;
+    drag.x = event.clientX;
+    drag.y = event.clientY;
+    drag.offsetX = event.clientX - rect.left;
+    drag.offsetY = event.clientY - rect.top;
+    overRef.current = drag.id;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const item = draft.find((entry) => entry.id === drag.id);
+    setDraggingId(drag.id);
+    setGhost({
+      imageUrl: item?.imageUrl ?? null,
+      width: rect.width,
+      height: rect.height,
+    });
+  }
+
+  function onPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || drag.active) return;
+    clearDrag();
+  }
+
+  useLayoutEffect(() => {
+    const drag = dragRef.current;
+    if (!ghost || !drag) return;
+    placeGhost(drag.x, drag.y);
+  }, [ghost]);
+
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const token = ++flipTokenRef.current;
+    const nodes = [...list.querySelectorAll<HTMLElement>("[data-order-id]")];
+    const next = new Map<string, DOMRect>();
+    for (const node of nodes) {
+      const id = node.dataset.orderId;
+      if (!id) continue;
+      node.style.transition = "none";
+      node.style.transform = "";
+      const rect = node.getBoundingClientRect();
+      const prev = positionsRef.current.get(id);
+      if (draggingId && id !== draggingId && prev) {
+        const dx = prev.left - rect.left;
+        const dy = prev.top - rect.top;
+        if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+          node.style.transition = "none";
+          node.style.transform = `translate(${dx}px, ${dy}px)`;
+          requestAnimationFrame(() => {
+            if (flipTokenRef.current !== token) return;
+            node.style.transition = "transform 180ms ease";
+            node.style.transform = "";
+          });
+        }
+      }
+      next.set(id, rect);
+    }
+    positionsRef.current = next;
+  }, [draft, draggingId, view]);
+
+  useEffect(() => {
+    if (!draggingId) return;
+
+    function onMove(event: PointerEvent) {
+      const drag = dragRef.current;
+      if (!drag?.active || event.pointerId !== drag.pointerId) return;
+      event.preventDefault();
+      drag.x = event.clientX;
+      drag.y = event.clientY;
+      placeGhost(event.clientX, event.clientY);
+      const nextId = hitProductId(event.clientX, event.clientY);
+      if (nextId) shiftTo(drag.id, nextId);
+    }
+
+    function onUp(event: PointerEvent) {
+      const drag = dragRef.current;
+      if (!drag?.active || event.pointerId !== drag.pointerId) return;
+      clearDrag();
+    }
+
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    const previousCursor = document.body.style.cursor;
+    document.body.style.cursor = "grabbing";
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      document.body.style.cursor = previousCursor;
+    };
+  }, [draggingId]);
 
   async function save() {
     if (!active) return;
@@ -188,7 +348,7 @@ export function SectionProductOrderModal({
     <AdminModal
       wide
       title="Ordenação das seções"
-      subtitle="Arraste o produto ou informe a posição."
+      subtitle="Arraste a imagem para mudar a posição."
       onClose={onClose}
       footer={
         <>
@@ -277,72 +437,84 @@ export function SectionProductOrderModal({
                 />
               </label>
 
+              <div
+                role="tablist"
+                aria-label="Visualização da grade"
+                className="grid grid-cols-2 gap-1 rounded-lg bg-stone-100 p-1"
+              >
+                {(
+                  [
+                    ["mobile", "Visão Celular"],
+                    ["desktop", "Visão PC"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    aria-selected={view === id}
+                    onClick={() => setView(id)}
+                    className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                      view === id
+                        ? "bg-white text-stone-900 shadow-sm"
+                        : "text-stone-500 hover:text-stone-800"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
               {visible.length === 0 ? (
                 <p className="py-8 text-center text-sm text-stone-400">
                   Nenhum produto com esse nome.
                 </p>
               ) : (
-                <ul className="divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white">
-                  {visible.map(({ item, index }) => (
-                    <li
-                      key={item.id}
-                      onDragOver={(event) => {
-                        event.preventDefault();
-                        if (overId !== item.id) setOverId(item.id);
-                      }}
-                      onDrop={(event) => {
-                        event.preventDefault();
-                        onDrop(item.id);
-                      }}
-                      className={`flex items-center gap-2 px-2 py-2 sm:gap-3 sm:px-3 sm:py-2.5 ${
-                        draggingId === item.id
-                          ? "opacity-50"
-                          : overId === item.id && draggingId
-                            ? "bg-sky-50"
-                            : ""
-                      }`}
-                    >
-                      <div
-                        draggable
-                        onDragStart={(event) => {
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("text/plain", item.id);
-                          event.dataTransfer.setDragImage(
-                            event.currentTarget,
-                            40,
-                            24
-                          );
-                          setDraggingId(item.id);
-                          setOverId(item.id);
-                        }}
-                        onDragEnd={() => {
-                          setDraggingId(null);
-                          setOverId(null);
-                        }}
-                        className="flex min-w-0 flex-1 cursor-grab items-center gap-2 active:cursor-grabbing sm:gap-3"
-                      >
-                        <span
-                          aria-hidden
-                          className="flex h-8 w-7 shrink-0 items-center justify-center text-stone-400"
+                <div className={view === "desktop" ? "overflow-x-auto" : undefined}>
+                  <ul
+                    ref={listRef}
+                    className={`grid gap-3 ${
+                      view === "mobile"
+                        ? "grid-cols-2"
+                        : "grid-cols-4 max-md:min-w-[40rem]"
+                    }`}
+                  >
+                    {visible.map(({ item, index }) => {
+                      const dragging = draggingId === item.id;
+                      return (
+                        <li
+                          key={item.id}
+                          data-order-id={item.id}
+                          className={`min-w-0 select-none ${dragging ? "opacity-40" : ""}`}
                         >
-                          <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor">
-                            <path d="M5 3.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm8 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM5 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm8 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM5 12.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm8 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z" />
-                          </svg>
-                        </span>
-                        <div className="relative h-12 w-9 shrink-0 overflow-hidden rounded-md bg-stone-100">
-                          {item.imageUrl ? (
-                            <Image
-                              src={item.imageUrl}
-                              alt=""
-                              fill
-                              className="pointer-events-none object-cover"
-                              sizes="36px"
-                              draggable={false}
-                            />
-                          ) : null}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-stone-900">
+                          <div
+                            onPointerDown={(event) => onPointerDown(event, item.id)}
+                            onPointerMove={onPointerMove}
+                            onPointerUp={onPointerUp}
+                            onPointerCancel={(event) => onPointerUp(event)}
+                            className={`relative aspect-[3/4] cursor-grab select-none overflow-hidden rounded-lg bg-stone-100 active:cursor-grabbing ${
+                              view === "mobile" ? "touch-none" : "touch-pan-x"
+                            }`}
+                          >
+                            {item.imageUrl ? (
+                              <Image
+                                src={item.imageUrl}
+                                alt=""
+                                fill
+                                className="pointer-events-none object-cover"
+                                sizes={
+                                  view === "mobile"
+                                    ? "(min-width: 768px) 240px, 45vw"
+                                    : "180px"
+                                }
+                                draggable={false}
+                              />
+                            ) : null}
+                            <span className="absolute left-1.5 top-1.5 rounded-md bg-white/90 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-stone-800">
+                              {index + 1}
+                            </span>
+                          </div>
+                          <p className="mt-1.5 line-clamp-2 text-xs font-medium text-stone-900">
                             {item.name}
                           </p>
                           {!item.visibleOnSite ? (
@@ -350,38 +522,37 @@ export function SectionProductOrderModal({
                               Oculto no site
                             </p>
                           ) : null}
-                        </div>
-                      </div>
-                      <div className="shrink-0">
-                        <label className="sr-only" htmlFor={`pos-${item.id}`}>
-                          Posição de {item.name}
-                        </label>
-                        <input
-                          id={`pos-${item.id}`}
-                          type="number"
-                          min={1}
-                          max={draft.length}
-                          key={`${item.id}-${index}`}
-                          defaultValue={index + 1}
-                          onBlur={(event) =>
-                            applyPosition(index, event.target.value)
-                          }
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.currentTarget.blur();
-                            }
-                          }}
-                          className="box-border h-7 w-12 rounded-md border border-stone-200 bg-white px-1 text-center text-xs tabular-nums text-stone-800 focus:border-stone-400 focus:outline-none"
-                        />
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
               )}
             </>
           )}
         </div>
       )}
+      {ghost
+        ? createPortal(
+            <div
+              ref={ghostRef}
+              className="pointer-events-none fixed left-0 top-0 z-[80] cursor-grabbing overflow-hidden rounded-lg shadow-[0_18px_40px_-12px_rgba(28,25,23,0.45)] ring-2 ring-white"
+              style={{ width: ghost.width, height: ghost.height }}
+            >
+              {ghost.imageUrl ? (
+                <img
+                  src={ghost.imageUrl}
+                  alt=""
+                  draggable={false}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="h-full w-full bg-stone-200" />
+              )}
+            </div>,
+            document.body
+          )
+        : null}
     </AdminModal>
   );
 }
