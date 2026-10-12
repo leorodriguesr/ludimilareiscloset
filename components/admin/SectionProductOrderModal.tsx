@@ -37,6 +37,33 @@ function normalizeSearch(value: string): string {
 
 type OrderView = "mobile" | "desktop";
 
+function findScroller(start: HTMLElement | null, axis: "x" | "y"): HTMLElement | null {
+  let current = start?.parentElement ?? null;
+  while (current) {
+    const style = getComputedStyle(current);
+    const overflow = axis === "y" ? style.overflowY : style.overflowX;
+    const canScroll =
+      axis === "y"
+        ? current.scrollHeight > current.clientHeight + 1
+        : current.scrollWidth > current.clientWidth + 1;
+    if ((overflow === "auto" || overflow === "scroll") && canScroll) return current;
+    current = current.parentElement;
+  }
+  return null;
+}
+
+function edgeScrollDelta(position: number, start: number, end: number, edge: number): number {
+  if (position < start + edge) {
+    const ratio = Math.min(1, (start + edge - position) / edge);
+    return -Math.max(6, Math.round(22 * ratio));
+  }
+  if (position > end - edge) {
+    const ratio = Math.min(1, (position - (end - edge)) / edge);
+    return Math.max(6, Math.round(22 * ratio));
+  }
+  return 0;
+}
+
 function moveItem<T>(list: T[], from: number, to: number): T[] {
   if (from === to || from < 0 || from >= list.length) return list;
   const next = [...list];
@@ -184,6 +211,22 @@ export function SectionProductOrderModal({
     );
   }
 
+  function reorderPoint(x: number, y: number): { x: number; y: number } {
+    const list = listRef.current;
+    const scroller = findScroller(list, "y");
+    if (!list || !scroller) return { x, y };
+    const bounds = scroller.getBoundingClientRect();
+    const grid = list.getBoundingClientRect();
+    const top = Math.max(bounds.top, grid.top) + 36;
+    const bottom = Math.min(bounds.bottom, grid.bottom) - 36;
+    const left = Math.max(bounds.left, grid.left) + 20;
+    const right = Math.min(bounds.right, grid.right) - 20;
+    return {
+      x: right > left ? Math.min(right, Math.max(left, x)) : x,
+      y: bottom > top ? Math.min(bottom, Math.max(top, y)) : y,
+    };
+  }
+
   function shiftTo(fromId: string, targetId: string) {
     if (targetId === fromId) {
       overRef.current = fromId;
@@ -282,14 +325,42 @@ export function SectionProductOrderModal({
   useEffect(() => {
     if (!draggingId) return;
 
+    const pointer = { x: dragRef.current?.x ?? 0, y: dragRef.current?.y ?? 0 };
+    let frame = 0;
+
+    function followPointer() {
+      const drag = dragRef.current;
+      if (!drag?.active) return;
+      const list = listRef.current;
+      const vertical = findScroller(list, "y");
+      if (vertical) {
+        const rect = vertical.getBoundingClientRect();
+        const delta = edgeScrollDelta(pointer.y, rect.top, rect.bottom, 88);
+        if (delta) vertical.scrollTop += delta;
+      }
+      const horizontal = findScroller(list, "x");
+      if (horizontal) {
+        const rect = horizontal.getBoundingClientRect();
+        const delta = edgeScrollDelta(pointer.x, rect.left, rect.right, 64);
+        if (delta) horizontal.scrollLeft += delta;
+      }
+      const point = reorderPoint(pointer.x, pointer.y);
+      const nextId = hitProductId(point.x, point.y);
+      if (nextId) shiftTo(drag.id, nextId);
+      frame = requestAnimationFrame(followPointer);
+    }
+
     function onMove(event: PointerEvent) {
       const drag = dragRef.current;
       if (!drag?.active || event.pointerId !== drag.pointerId) return;
       event.preventDefault();
+      pointer.x = event.clientX;
+      pointer.y = event.clientY;
       drag.x = event.clientX;
       drag.y = event.clientY;
       placeGhost(event.clientX, event.clientY);
-      const nextId = hitProductId(event.clientX, event.clientY);
+      const point = reorderPoint(event.clientX, event.clientY);
+      const nextId = hitProductId(point.x, point.y);
       if (nextId) shiftTo(drag.id, nextId);
     }
 
@@ -299,12 +370,14 @@ export function SectionProductOrderModal({
       clearDrag();
     }
 
+    frame = requestAnimationFrame(followPointer);
     window.addEventListener("pointermove", onMove, { passive: false });
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
     const previousCursor = document.body.style.cursor;
     document.body.style.cursor = "grabbing";
     return () => {
+      cancelAnimationFrame(frame);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
