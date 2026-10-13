@@ -191,6 +191,7 @@ export function AdminPanel({
   });
   const [showProductModal, setShowProductModal] = useState(false);
   const [showOrderModal, setShowOrderModal] = useState(false);
+  const [downloadingSheet, setDownloadingSheet] = useState(false);
   const [productSearchQuery, setProductSearchQuery] = useState("");
 
   const navGroups = useMemo(() => visibleAdminNavGroups(role), [role]);
@@ -205,6 +206,34 @@ export function AdminPanel({
     if (!query) return products;
     return products.filter((product) => productMatchesSearch(product, query));
   }, [products, productSearchQuery]);
+
+  async function downloadStockSheet() {
+    setDownloadingSheet(true);
+    try {
+      const res = await fetch("/api/admin/products/stock-count-sheet");
+      if (!res.ok) {
+        window.alert("Não foi possível gerar a contagem de estoque.");
+        return;
+      }
+      const blob = await res.blob();
+      const filename =
+        res.headers
+          .get("Content-Disposition")
+          ?.match(/filename="([^"]+)"/)?.[1] ?? "contagem-estoque.pdf";
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      window.alert("Não foi possível gerar a contagem de estoque.");
+    } finally {
+      setDownloadingSheet(false);
+    }
+  }
 
   const fetchProducts = useCallback(async () => {
     const res = await fetch("/api/products");
@@ -374,6 +403,28 @@ export function AdminPanel({
                 </label>
                 {role === "ADMIN" && (
                   <>
+                    <button
+                      type="button"
+                      disabled={downloadingSheet}
+                      onClick={() => void downloadStockSheet()}
+                      className={`inline-flex w-full shrink-0 items-center justify-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 text-xs font-semibold text-stone-700 shadow-sm transition-colors hover:bg-stone-50 disabled:opacity-50 sm:w-auto ${ADMIN_SEARCH_INPUT_SIZE}`}
+                    >
+                      <svg
+                        className="h-3.5 w-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        viewBox="0 0 24 24"
+                        aria-hidden
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M7.5 11.25 12 15.75m0 0 4.5-4.5M12 15.75V3"
+                        />
+                      </svg>
+                      {downloadingSheet ? "Gerando…" : "Contagem"}
+                    </button>
                     <button
                       type="button"
                       onClick={() => setShowOrderModal(true)}
