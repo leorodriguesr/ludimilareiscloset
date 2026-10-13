@@ -227,9 +227,12 @@ function HomeCatalog({
             </ProductGrid>
           </section>
           {index === 0 && categories.length > 0 ? (
-            <div className="-mx-2 sm:-mx-4">
-              <HomeCategoryShowcase categories={categories} />
-            </div>
+            <>
+              <SellerAssistBanner />
+              <div className="-mx-2 sm:-mx-4">
+                <HomeCategoryShowcase categories={categories} />
+              </div>
+            </>
           ) : null}
           {index === 1 ? <SellerAssistBanner /> : null}
         </div>
