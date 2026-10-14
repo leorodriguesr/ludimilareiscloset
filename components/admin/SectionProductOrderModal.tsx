@@ -64,7 +64,7 @@ function edgeScrollDelta(position: number, start: number, end: number, edge: num
   return 0;
 }
 
-const HOLD_MS = 1000;
+const HOLD_MS = 500;
 const HOLD_CANCEL_PX = 12;
 
 function visibleProducts(products: SectionProductOrderItem[]) {
@@ -479,7 +479,7 @@ export function SectionProductOrderModal({
     <AdminModal
       wide
       title="Ordenação das seções"
-      subtitle="Segure a imagem por 1 segundo e arraste."
+      subtitle="Segure a imagem por 0,5 segundo e arraste."
       onClose={onClose}
       footer={
         <>
