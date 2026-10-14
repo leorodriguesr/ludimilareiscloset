@@ -64,6 +64,22 @@ function edgeScrollDelta(position: number, start: number, end: number, edge: num
   return 0;
 }
 
+const HOLD_MS = 1000;
+const HOLD_CANCEL_PX = 12;
+
+function visibleProducts(products: SectionProductOrderItem[]) {
+  return products.filter((item) => item.visibleOnSite);
+}
+
+function mergeVisibleOrder(
+  all: SectionProductOrderItem[],
+  visibleDraft: SectionProductOrderItem[]
+): SectionProductOrderItem[] {
+  const queue = [...visibleDraft];
+  const visibleIds = new Set(visibleDraft.map((item) => item.id));
+  return all.map((item) => (visibleIds.has(item.id) ? queue.shift()! : item));
+}
+
 function moveItem<T>(list: T[], from: number, to: number): T[] {
   if (from === to || from < 0 || from >= list.length) return list;
   const next = [...list];
@@ -88,6 +104,7 @@ export function SectionProductOrderModal({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [holdingId, setHoldingId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [ghost, setGhost] = useState<{
     imageUrl: string | null;
@@ -104,7 +121,9 @@ export function SectionProductOrderModal({
     offsetX: number;
     offsetY: number;
     active: boolean;
+    source: HTMLDivElement | null;
   } | null>(null);
+  const holdTimerRef = useRef<number | null>(null);
   const overRef = useRef<string | null>(null);
   const ghostRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
@@ -112,10 +131,11 @@ export function SectionProductOrderModal({
   const flipTokenRef = useRef(0);
 
   const active = sections.find((section) => section.id === activeId) ?? null;
+  const baseline = active ? visibleProducts(active.products) : [];
   const dirty =
     Boolean(active) &&
-    (draft.length !== active!.products.length ||
-      draft.some((item, index) => item.id !== active!.products[index]?.id));
+    (draft.length !== baseline.length ||
+      draft.some((item, index) => item.id !== baseline[index]?.id));
 
   const visible = useMemo(() => {
     const needle = normalizeSearch(query);
@@ -165,7 +185,7 @@ export function SectionProductOrderModal({
       setDraft([]);
       return;
     }
-    setDraft(active.products);
+    setDraft(visibleProducts(active.products));
   }, [activeId, sections]);
 
   useEffect(() => {
@@ -179,6 +199,10 @@ export function SectionProductOrderModal({
     return () => {
       document.body.style.overflow = prev;
       window.removeEventListener("keydown", onKey);
+      if (holdTimerRef.current != null) {
+        window.clearTimeout(holdTimerRef.current);
+        holdTimerRef.current = null;
+      }
     };
   }, [open, onClose]);
 
@@ -197,11 +221,43 @@ export function SectionProductOrderModal({
     node.style.transform = `translate3d(${x - drag.offsetX}px, ${y - drag.offsetY}px, 0) scale(1.04)`;
   }
 
+  function clearHoldTimer() {
+    if (holdTimerRef.current == null) return;
+    window.clearTimeout(holdTimerRef.current);
+    holdTimerRef.current = null;
+  }
+
   function clearDrag() {
+    clearHoldTimer();
     dragRef.current = null;
     overRef.current = null;
+    setHoldingId(null);
     setDraggingId(null);
     setGhost(null);
+  }
+
+  function beginDrag() {
+    const drag = dragRef.current;
+    const source = drag?.source;
+    if (!drag || !source || drag.active) return;
+    const rect = source.getBoundingClientRect();
+    drag.active = true;
+    drag.offsetX = drag.x - rect.left;
+    drag.offsetY = drag.y - rect.top;
+    overRef.current = drag.id;
+    try {
+      source.setPointerCapture(drag.pointerId);
+    } catch {
+      // O ponteiro pode ter sido solto antes da captura.
+    }
+    const item = draft.find((entry) => entry.id === drag.id);
+    setHoldingId(null);
+    setDraggingId(drag.id);
+    setGhost({
+      imageUrl: item?.imageUrl ?? null,
+      width: rect.width,
+      height: rect.height,
+    });
   }
 
   function hitProductId(x: number, y: number): string | null {
@@ -243,6 +299,7 @@ export function SectionProductOrderModal({
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>, id: string) {
     if (event.button !== 0) return;
+    clearHoldTimer();
     dragRef.current = {
       id,
       pointerId: event.pointerId,
@@ -253,30 +310,25 @@ export function SectionProductOrderModal({
       offsetX: 0,
       offsetY: 0,
       active: false,
+      source: event.currentTarget,
     };
+    setHoldingId(id);
+    holdTimerRef.current = window.setTimeout(() => {
+      holdTimerRef.current = null;
+      beginDrag();
+    }, HOLD_MS);
   }
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId || drag.active) return;
-    const dx = event.clientX - drag.startX;
-    const dy = event.clientY - drag.startY;
-    if (dx * dx + dy * dy < 36) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    drag.active = true;
     drag.x = event.clientX;
     drag.y = event.clientY;
-    drag.offsetX = event.clientX - rect.left;
-    drag.offsetY = event.clientY - rect.top;
-    overRef.current = drag.id;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const item = draft.find((entry) => entry.id === drag.id);
-    setDraggingId(drag.id);
-    setGhost({
-      imageUrl: item?.imageUrl ?? null,
-      width: rect.width,
-      height: rect.height,
-    });
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (dx * dx + dy * dy >= HOLD_CANCEL_PX * HOLD_CANCEL_PX) {
+      clearDrag();
+    }
   }
 
   function onPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
@@ -395,7 +447,11 @@ export function SectionProductOrderModal({
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ productIds: draft.map((item) => item.id) }),
+          body: JSON.stringify({
+            productIds: mergeVisibleOrder(active.products, draft).map(
+              (item) => item.id
+            ),
+          }),
         }
       );
       const data = (await res.json()) as { error?: string };
@@ -405,7 +461,9 @@ export function SectionProductOrderModal({
       }
       setSections((prev) =>
         prev.map((section) =>
-          section.id === active.id ? { ...section, products: draft } : section
+          section.id === active.id
+            ? { ...section, products: mergeVisibleOrder(section.products, draft) }
+            : section
         )
       );
     } catch {
@@ -421,7 +479,7 @@ export function SectionProductOrderModal({
     <AdminModal
       wide
       title="Ordenação das seções"
-      subtitle="Arraste a imagem para mudar a posição."
+      subtitle="Segure a imagem por 1 segundo e arraste."
       onClose={onClose}
       footer={
         <>
@@ -481,7 +539,9 @@ export function SectionProductOrderModal({
 
           {draft.length === 0 ? (
             <p className="py-8 text-center text-sm text-stone-400">
-              Nenhum produto nesta seção.
+              {active && active.products.length > 0
+                ? "Nenhum produto visível nesta seção."
+                : "Nenhum produto nesta seção."}
             </p>
           ) : (
             <>
@@ -554,6 +614,7 @@ export function SectionProductOrderModal({
                   >
                     {visible.map(({ item, index }) => {
                       const dragging = draggingId === item.id;
+                      const holding = holdingId === item.id;
                       return (
                         <li
                           key={item.id}
@@ -565,7 +626,9 @@ export function SectionProductOrderModal({
                             onPointerMove={onPointerMove}
                             onPointerUp={onPointerUp}
                             onPointerCancel={(event) => onPointerUp(event)}
-                            className={`relative aspect-[3/4] cursor-grab select-none overflow-hidden rounded-lg bg-stone-100 active:cursor-grabbing ${
+                            className={`relative aspect-[3/4] select-none overflow-hidden rounded-lg bg-stone-100 ${
+                              holding ? "ring-2 ring-sky-400" : ""
+                            } ${
                               view === "mobile" ? "touch-none" : "touch-pan-x"
                             }`}
                           >
@@ -590,11 +653,6 @@ export function SectionProductOrderModal({
                           <p className="mt-1.5 line-clamp-2 text-xs font-medium text-stone-900">
                             {item.name}
                           </p>
-                          {!item.visibleOnSite ? (
-                            <p className="text-[11px] text-stone-400">
-                              Oculto no site
-                            </p>
-                          ) : null}
                         </li>
                       );
                     })}
