@@ -19,7 +19,6 @@ import {
   EXCHANGE_STATUS_LABELS,
 } from "@/lib/exchanges/constants";
 import { canCompleteExchangeWithOutbound } from "@/lib/exchanges/outbound-complete";
-import { mapExchangeOutboundListStatus } from "@/lib/exchanges/outbound-shipment-list";
 import { SHIPPING_PROVIDERS } from "@/lib/shipping/providers";
 import { shippingTrackingUrl } from "@/lib/shipping/tracking-url";
 import {
@@ -206,10 +205,14 @@ function balanceLabel(amount: number) {
   return "Zerado";
 }
 
-const OUTBOUND_STATUS_LABEL: Record<
-  ReturnType<typeof mapExchangeOutboundListStatus>,
-  string
-> = {
+type OutboundListStatus =
+  | "to_pack"
+  | "packed"
+  | "shipped"
+  | "delivered"
+  | "cancelled";
+
+const OUTBOUND_STATUS_LABEL: Record<OutboundListStatus, string> = {
   to_pack: "Por embalar",
   packed: "Por enviar",
   shipped: "Enviado",
@@ -217,10 +220,7 @@ const OUTBOUND_STATUS_LABEL: Record<
   cancelled: "Cancelado",
 };
 
-const OUTBOUND_STATUS_TONE: Record<
-  ReturnType<typeof mapExchangeOutboundListStatus>,
-  string
-> = {
+const OUTBOUND_STATUS_TONE: Record<OutboundListStatus, string> = {
   to_pack: "bg-amber-100 text-amber-900",
   packed: "bg-stone-100 text-stone-700",
   shipped: "bg-sky-100 text-sky-900",
@@ -228,8 +228,13 @@ const OUTBOUND_STATUS_TONE: Record<
   cancelled: "bg-red-100 text-red-800",
 };
 
-function outboundStatus(shippingStatus: string) {
-  return mapExchangeOutboundListStatus(shippingStatus);
+function outboundStatus(shippingStatus: string): OutboundListStatus {
+  const status = shippingStatus.trim().toLowerCase();
+  if (status === "cancelled") return "cancelled";
+  if (status === "delivered") return "delivered";
+  if (status === "posted" || status === "shipped") return "shipped";
+  if (status === "packed") return "packed";
+  return "to_pack";
 }
 
 function returnShippingOf(ex: {
