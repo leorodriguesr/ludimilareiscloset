@@ -19,6 +19,9 @@ import {
   EXCHANGE_STATUS_LABELS,
 } from "@/lib/exchanges/constants";
 import { canCompleteExchangeWithOutbound } from "@/lib/exchanges/outbound-complete";
+import { mapExchangeOutboundListStatus } from "@/lib/exchanges/outbound-shipment-list";
+import { SHIPPING_PROVIDERS } from "@/lib/shipping/providers";
+import { shippingTrackingUrl } from "@/lib/shipping/tracking-url";
 import {
   EXCHANGE_RETURN_METHOD_LABELS,
   EXCHANGE_SHIPPING_METHOD_LABELS,
@@ -203,8 +206,30 @@ function balanceLabel(amount: number) {
   return "Zerado";
 }
 
-function trackingUrl(code: string) {
-  return `https://rastreamento.superfrete.com/#${encodeURIComponent(code)}`;
+const OUTBOUND_STATUS_LABEL: Record<
+  ReturnType<typeof mapExchangeOutboundListStatus>,
+  string
+> = {
+  to_pack: "Por embalar",
+  packed: "Por enviar",
+  shipped: "Enviado",
+  delivered: "Entregue",
+  cancelled: "Cancelado",
+};
+
+const OUTBOUND_STATUS_TONE: Record<
+  ReturnType<typeof mapExchangeOutboundListStatus>,
+  string
+> = {
+  to_pack: "bg-amber-100 text-amber-900",
+  packed: "bg-stone-100 text-stone-700",
+  shipped: "bg-sky-100 text-sky-900",
+  delivered: "bg-emerald-100 text-emerald-800",
+  cancelled: "bg-red-100 text-red-800",
+};
+
+function outboundStatus(shippingStatus: string) {
+  return mapExchangeOutboundListStatus(shippingStatus);
 }
 
 function returnShippingOf(ex: {
@@ -262,11 +287,33 @@ function exchangeStatusLabel(ex: {
   return EXCHANGE_STATUS_LABELS[ex.status];
 }
 
+function tableStatus(ex: {
+  kind?: ExchangeKind;
+  status: ExchangeStatus;
+  balanceStatus?: string;
+  items?: { direction: string }[];
+  shippings: ExchangeShippingRow[];
+  inspectedAt: string | null;
+}): { label: string; highlight: boolean; conferido: boolean } {
+  const conferido = Boolean(ex.inspectedAt && ex.status !== "RECEIVED");
+  const kind = ex.kind ?? "EXCHANGE";
+  if (kind === "RETURN" && ex.status === "COMPLETED") {
+    return { label: "Concluído", highlight: true, conferido: false };
+  }
+  if (kind === "EXCHANGE" && ex.status === "OUTBOUND" && conferido) {
+    return { label: "Concluído", highlight: true, conferido: false };
+  }
+  return {
+    label: exchangeStatusLabel(ex),
+    highlight: false,
+    conferido,
+  };
+}
+
 const LIST_BTN =
   "rounded-md border px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-40";
 const LIST_BTN_PRIMARY = `${LIST_BTN} border-stone-900 bg-stone-900 text-white hover:bg-stone-800`;
 const LIST_BTN_SOFT = `${LIST_BTN} border-stone-200 bg-white text-stone-700 hover:bg-stone-50`;
-const LIST_BTN_OK = `${LIST_BTN} border-emerald-700 bg-emerald-700 text-white hover:bg-emerald-800`;
 
 export function ExchangeManager() {
   const { isAdmin } = useAuth();
@@ -635,44 +682,52 @@ export function ExchangeManager() {
                     !ex.items.some((i) => i.direction === "OUTBOUND") &&
                     ex.status !== "CANCELLED" &&
                     ex.status !== "COMPLETED";
-                  const primaryAction = canCreateReverse
+                  const primaryAction = canDefineOutbound
                     ? {
-                        label: "Criar reverso",
+                        label: "Definir novo envio",
                         className: LIST_BTN_PRIMARY,
-                        onClick: () => setManualReturnId(ex.id),
+                        onClick: () => setOutboundId(ex.id),
                       }
-                    : canInspect
+                    : canRefund
                       ? {
-                          label: "Conferir peça",
-                          className: LIST_BTN_OK,
+                          label: "Devolver dinheiro",
+                          className: LIST_BTN_PRIMARY,
                           disabled: busy,
-                          onClick: () => setInspectId(ex.id),
+                          onClick: () => setRefundId(ex.id),
                         }
-                      : canDefineOutbound
+                      : canCharge
                         ? {
-                            label: "Definir novo envio",
+                            label: "Cobrar cliente",
                             className: LIST_BTN_PRIMARY,
-                            onClick: () => setOutboundId(ex.id),
+                            disabled: busy,
+                            onClick: () => {
+                              setChargeId(ex.id);
+                              setPaymentResult(null);
+                            },
                           }
-                        : canRefund
-                          ? {
-                              label: "Devolver dinheiro",
-                              className: LIST_BTN_PRIMARY,
-                              disabled: busy,
-                              onClick: () => setRefundId(ex.id),
-                            }
-                        : canCharge
-                            ? {
-                                label: "Cobrar cliente",
-                                className: LIST_BTN_PRIMARY,
-                                disabled: busy,
-                                onClick: () => {
-                                  setChargeId(ex.id);
-                                  setPaymentResult(null);
-                                },
-                              }
-                            : null;
+                        : null;
                   const menuItems: ExchangeMenuItem[] = [
+                    ...(canCreateReverse
+                      ? [
+                          {
+                            id: "reverse",
+                            label: "Criar reverso",
+                            icon: ICONS.reverse,
+                            onClick: () => setManualReturnId(ex.id),
+                          },
+                        ]
+                      : []),
+                    ...(canInspect
+                      ? [
+                          {
+                            id: "inspect",
+                            label: "Conferir peça",
+                            icon: ICONS.inspect,
+                            disabled: busy,
+                            onClick: () => setInspectId(ex.id),
+                          },
+                        ]
+                      : []),
                     ...(canEdit
                       ? [
                           {
@@ -704,13 +759,19 @@ export function ExchangeManager() {
                             label: "Cancelar",
                             icon: ICONS.cancel,
                             danger: true,
-                            separatorBefore: canEdit || canCharge || canRefund,
+                            separatorBefore:
+                              canEdit ||
+                              canCharge ||
+                              canRefund ||
+                              canCreateReverse ||
+                              canInspect,
                             onClick: () => setCancelId(ex.id),
                           },
                         ]
                       : []),
                   ];
                   const open = () => setSelectedId(ex.id);
+                  const status = tableStatus(ex);
 
                   return (
                     <tr
@@ -793,10 +854,16 @@ export function ExchangeManager() {
                         className="cursor-pointer whitespace-nowrap px-4 py-3"
                         onClick={open}
                       >
-                        <p className="whitespace-nowrap text-stone-800">
-                          {exchangeStatusLabel(ex)}
-                        </p>
-                        {ex.inspectedAt && ex.status !== "RECEIVED" ? (
+                        {status.highlight ? (
+                          <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+                            {status.label}
+                          </span>
+                        ) : (
+                          <p className="whitespace-nowrap text-stone-800">
+                            {status.label}
+                          </p>
+                        )}
+                        {status.conferido ? (
                           <p className="text-[11px] text-emerald-700">
                             Conferido
                           </p>
@@ -1224,6 +1291,8 @@ function ExchangeDetailDrawer({
                 <ul className="space-y-2">
                   {d.shippings.map((s) => {
                     const local = isLocalExchangeShippingMethod(s.method);
+                    const outbound = s.type === "OUTBOUND";
+                    const status = outbound ? outboundStatus(s.shippingStatus) : null;
                     return (
                       <li
                         key={s.id}
@@ -1271,9 +1340,23 @@ function ExchangeDetailDrawer({
                             ? ` · ${formatPrice(s.quotedPrice)}`
                             : ""}
                         </p>
+                        {status ? (
+                          <p className="mt-1.5">
+                            <span
+                              className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${OUTBOUND_STATUS_TONE[status]}`}
+                            >
+                              {OUTBOUND_STATUS_LABEL[status]}
+                            </span>
+                          </p>
+                        ) : null}
                         {!local && s.trackingCode && (
                           <a
-                            href={trackingUrl(s.trackingCode)}
+                            href={shippingTrackingUrl(
+                              s.trackingCode,
+                              outbound
+                                ? SHIPPING_PROVIDERS.MELHOR_ENVIO
+                                : SHIPPING_PROVIDERS.SUPERFRETE
+                            )}
                             target="_blank"
                             rel="noreferrer"
                             className="mt-1 block text-xs font-medium text-sky-800"
@@ -1542,6 +1625,16 @@ const ICONS = {
   refund: (
     <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
       <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0 1 15.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 0 1 3 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 0 0-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 0 1-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 0 0 3 15h-.75M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm3 0h.008v.008H18V10.5Zm-12 0h.008v.008H6V10.5Z" />
+    </svg>
+  ),
+  reverse: (
+    <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
+    </svg>
+  ),
+  inspect: (
+    <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
     </svg>
   ),
   cancel: (
