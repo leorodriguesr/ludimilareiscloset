@@ -322,10 +322,17 @@ function isCheckoutOrigin(order: Pick<AdminOrder, "orderSource">): boolean {
   return order.orderSource !== "ADMIN_SALE";
 }
 
-/** Link de pagamento copiável: venda avulsa ou checkout ainda aguardando. */
+/** Link de pagamento copiável: venda avulsa, checkout pendente ou acréscimo de checkout pago. */
+function isPaidCheckoutWithOpenBalance(order: AdminOrder): boolean {
+  return (
+    isCheckoutOrigin(order) && Boolean(order.paidAt) && orderHasUnpaidItems(order)
+  );
+}
+
 function canSharePaymentLink(order: AdminOrder): boolean {
   if (isInactiveSale(order)) return false;
   if (
+    !isPaidCheckoutWithOpenBalance(order) &&
     !isCheckoutPaymentLinkWithinDeadline({
       orderSource: order.orderSource,
       expiresAt: order.expiresAt,
@@ -335,7 +342,6 @@ function canSharePaymentLink(order: AdminOrder): boolean {
   }
   if (!orderHasUnpaidItems(order)) return false;
   if (order.paymentChannel === "MANUAL" && !order.paidAt) return false;
-  if (isCheckoutOrigin(order) && order.paidAt) return false;
   return (
     order.paymentMethod === "pix" ||
     order.paymentMethod === "card" ||

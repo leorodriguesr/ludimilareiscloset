@@ -1,7 +1,6 @@
 import {
   DiscountMode,
   FulfillmentType,
-  OrderSource,
 } from "@/app/generated/prisma/client";
 import { randomUUID } from "node:crypto";
 import {
@@ -100,12 +99,6 @@ export async function replaceAdminSaleItems(input: {
 
   if (!order) {
     throw new AdminSaleItemsError("Pedido não encontrado.", 404);
-  }
-  if (order.orderSource !== OrderSource.ADMIN_SALE) {
-    throw new AdminSaleItemsError(
-      "Só é possível editar itens de venda avulsa.",
-      400
-    );
   }
   if (
     order.status === ORDER_STATUS.CANCELLED ||

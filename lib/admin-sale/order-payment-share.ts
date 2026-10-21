@@ -50,7 +50,12 @@ function isShareablePaymentSource(source: string | null | undefined): boolean {
 
 function needsPaymentShare(order: OrderShareSource): boolean {
   if (!isShareablePaymentSource(order.orderSource)) return false;
+  const paidCheckoutAddon =
+    order.orderSource === OrderSource.CHECKOUT &&
+    Boolean(order.paidAt) &&
+    hasUnpaidItems(order);
   if (
+    !paidCheckoutAddon &&
     !isCheckoutPaymentLinkWithinDeadline({
       orderSource: order.orderSource,
       expiresAt: order.expiresAt,

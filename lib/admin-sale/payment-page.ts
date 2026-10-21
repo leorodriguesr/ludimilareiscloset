@@ -50,14 +50,6 @@ export async function ensureOrderPaymentToken(
 
   if (!order) return null;
   if (!acceptsPaymentPageToken(order.orderSource)) return null;
-  if (
-    !isCheckoutPaymentLinkWithinDeadline({
-      orderSource: order.orderSource,
-      expiresAt: order.expiresAt,
-    })
-  ) {
-    return null;
-  }
   if (order.paymentMethod !== PAYMENT_METHOD.PIX) return null;
   if (
     order.status === ORDER_STATUS.CANCELLED ||
@@ -74,6 +66,20 @@ export async function ensureOrderPaymentToken(
     (Boolean(order.paidAt) || order.status === ORDER_STATUS.PAID) &&
     !pendingCharge;
   if (fullyPaid) return null;
+
+  const paidCheckoutAddon =
+    order.orderSource === OrderSource.CHECKOUT &&
+    Boolean(order.paidAt) &&
+    Boolean(pendingCharge);
+  if (
+    !paidCheckoutAddon &&
+    !isCheckoutPaymentLinkWithinDeadline({
+      orderSource: order.orderSource,
+      expiresAt: order.expiresAt,
+    })
+  ) {
+    return null;
+  }
 
   const now = new Date();
   if (
@@ -138,15 +144,6 @@ export async function validatePaymentToken(token: string): Promise<
     return { ok: false, error: "Este link expirou. Solicite um novo ao vendedor." };
   }
 
-  if (
-    !isCheckoutPaymentLinkWithinDeadline({
-      orderSource: order.orderSource,
-      expiresAt: order.expiresAt,
-    })
-  ) {
-    return { ok: false, error: "Este pedido expirou." };
-  }
-
   if (order.status === ORDER_STATUS.CANCELLED) {
     return { ok: false, error: "Esta venda foi cancelada." };
   }
@@ -159,6 +156,20 @@ export async function validatePaymentToken(token: string): Promise<
     where: { orderId: order.id, status: "pending" },
     select: { id: true },
   });
+  const paidCheckoutAddon =
+    order.orderSource === OrderSource.CHECKOUT &&
+    (order.status === ORDER_STATUS.PAID || Boolean(order.paidAt)) &&
+    Boolean(pendingCharge);
+  if (
+    !paidCheckoutAddon &&
+    !isCheckoutPaymentLinkWithinDeadline({
+      orderSource: order.orderSource,
+      expiresAt: order.expiresAt,
+    })
+  ) {
+    return { ok: false, error: "Este pedido expirou." };
+  }
+
   const paid =
     (order.status === ORDER_STATUS.PAID || Boolean(order.paidAt)) &&
     !pendingCharge;

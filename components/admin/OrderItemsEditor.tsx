@@ -86,7 +86,6 @@ function canMutateItems(order: {
   superfreteShipmentId: string | null;
   shippingStatus: string;
 }): boolean {
-  if (order.orderSource !== "ADMIN_SALE") return false;
   if (order.status === "cancelled" || order.status === "expired") return false;
   if (order.labelUrl || order.superfreteShipmentId) return false;
   if (order.shippingStatus === "shipped" || order.shippingStatus === "delivered") {
