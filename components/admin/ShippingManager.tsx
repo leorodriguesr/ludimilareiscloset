@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -153,6 +154,38 @@ const SHIPPING_TOOLBAR_SIZE =
 const SHIPPING_TOOLBAR_CONTROL = `${SHIPPING_TOOLBAR_SIZE} rounded-lg border px-3 sm:px-3.5`;
 
 const ACTION_MENU_WIDTH = 236;
+const ACTION_MENU_GAP = 6;
+const ACTION_MENU_VIEWPORT_PAD = 8;
+
+type ActionMenuPosition = { top: number; left: number; maxHeight: number };
+
+function actionMenuLeft(rect: DOMRect): number {
+  return Math.max(
+    ACTION_MENU_VIEWPORT_PAD,
+    Math.min(
+      rect.right - ACTION_MENU_WIDTH,
+      window.innerWidth - ACTION_MENU_WIDTH - ACTION_MENU_VIEWPORT_PAD
+    )
+  );
+}
+
+/** Abre para cima quando não cabe abaixo do botão e limita à viewport. */
+function actionMenuPosition(rect: DOMRect, menuHeight: number): ActionMenuPosition {
+  const left = actionMenuLeft(rect);
+  const spaceBelow = Math.max(
+    0,
+    window.innerHeight - rect.bottom - ACTION_MENU_GAP - ACTION_MENU_VIEWPORT_PAD
+  );
+  const spaceAbove = Math.max(0, rect.top - ACTION_MENU_GAP - ACTION_MENU_VIEWPORT_PAD);
+  const openUpward = menuHeight > spaceBelow && spaceAbove > spaceBelow;
+  const available = openUpward ? spaceAbove : spaceBelow;
+  const contentHeight = menuHeight > 0 ? menuHeight : available;
+  const maxHeight = Math.min(contentHeight, available);
+  const top = openUpward
+    ? Math.max(ACTION_MENU_VIEWPORT_PAD, rect.top - ACTION_MENU_GAP - maxHeight)
+    : rect.bottom + ACTION_MENU_GAP;
+  return { top, left, maxHeight };
+}
 
 const TABLE_CELL_PRIMARY = "text-sm font-medium text-stone-900";
 const TABLE_CELL_SECONDARY = "text-xs font-normal text-stone-500";
@@ -1784,9 +1817,10 @@ function ShipmentRowActionsMenu({
   onViewPacking: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [menuPos, setMenuPos] = useState<ActionMenuPosition | null>(null);
   const [mounted, setMounted] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const caps = shipmentCapabilities(order, trackingCode);
 
   useEffect(() => setMounted(true), []);
@@ -1796,7 +1830,14 @@ function ShipmentRowActionsMenu({
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape") setOpen(false);
     }
-    function onScroll() {
+    function onScroll(event: Event) {
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        menuRef.current?.contains(target)
+      ) {
+        return;
+      }
       setOpen(false);
     }
     window.addEventListener("keydown", onKey);
@@ -1811,6 +1852,27 @@ function ShipmentRowActionsMenu({
     setOpen(false);
   }
 
+  const placeMenu = useCallback(() => {
+    const rect = btnRef.current?.getBoundingClientRect();
+    const menu = menuRef.current;
+    if (!rect || !menu) return;
+    const borderY = Math.max(0, menu.offsetHeight - menu.clientHeight);
+    const menuHeight = menu.scrollHeight + borderY;
+    if (menuHeight <= 0) return;
+    setMenuPos((current) => {
+      const next = actionMenuPosition(rect, menuHeight);
+      if (
+        current &&
+        current.top === next.top &&
+        current.left === next.left &&
+        current.maxHeight === next.maxHeight
+      ) {
+        return current;
+      }
+      return next;
+    });
+  }, []);
+
   function toggleMenu() {
     if (open) {
       closeMenu();
@@ -1818,11 +1880,9 @@ function ShipmentRowActionsMenu({
     }
     const rect = btnRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const left = Math.max(
-      8,
-      Math.min(rect.right - ACTION_MENU_WIDTH, window.innerWidth - ACTION_MENU_WIDTH - 8)
+    setMenuPos(
+      actionMenuPosition(rect, window.innerHeight - ACTION_MENU_VIEWPORT_PAD * 2)
     );
-    setMenuPos({ top: rect.bottom + 6, left });
     setOpen(true);
   }
 
@@ -2075,6 +2135,20 @@ function ShipmentRowActionsMenu({
     runAction,
   ]);
 
+  useLayoutEffect(() => {
+    if (!open) return;
+    placeMenu();
+  }, [open, actions.length, placeMenu]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onResize() {
+      placeMenu();
+    }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [open, actions.length, placeMenu]);
+
   return (
     <td className="px-3 py-3.5" onClick={(event) => event.stopPropagation()}>
       <div className="flex justify-center">
@@ -2108,10 +2182,16 @@ function ShipmentRowActionsMenu({
                 onClick={closeMenu}
               />
               <div
+                ref={menuRef}
                 role="menu"
                 aria-label="Ações do envio"
-                className="fixed z-[91] overflow-hidden rounded-xl border border-stone-200 bg-white py-1.5 shadow-lg"
-                style={{ top: menuPos.top, left: menuPos.left, width: ACTION_MENU_WIDTH }}
+                className="fixed z-[91] overflow-x-hidden overflow-y-auto rounded-xl border border-stone-200 bg-white py-1.5 shadow-lg"
+                style={{
+                  top: menuPos.top,
+                  left: menuPos.left,
+                  width: ACTION_MENU_WIDTH,
+                  maxHeight: menuPos.maxHeight,
+                }}
               >
                 {actions.map((action) => (
                   <div key={action.id}>
