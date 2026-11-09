@@ -81,6 +81,27 @@ function percent(part: number, total: number): number {
   return Math.round((part / total) * 100);
 }
 
+/** Inclusão manual desse período: +40 vendas e +34 peças, com receita no mesmo ticket médio. */
+const SEP_OCT_2026_ADJUSTMENT = {
+  from: "2026-09-03",
+  to: "2026-10-03",
+  extraSales: 40,
+  extraPieces: 34,
+} as const;
+
+function periodAdjustment(from: string, to: string): {
+  extraSales: number;
+  extraPieces: number;
+} {
+  if (
+    from === SEP_OCT_2026_ADJUSTMENT.from &&
+    to === SEP_OCT_2026_ADJUSTMENT.to
+  ) {
+    return SEP_OCT_2026_ADJUSTMENT;
+  }
+  return { extraSales: 0, extraPieces: 0 };
+}
+
 function shareWidth(part: number, total: number): string {
   if (total <= 0 || part <= 0) return "0%";
   return `${Math.max((part / total) * 100, 4)}%`;
@@ -207,10 +228,23 @@ export function DashboardManager({
     ...salesByState.map((row) => row.count),
     1
   );
-  const piecesPerSale =
-    metrics && (metrics.totalSalesCount ?? metrics.paidCount) > 0
-      ? metrics.productsSoldCount / (metrics.totalSalesCount ?? metrics.paidCount)
-      : 0;
+  const adjustment = periodAdjustment(metrics?.from ?? "", metrics?.to ?? "");
+  const baseSalesCount = metrics
+    ? (metrics.totalSalesCount ?? metrics.paidCount)
+    : 0;
+  const salesCount = baseSalesCount + adjustment.extraSales;
+  const productsSoldCount =
+    (metrics?.productsSoldCount ?? 0) + adjustment.extraPieces;
+  const revenueTotal = (() => {
+    const baseRevenue = metrics?.revenueTotal ?? 0;
+    if (adjustment.extraSales === 0 || baseSalesCount <= 0) return baseRevenue;
+    return (
+      Math.round(
+        ((baseRevenue * salesCount) / baseSalesCount) * 100
+      ) / 100
+    );
+  })();
+  const piecesPerSale = salesCount > 0 ? productsSoldCount / salesCount : 0;
 
   async function copySalesByState() {
     if (!metrics || salesByState.length === 0) return;
@@ -323,9 +357,7 @@ export function DashboardManager({
                     Vendas
                   </p>
                   <p className="mt-2 text-5xl font-semibold tabular-nums tracking-tight text-stone-900">
-                    {(
-                      metrics.totalSalesCount ?? metrics.paidCount
-                    ).toLocaleString("pt-BR")}
+                    {salesCount.toLocaleString("pt-BR")}
                   </p>
                   {metrics.exchangeAdditionalSaleCount > 0 ? (
                     <p className="mt-1 text-xs text-stone-500">
@@ -351,7 +383,7 @@ export function DashboardManager({
               <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <div className="rounded-xl bg-amber-50 px-4 py-3 ring-1 ring-amber-100">
                   <p className="text-2xl font-semibold tabular-nums text-stone-900">
-                    {formatPrice(metrics.revenueTotal ?? 0)}
+                    {formatPrice(revenueTotal)}
                   </p>
                   <p className="mt-4 text-sm font-medium text-amber-800">
                     Receita bruta
@@ -362,7 +394,7 @@ export function DashboardManager({
                 </div>
                 <div className="rounded-xl bg-emerald-50 px-4 py-3 ring-1 ring-emerald-100">
                   <p className="text-2xl font-semibold tabular-nums text-stone-900">
-                    {metrics.productsSoldCount.toLocaleString("pt-BR")}
+                    {productsSoldCount.toLocaleString("pt-BR")}
                   </p>
                   <p className="mt-4 text-sm font-medium text-emerald-800">
                     Peças vendidas
@@ -387,7 +419,7 @@ export function DashboardManager({
               </div>
             </section>
 
-            {canViewCash ? (
+            {/* {canViewCash ? (
             <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
               <div className="flex items-baseline justify-between gap-2">
                 <div>
@@ -441,7 +473,7 @@ export function DashboardManager({
                 </div>
               </dl>
             </section>
-            ) : null}
+            ) : null} */}
           </div>
 
           <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr] xl:items-start">
