@@ -15,10 +15,11 @@ export async function GET(request: NextRequest) {
     searchParams.get("from"),
     searchParams.get("to")
   );
+  const origin = searchParams.get("origin");
 
   try {
     const metrics = dashboardMetricsForRole(
-      await getDashboardMetrics(range),
+      await getDashboardMetrics(range, origin),
       gate.role
     );
     return NextResponse.json(metrics);

@@ -15,6 +15,7 @@ import {
 } from "@/app/generated/prisma/client";
 import { ORDER_STATUS } from "@/lib/orders/constants";
 import { expireOrdersBatch } from "@/lib/orders/expire-orders";
+import { collectSaleOrigins, orderOriginWhere } from "@/lib/admin/sale-origin";
 import { prisma } from "@/lib/prisma";
 
 const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
@@ -58,6 +59,9 @@ export type DashboardMetrics = {
   cashNet: number;
   /** Caixa líquido − custos de frete de troca pagos pela loja. */
   operatingNet: number;
+  /** Origem aplicada. Null mostra todas. */
+  origin: string | null;
+  origins: string[];
 };
 
 /** Gestor vê operação; números de caixa ficam só com o admin. */
@@ -119,6 +123,13 @@ export function parseDashboardDateRange(
   return normalizeRange(from, to);
 }
 
+function combineWhere<T extends Record<string, unknown>>(parts: T[]): T {
+  const filtered = parts.filter((part) => Object.keys(part).length > 0);
+  if (filtered.length === 0) return {} as T;
+  if (filtered.length === 1) return filtered[0]!;
+  return { AND: filtered } as unknown as T;
+}
+
 function dateInRange(
   value: Date | null | undefined,
   bounds: { gte: Date; lte: Date }
@@ -127,9 +138,13 @@ function dateInRange(
 }
 
 export async function getDashboardMetrics(
-  range: DashboardDateRange
+  range: DashboardDateRange,
+  origin: string | null = null
 ): Promise<DashboardMetrics> {
   const bounds = rangeToUtcBounds(range);
+  const selectedOrigin = origin?.trim() || null;
+  const originFilter = orderOriginWhere(selectedOrigin);
+  const orderScoped = Object.keys(originFilter).length > 0;
 
   try {
     await expireOrdersBatch();
@@ -139,14 +154,17 @@ export async function getDashboardMetrics(
 
   const inPeriod = { gte: bounds.gte, lte: bounds.lte };
   const orders = await prisma.order.findMany({
-    where: {
-      OR: [
-        { paidAt: inPeriod },
-        { createdAt: inPeriod },
-        { cancelledAt: inPeriod },
-        { expiredAt: inPeriod },
-      ],
-    },
+    where: combineWhere([
+      originFilter,
+      {
+        OR: [
+          { paidAt: inPeriod },
+          { createdAt: inPeriod },
+          { cancelledAt: inPeriod },
+          { expiredAt: inPeriod },
+        ],
+      },
+    ]),
     select: {
       status: true,
       paidAt: true,
@@ -221,26 +239,40 @@ export async function getDashboardMetrics(
     }
   }
 
-  const [extraSales, ledgerRows, storeShippings, storeReships] = await Promise.all([
+  const [extraSales, ledgerRows, storeShippings, storeReships, origins] =
+    await Promise.all([
     prisma.exchange.findMany({
-      where: {
-        additionalSaleRecognizedAt: inPeriod,
-        additionalSaleItemCount: { gt: 0 },
-        status: { not: ExchangeStatus.CANCELLED },
-      },
+      where: combineWhere([
+        {
+          additionalSaleRecognizedAt: inPeriod,
+          additionalSaleItemCount: { gt: 0 },
+          status: { not: ExchangeStatus.CANCELLED },
+        },
+        orderScoped ? { order: originFilter } : {},
+      ]),
       select: {
         additionalSaleItemCount: true,
         additionalSaleItemsTotal: true,
       },
     }),
     prisma.cashLedgerEntry.findMany({
-      where: {
-        createdAt: inPeriod,
-      },
+      where: combineWhere([
+        { createdAt: inPeriod },
+        orderScoped
+          ? {
+              OR: [
+                { order: originFilter },
+                { exchange: { order: originFilter } },
+              ],
+            }
+          : {},
+      ]),
       select: { kind: true, direction: true, amount: true },
     }),
     prisma.exchangeShipping.findMany({
-      where: {
+      where: combineWhere([
+        orderScoped ? { exchange: { order: originFilter } } : {},
+        {
         paidBy: ExchangeShippingPaidBy.STORE,
         cost: { gt: 0 },
         OR: [
@@ -253,11 +285,14 @@ export async function getDashboardMetrics(
             ],
           },
         ],
-      },
+        },
+      ]),
       select: { cost: true },
     }),
     prisma.orderReshipment.findMany({
-      where: {
+      where: combineWhere([
+        orderScoped ? { order: originFilter } : {},
+        {
         paidBy: ExchangeShippingPaidBy.STORE,
         cost: { gt: 0 },
         OR: [
@@ -270,9 +305,11 @@ export async function getDashboardMetrics(
             ],
           },
         ],
-      },
+        },
+      ]),
       select: { cost: true },
     }),
+    collectSaleOrigins(),
   ]);
   const exchangeAdditionalSaleCount = extraSales.length;
   const exchangeAdditionalItemsCount = extraSales.reduce(
@@ -351,5 +388,7 @@ export async function getDashboardMetrics(
     cashOutTotal,
     cashNet,
     operatingNet,
+    origin: selectedOrigin,
+    origins,
   };
 }

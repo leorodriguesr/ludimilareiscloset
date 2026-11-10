@@ -10,8 +10,8 @@ import {
   fetchOrderShippingFieldsByIds,
   mergeOrderShippingFields,
 } from "@/lib/orders/order-shipping-fields";
+import { collectSaleOrigins, orderOriginWhere } from "@/lib/admin/sale-origin";
 import { requireAdminApi } from "@/lib/require-admin-api";
-import { OrderSource } from "@/app/generated/prisma/client";
 import type { Prisma } from "@/app/generated/prisma/client";
 import {
   clampAdminListPage,
@@ -45,29 +45,6 @@ function statusWhere(statusFilter: string | null): Prisma.OrderWhereInput {
   return {};
 }
 
-function originWhere(origin: string | null): Prisma.OrderWhereInput {
-  if (!origin) return {};
-  if (origin === "checkout") {
-    return { orderSource: OrderSource.CHECKOUT };
-  }
-  if (origin === "Admin") {
-    return {
-      orderSource: OrderSource.ADMIN_SALE,
-      createdBy: { role: "ADMIN" },
-    };
-  }
-  if (origin === "Avulsa") {
-    return {
-      orderSource: OrderSource.ADMIN_SALE,
-      OR: [{ createdByUserId: null }, { createdBy: { is: { name: "" } } }],
-    };
-  }
-  return {
-    orderSource: OrderSource.ADMIN_SALE,
-    createdBy: { name: { startsWith: origin } },
-  };
-}
-
 function searchWhere(query: string): Prisma.OrderWhereInput {
   const q = query.trim();
   if (!q) return {};
@@ -88,26 +65,6 @@ function andWhere(parts: Prisma.OrderWhereInput[]): Prisma.OrderWhereInput {
   return { AND: filtered };
 }
 
-async function collectSaleOrigins(): Promise<string[]> {
-  const rows = await prisma.order.findMany({
-    where: { orderSource: OrderSource.ADMIN_SALE },
-    select: { createdBy: { select: { name: true, role: true } } },
-    take: 400,
-  });
-  const labels = new Set<string>(["checkout"]);
-  for (const row of rows) {
-    if (row.createdBy?.role === "ADMIN") labels.add("Admin");
-    const first = row.createdBy?.name?.trim().split(/\s+/)[0];
-    if (first) labels.add(first);
-    else labels.add("Avulsa");
-  }
-  const preferred = ["checkout", "Admin", "Avulsa"];
-  const rest = [...labels]
-    .filter((label) => !preferred.includes(label))
-    .sort((a, b) => a.localeCompare(b, "pt-BR"));
-  return [...preferred.filter((label) => labels.has(label)), ...rest];
-}
-
 export async function GET(request: NextRequest) {
   const gate = await requireAdminApi();
   if (gate instanceof NextResponse) return gate;
@@ -121,7 +78,7 @@ export async function GET(request: NextRequest) {
   const page = parseAdminListPage(searchParams.get("page"));
   const limit = parseAdminListLimit(searchParams.get("limit"));
 
-  const shared = [searchWhere(q), originWhere(origin)];
+  const shared = [searchWhere(q), orderOriginWhere(origin)];
   const where = andWhere([
     statusWhere(statusFilter),
     saleListDateWhere(from, to, statusFilter),

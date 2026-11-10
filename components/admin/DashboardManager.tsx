@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatPrice } from "@/lib/format";
 
 type DashboardStateRow = {
@@ -32,6 +32,8 @@ type DashboardMetrics = {
   cashOutTotal: number;
   cashNet: number;
   operatingNet: number;
+  origin: string | null;
+  origins: string[];
 };
 
 type DatePreset = "today" | "7d" | "month" | "custom";
@@ -164,31 +166,47 @@ export function DashboardManager({
   const [from, setFrom] = useState(defaults.from);
   const [to, setTo] = useState(defaults.to);
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+  const [origin, setOrigin] = useState<string | null>(null);
+  const appliedOrigin = useRef<string | null>(null);
+  const requestId = useRef(0);
+  const [origins, setOrigins] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copiedStates, setCopiedStates] = useState(false);
 
-  const fetchMetrics = useCallback(async (rangeFrom: string, rangeTo: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({ from: rangeFrom, to: rangeTo });
-      const res = await fetch(`/api/admin/dashboard?${params}`);
-      const data = (await res.json()) as DashboardMetrics & { error?: string };
-      if (!res.ok) {
-        setError(data.error ?? "Não foi possível carregar o dashboard.");
-        return;
+  const fetchMetrics = useCallback(
+    async (rangeFrom: string, rangeTo: string, rangeOrigin: string | null) => {
+      const id = ++requestId.current;
+      setLoading(true);
+      setError(null);
+      try {
+        const params = new URLSearchParams({ from: rangeFrom, to: rangeTo });
+        if (rangeOrigin) params.set("origin", rangeOrigin);
+        const res = await fetch(`/api/admin/dashboard?${params}`);
+        const data = (await res.json()) as DashboardMetrics & { error?: string };
+        if (requestId.current !== id) return;
+        if (!res.ok) {
+          setOrigin(appliedOrigin.current);
+          setError(data.error ?? "Não foi possível carregar o dashboard.");
+          return;
+        }
+        if (data.origins?.length) setOrigins(data.origins);
+        appliedOrigin.current = data.origin ?? null;
+        setOrigin(data.origin ?? null);
+        setMetrics(data);
+      } catch {
+        if (requestId.current !== id) return;
+        setOrigin(appliedOrigin.current);
+        setError("Erro de conexão ao carregar o dashboard.");
+      } finally {
+        if (requestId.current === id) setLoading(false);
       }
-      setMetrics(data);
-    } catch {
-      setError("Erro de conexão ao carregar o dashboard.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    },
+    []
+  );
 
   useEffect(() => {
-    void fetchMetrics(defaults.from, defaults.to);
+    void fetchMetrics(defaults.from, defaults.to, null);
   }, [defaults.from, defaults.to, fetchMetrics]);
 
   function applyRange(nextFrom: string, nextTo: string, nextPreset: DatePreset) {
@@ -199,7 +217,7 @@ export function DashboardManager({
     setFrom(ordered.from);
     setTo(ordered.to);
     setPreset(nextPreset);
-    void fetchMetrics(ordered.from, ordered.to);
+    void fetchMetrics(ordered.from, ordered.to, origin);
   }
 
   function applyPreset(next: DatePreset) {
@@ -228,7 +246,9 @@ export function DashboardManager({
     ...salesByState.map((row) => row.count),
     1
   );
-  const adjustment = periodAdjustment(metrics?.from ?? "", metrics?.to ?? "");
+  const adjustment = metrics?.origin
+    ? { extraSales: 0, extraPieces: 0 }
+    : periodAdjustment(metrics?.from ?? "", metrics?.to ?? "");
   const baseSalesCount = metrics
     ? (metrics.totalSalesCount ?? metrics.paidCount)
     : 0;
@@ -304,6 +324,54 @@ export function DashboardManager({
               applyRange(from || to, to || from, "custom");
             }}
           >
+            <label className="relative">
+              <span className="sr-only">Filtrar por origem</span>
+              <select
+                value={origin ?? ""}
+                disabled={loading && !metrics}
+                onChange={(event) => {
+                  const next = event.target.value || null;
+                  setOrigin(next);
+                  void fetchMetrics(metrics?.from ?? from, metrics?.to ?? to, next);
+                }}
+                className={`box-border h-8 appearance-none rounded-lg border py-0 pl-2.5 pr-8 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-stone-200 ${
+                  origin
+                    ? "border-stone-900 bg-stone-900 text-white"
+                    : "border-stone-200 bg-white text-stone-800"
+                }`}
+              >
+                <option value="" className="bg-white text-stone-900">
+                  Origem
+                </option>
+                {(origins.length > 0 ? origins : (metrics?.origins ?? [])).map(
+                  (label) => (
+                    <option
+                      key={label}
+                      value={label}
+                      className="bg-white text-stone-900"
+                    >
+                      {label}
+                    </option>
+                  )
+                )}
+              </select>
+              <svg
+                className={`pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 ${
+                  origin ? "text-white/80" : "text-stone-400"
+                }`}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                viewBox="0 0 24 24"
+                aria-hidden
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
+            </label>
             <input
               type="date"
               value={from}
@@ -354,7 +422,7 @@ export function DashboardManager({
               <div className="flex flex-wrap items-end justify-between gap-4">
                 <div>
                   <p className="flex items-center gap-2 text-sm font-semibold text-stone-900">
-                    Vendas
+                    {metrics.origin ? `Vendas (${metrics.origin})` : "Vendas"}
                   </p>
                   <p className="mt-2 text-5xl font-semibold tabular-nums tracking-tight text-stone-900">
                     {salesCount.toLocaleString("pt-BR")}
