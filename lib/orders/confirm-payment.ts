@@ -14,6 +14,7 @@ import {
 import { commitStockReservations } from "@/lib/orders/stock/reservation";
 import { prisma } from "@/lib/prisma";
 import { onOrderPaymentConfirmed } from "@/lib/fulfillment/fulfillment-service";
+import { reportAdminSalePurchaseToMeta } from "@/lib/meta/report-admin-sale-purchase";
 import {
   OrderSource,
   FulfillmentType,
@@ -219,6 +220,7 @@ async function validateAttemptForConfirmation(input: {
     attempt.order.status === ORDER_STATUS.PAID &&
     !isOrderChargeAttempt(attempt)
   ) {
+    await reportAdminSalePurchaseToMeta(attempt.orderId);
     return rejectConfirmation({
       gateway: input.gateway,
       source: input.source,
@@ -478,6 +480,7 @@ async function confirmAttemptInTransaction(input: {
   });
 
   void onOrderPaymentConfirmed(input.attempt.order);
+  await reportAdminSalePurchaseToMeta(input.attempt.orderId);
 
   return {
     updated: true,

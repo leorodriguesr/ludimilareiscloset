@@ -43,6 +43,11 @@ enum DiscountMode {
   PERCENT
 }
 
+enum WhatsAppAdClickStatus {
+  AVAILABLE
+  USED
+}
+
 /** Tipos de evento para histórico futuro (OrderEvent). */
 enum OrderEventType {
   CREATED
@@ -328,6 +333,7 @@ model Order {
   exchanges          Exchange[]
   reshipments        OrderReshipment[]
   cashLedgerEntries  CashLedgerEntry[]
+  whatsappAdClick    WhatsAppAdClick?
 
   @@index([userId, status])
   @@index([email, status])
@@ -910,6 +916,34 @@ model ShowcaseVideo {
   createdAt DateTime @default(now())
 
   @@index([sortOrder])
+}
+
+/**
+ * Clique de anúncio que abriu conversa no WhatsApp.
+ * Cada ctwa_clid vale para um único Purchase e não é reutilizado em compra posterior.
+ */
+model WhatsAppAdClick {
+  id           String                 @id @default(cuid())
+  /** 55 + DDD + número, com nono dígito quando é celular. */
+  phoneKey     String
+  /** Variante sem o nono dígito, para casar telefone cadastrado no formato antigo. */
+  phoneKeyAlt  String?
+  waId         String
+  ctwaClid     String                 @unique
+  sourceId     String?
+  sourceUrl    String?
+  clickedAt    DateTime
+  status       WhatsAppAdClickStatus  @default(AVAILABLE)
+  usedAt       DateTime?
+  orderId      String?                @unique
+  order        Order?                 @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  sentAt       DateTime?
+  lastError    String?
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  @@index([phoneKey, status, clickedAt])
+  @@index([phoneKeyAlt, status, clickedAt])
 }
 
 /** Tokens OAuth do Melhor Envio (conta da loja). */

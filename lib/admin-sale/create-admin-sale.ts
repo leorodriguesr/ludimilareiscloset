@@ -598,6 +598,10 @@ export async function createAdminSale(
       },
     });
     await onOrderPaymentConfirmed(order);
+    const { reportAdminSalePurchaseToMeta } = await import(
+      "@/lib/meta/report-admin-sale-purchase"
+    );
+    await reportAdminSalePurchaseToMeta(order.id);
   }
 
   let payment:

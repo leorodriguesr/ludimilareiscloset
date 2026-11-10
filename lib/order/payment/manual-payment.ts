@@ -11,6 +11,7 @@ import {
 import { appendCashLedgerEntry } from "@/lib/cash/ledger";
 import { parsePieceSelections } from "@/lib/exchanges/serialize";
 import { onOrderPaymentConfirmed } from "@/lib/fulfillment/fulfillment-service";
+import { reportAdminSalePurchaseToMeta } from "@/lib/meta/report-admin-sale-purchase";
 import {
   ORDER_CHARGE_STATUS,
   ORDER_ITEM_PAYMENT_STATUS,
@@ -99,6 +100,7 @@ export async function markOrderPaidManually(input: {
     });
     if (pendingItems.length === 0 && pendingCharges.length === 0) {
       await onOrderPaymentConfirmed(order);
+      await reportAdminSalePurchaseToMeta(order.id);
       return { ok: true };
     }
 
@@ -301,6 +303,7 @@ export async function markOrderPaidManually(input: {
     customerDataStatus:
       order.customerDataStatus ?? CustomerDataStatus.PENDING,
   });
+  await reportAdminSalePurchaseToMeta(order.id);
 
   return { ok: true };
 }
