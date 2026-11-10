@@ -92,6 +92,14 @@ export function Footer() {
                   Minha conta
                 </Link>
               </li>
+              <li>
+                <Link
+                  href="/privacidade"
+                  className="transition-colors hover:text-white"
+                >
+                  Privacidade
+                </Link>
+              </li>
             </ul>
           </div>
 
