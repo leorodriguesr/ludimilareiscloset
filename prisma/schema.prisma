@@ -932,6 +932,14 @@ model WhatsAppAdClick {
   ctwaClid     String                 @unique
   sourceId     String?
   sourceUrl    String?
+  /** Texto do anúncio que a Meta manda junto com o clique. */
+  headline     String?
+  bodyText     String?
+  /** Nomes resolvidos na API de anúncios, quando o token tem permissão. */
+  adName       String?
+  adsetName    String?
+  campaignId   String?
+  campaignName String?
   clickedAt    DateTime
   status       WhatsAppAdClickStatus  @default(AVAILABLE)
   usedAt       DateTime?

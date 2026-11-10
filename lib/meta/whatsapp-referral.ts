@@ -5,6 +5,8 @@ export type WhatsAppAdReferral = {
   ctwaClid: string;
   sourceId: string | null;
   sourceUrl: string | null;
+  headline: string | null;
+  bodyText: string | null;
   clickedAt: Date;
 };
 
@@ -79,6 +81,8 @@ function referralFromMessage(message: unknown): WhatsAppAdReferral | null {
     ctwaClid,
     sourceId: asString(referral?.source_id),
     sourceUrl: asString(referral?.source_url),
+    headline: asString(referral?.headline),
+    bodyText: asString(referral?.body),
     clickedAt,
   };
 }

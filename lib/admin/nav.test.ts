@@ -17,6 +17,7 @@ describe("visibleAdminNavGroups", () => {
     const operacao = visibleAdminNavGroups("GESTOR")[0];
     assert.ok(operacao.items.every((item) => item.id !== "exchanges"));
     assert.ok(operacao.items.every((item) => item.id !== "dashboard"));
+    assert.ok(operacao.items.every((item) => item.id !== "ads"));
     assert.ok(operacao.items.some((item) => item.id === "products"));
   });
 });
@@ -31,5 +32,7 @@ describe("canAccessAdminSection", () => {
     assert.equal(canAccessAdminSection("ADMIN", "exchanges"), true);
     assert.equal(canAccessAdminSection("GESTOR", "dashboard"), false);
     assert.equal(canAccessAdminSection("ADMIN", "dashboard"), true);
+    assert.equal(canAccessAdminSection("GESTOR", "ads"), false);
+    assert.equal(canAccessAdminSection("ADMIN", "ads"), true);
   });
 });

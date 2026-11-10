@@ -20,6 +20,8 @@ export async function recordWhatsAppAdClick(
         ctwaClid: referral.ctwaClid,
         sourceId: referral.sourceId,
         sourceUrl: referral.sourceUrl,
+        headline: referral.headline,
+        bodyText: referral.bodyText,
         clickedAt: referral.clickedAt,
       },
     });

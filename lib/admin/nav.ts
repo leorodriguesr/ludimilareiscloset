@@ -2,6 +2,7 @@ import type { AppRole } from "@/lib/auth/permissions";
 
 export type AdminSection =
   | "dashboard"
+  | "ads"
   | "products"
   | "sections"
   | "categories"
@@ -22,6 +23,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     title: "Operação",
     items: [
       { id: "dashboard", label: "Dashboard" },
+      { id: "ads", label: "Anúncios" },
       { id: "products", label: "Produtos" },
       { id: "sales", label: "Vendas" },
       { id: "shipping", label: "Envios" },
@@ -54,7 +56,10 @@ export function visibleAdminNavGroups(
     (group) => ({
       ...group,
       items: group.items.filter(
-        (item) => item.id !== "exchanges" && item.id !== "dashboard"
+        (item) =>
+          item.id !== "exchanges" &&
+          item.id !== "dashboard" &&
+          item.id !== "ads"
       ),
     })
   );

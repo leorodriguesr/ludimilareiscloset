@@ -107,6 +107,8 @@ describe("parseWhatsAppAdReferrals", () => {
                       source_type: "ad",
                       source_id: "ad-1",
                       source_url: "https://fb.me/abc",
+                      headline: "Vestido novo",
+                      body: "Chegou na loja",
                       ctwa_clid: "clid-abc",
                     },
                   },
@@ -122,6 +124,8 @@ describe("parseWhatsAppAdReferrals", () => {
     assert.equal(referrals[0]?.ctwaClid, "clid-abc");
     assert.equal(referrals[0]?.waId, "5562982181924");
     assert.equal(referrals[0]?.sourceId, "ad-1");
+    assert.equal(referrals[0]?.headline, "Vestido novo");
+    assert.equal(referrals[0]?.bodyText, "Chegou na loja");
   });
 });
 
