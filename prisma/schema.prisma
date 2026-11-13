@@ -278,6 +278,8 @@ model Order {
   /** Dados de contato e entrega coletados no checkout da loja. */
   recipientName       String?
   phone               String?
+  /** Telefone que a vendedora digitou. O Purchase da Meta usa este número, mesmo se a cliente alterar o contato. */
+  conversationPhone   String?
   cpf                 String?
   addressStreet       String?
   addressNumber       String?

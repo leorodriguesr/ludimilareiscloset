@@ -1,3 +1,13 @@
+/** Número da conversa, quando a vendedora informou; senão o telefone do pedido. */
+export function whatsAppPurchasePhone(order: {
+  conversationPhone?: string | null;
+  phone?: string | null;
+}): string {
+  const conversation = order.conversationPhone?.trim() ?? "";
+  if (conversation) return conversation;
+  return order.phone?.trim() ?? "";
+}
+
 /** Janela em que a Meta ainda atribui o Purchase ao clique do anúncio. */
 export const WHATSAPP_CLICK_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 

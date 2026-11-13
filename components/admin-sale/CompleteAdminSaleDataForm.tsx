@@ -235,7 +235,7 @@ export function CompleteAdminSaleDataForm({ token }: Props) {
             </p>
           </div>
           <div>
-            <FieldLabel>Telefone</FieldLabel>
+            <FieldLabel>Telefone de contato</FieldLabel>
             <TextInput
               inputMode="numeric"
               autoComplete="tel"
@@ -285,7 +285,7 @@ export function CompleteAdminSaleDataForm({ token }: Props) {
                 />
               </div>
               <div>
-                <FieldLabel>Telefone</FieldLabel>
+                <FieldLabel>Telefone de contato</FieldLabel>
                 <TextInput
                   inputMode="numeric"
                   autoComplete="tel"

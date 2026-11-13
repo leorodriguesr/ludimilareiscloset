@@ -431,6 +431,7 @@ export async function createAdminSale(
           .trim()
           .slice(0, CUSTOMER_NAME_MAX_LENGTH),
         phone: input.contact!.phone.trim(),
+        conversationPhone: input.contact!.phone.trim(),
         cpf: fillNow && !isArranged ? input.contact!.cpf?.trim() || null : null,
         addressStreet:
           fillNow && !isArranged ? input.address?.street.trim() || null : null,

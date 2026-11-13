@@ -1,7 +1,10 @@
 import { OrderSource } from "@/app/generated/prisma/client";
 import { sendWhatsAppPurchase } from "@/lib/meta/capi";
 import { brPhoneKeys } from "@/lib/meta/phone-keys";
-import { decideWhatsAppPurchase } from "@/lib/meta/purchase-match";
+import {
+  decideWhatsAppPurchase,
+  whatsAppPurchasePhone,
+} from "@/lib/meta/purchase-match";
 import { ORDER_STATUS } from "@/lib/orders/constants";
 import { prisma } from "@/lib/prisma";
 
@@ -18,6 +21,7 @@ export async function reportAdminSalePurchaseToMeta(orderId: string): Promise<vo
         orderSource: true,
         status: true,
         phone: true,
+        conversationPhone: true,
         total: true,
         paidAt: true,
       },
@@ -26,7 +30,7 @@ export async function reportAdminSalePurchaseToMeta(orderId: string): Promise<vo
     if (order.status !== ORDER_STATUS.PAID || !order.paidAt) return;
     if (!(order.total > 0)) return;
 
-    const keys = brPhoneKeys(order.phone ?? "");
+    const keys = brPhoneKeys(whatsAppPurchasePhone(order));
     if (keys.length === 0) return;
 
     const clicks = await prisma.whatsAppAdClick.findMany({

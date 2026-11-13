@@ -3,7 +3,11 @@ import { createHmac } from "node:crypto";
 import { describe, it } from "node:test";
 import { whatsappPurchaseBody, type WhatsAppPurchaseEvent } from "./capi";
 import { brPhoneKeys, canonicalPhoneKeys } from "./phone-keys";
-import { decideWhatsAppPurchase, type WhatsAppClickCandidate } from "./purchase-match";
+import {
+  decideWhatsAppPurchase,
+  whatsAppPurchasePhone,
+  type WhatsAppClickCandidate,
+} from "./purchase-match";
 import {
   parseWhatsAppAdReferrals,
   whatsappSignatureValid,
@@ -136,6 +140,25 @@ describe("whatsappSignatureValid", () => {
     const signature = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
     assert.equal(whatsappSignatureValid(body, signature, secret), true);
     assert.equal(whatsappSignatureValid(`${body} `, signature, secret), false);
+  });
+});
+
+describe("whatsAppPurchasePhone", () => {
+  it("usa o telefone da conversa mesmo quando a cliente troca o contato", () => {
+    assert.equal(
+      whatsAppPurchasePhone({
+        conversationPhone: "(62) 98218-1924",
+        phone: "(64) 99969-6414",
+      }),
+      "(62) 98218-1924"
+    );
+  });
+
+  it("usa o telefone do pedido nas vendas antigas", () => {
+    assert.equal(
+      whatsAppPurchasePhone({ conversationPhone: "  ", phone: "62982181924" }),
+      "62982181924"
+    );
   });
 });
 
