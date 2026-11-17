@@ -299,21 +299,32 @@ function tableStatus(ex: {
   items?: { direction: string }[];
   shippings: ExchangeShippingRow[];
   inspectedAt: string | null;
-}): { label: string; highlight: boolean; conferido: boolean } {
+}): { label: string; tone: "done" | "waiting" | "ready" | "plain" } {
   const conferido = Boolean(ex.inspectedAt && ex.status !== "RECEIVED");
   const kind = ex.kind ?? "EXCHANGE";
   if (kind === "RETURN" && ex.status === "COMPLETED") {
-    return { label: "Concluído", highlight: true, conferido: false };
+    return { label: "Concluído", tone: "done" };
   }
   if (kind === "EXCHANGE" && ex.status === "OUTBOUND" && conferido) {
-    return { label: "Concluído", highlight: true, conferido: false };
+    return { label: "Concluído", tone: "done" };
+  }
+  if (ex.status === "RETURN_IN_TRANSIT") {
+    return { label: exchangeStatusLabel(ex), tone: "waiting" };
+  }
+  if (ex.status === "READY_OUTBOUND") {
+    return { label: exchangeStatusLabel(ex), tone: "ready" };
   }
   return {
     label: exchangeStatusLabel(ex),
-    highlight: false,
-    conferido,
+    tone: "plain",
   };
 }
+
+const STATUS_TONE_CLASS = {
+  done: "bg-emerald-100 text-emerald-800",
+  waiting: "bg-orange-100 text-orange-800",
+  ready: "bg-blue-100 text-blue-800",
+} as const;
 
 const LIST_BTN =
   "rounded-md border px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-40";
@@ -859,20 +870,17 @@ export function ExchangeManager() {
                         className="cursor-pointer whitespace-nowrap px-4 py-3"
                         onClick={open}
                       >
-                        {status.highlight ? (
-                          <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
-                            {status.label}
-                          </span>
-                        ) : (
+                        {status.tone === "plain" ? (
                           <p className="whitespace-nowrap text-stone-800">
                             {status.label}
                           </p>
+                        ) : (
+                          <span
+                            className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_TONE_CLASS[status.tone]}`}
+                          >
+                            {status.label}
+                          </span>
                         )}
-                        {status.conferido ? (
-                          <p className="text-[11px] text-emerald-700">
-                            Conferido
-                          </p>
-                        ) : null}
                       </td>
                       <td
                         className="px-3 py-3"
