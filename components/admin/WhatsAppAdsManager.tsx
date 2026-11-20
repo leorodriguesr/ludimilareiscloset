@@ -62,6 +62,7 @@ export function WhatsAppAdsManager() {
   const [to, setTo] = useState(initial.to);
   const [report, setReport] = useState<WhatsAppAdReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async (nextFrom: string, nextTo: string) => {
@@ -86,6 +87,32 @@ export function WhatsAppAdsManager() {
   useEffect(() => {
     void load(initial.from, initial.to);
   }, [load, initial.from, initial.to]);
+
+  async function downloadCustomerList() {
+    setDownloading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/admin/whatsapp-ads/customers");
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        setError(data?.error ?? "Não foi possível gerar a lista de clientes.");
+        return;
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "clientes-meta.csv";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("Não foi possível gerar a lista de clientes.");
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   function applyPreset(next: DatePreset) {
     const range = rangeForPreset(next);
@@ -113,6 +140,18 @@ export function WhatsAppAdsManager() {
           <p className="mt-1 max-w-xl text-sm text-stone-500">
             Cada linha é alguém que clicou no anúncio e mandou mensagem. A venda
             entra quando o pedido desse telefone fica pago, dentro de 7 dias.
+          </p>
+          <button
+            type="button"
+            onClick={() => void downloadCustomerList()}
+            disabled={downloading}
+            className="mt-3 h-8 rounded-lg bg-stone-900 px-3 text-xs font-semibold text-white disabled:opacity-50"
+          >
+            {downloading ? "Gerando lista…" : "Baixar clientes para a Meta"}
+          </button>
+          <p className="mt-1.5 max-w-xl text-xs text-stone-400">
+            Arquivo CSV de quem já pagou um pedido, no formato da lista de
+            clientes da Meta: telefone, nome, cidade, estado e total gasto.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
