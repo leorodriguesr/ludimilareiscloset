@@ -8,6 +8,12 @@ type DashboardStateRow = {
   count: number;
 };
 
+type DashboardCityRow = {
+  city: string;
+  state: string;
+  count: number;
+};
+
 type DashboardMetrics = {
   from: string;
   to: string;
@@ -21,6 +27,7 @@ type DashboardMetrics = {
   inboundSalesCount: number;
   motoboyDeliveriesCount: number;
   salesByState: DashboardStateRow[];
+  salesByCity: DashboardCityRow[];
   exchangeAdditionalSaleCount: number;
   exchangeAdditionalItemsCount: number;
   exchangeAdditionalRevenue: number;
@@ -173,6 +180,7 @@ export function DashboardManager({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copiedStates, setCopiedStates] = useState(false);
+  const [copiedCities, setCopiedCities] = useState(false);
 
   const fetchMetrics = useCallback(
     async (rangeFrom: string, rangeTo: string, rangeOrigin: string | null) => {
@@ -241,11 +249,13 @@ export function DashboardManager({
     const lower = trimmed.toLocaleLowerCase("pt-BR");
     return lower !== "não informado" && lower !== "nao informado";
   });
+  const salesByCity = metrics?.salesByCity ?? [];
   const paidCount = metrics?.paidCount ?? 0;
   const maxStateCount = Math.max(
     ...salesByState.map((row) => row.count),
     1
   );
+  const maxCityCount = Math.max(...salesByCity.map((row) => row.count), 1);
   const adjustment = metrics?.origin
     ? { extraSales: 0, extraPieces: 0 }
     : periodAdjustment(metrics?.from ?? "", metrics?.to ?? "");
@@ -265,6 +275,28 @@ export function DashboardManager({
     );
   })();
   const piecesPerSale = salesCount > 0 ? productsSoldCount / salesCount : 0;
+
+  async function copySalesByCity() {
+    if (!metrics || salesByCity.length === 0) return;
+    const list = salesByCity
+      .map((row) => {
+        const { uf, name } = row.state
+          ? describeState(row.state)
+          : { uf: "—", name: "Estado não informado" };
+        const share = percent(row.count, paidCount);
+        const place = row.state ? `${row.city} (${uf} · ${name})` : row.city;
+        return `${place} ${row.count.toLocaleString("pt-BR")} (${share}%)`;
+      })
+      .join("\n");
+    const text = `Vendas por cidade\n${formatRangeLabel(metrics.from, metrics.to)}\n\n${list}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedCities(true);
+      window.setTimeout(() => setCopiedCities(false), 2000);
+    } catch {
+      /* ignore */
+    }
+  }
 
   async function copySalesByState() {
     if (!metrics || salesByState.length === 0) return;
@@ -770,6 +802,117 @@ export function DashboardManager({
               </div>
             </section>
           </div>
+
+          <section className="flex min-h-0 flex-col rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-semibold text-stone-900">
+                  Vendas por cidade
+                </h3>
+                <p className="mt-0.5 text-xs text-stone-500">
+                  Cidade e estado do endereço de entrega
+                </p>
+              </div>
+              {salesByCity.length > 0 ? (
+                <div className="flex items-center gap-2">
+                  <p className="text-xs text-stone-500">
+                    {salesByCity.length}{" "}
+                    {salesByCity.length === 1 ? "cidade" : "cidades"}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void copySalesByCity()}
+                    title={copiedCities ? "Lista copiada" : "Copiar lista"}
+                    aria-label={
+                      copiedCities ? "Lista copiada" : "Copiar lista de cidades"
+                    }
+                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700"
+                  >
+                    {copiedCities ? (
+                      <svg
+                        className="h-3.5 w-3.5 text-emerald-600"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        viewBox="0 0 24 24"
+                        aria-hidden
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="m4.5 12.75 6 6 9-13.5"
+                        />
+                      </svg>
+                    ) : (
+                      <svg
+                        className="h-3.5 w-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={1.8}
+                        viewBox="0 0 24 24"
+                        aria-hidden
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"
+                        />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
+            {salesByCity.length === 0 ? (
+              <p className="py-10 text-center text-sm text-stone-400">
+                Nenhuma venda com cidade no período.
+              </p>
+            ) : (
+              <ol className="mt-4 min-h-0 flex-1 divide-y divide-stone-100 overflow-y-auto lg:max-h-[22rem]">
+                {salesByCity.map((row, index) => {
+                  const stateLabel = row.state
+                    ? describeState(row.state)
+                    : { uf: "—", name: "Não informado" };
+                  const share = percent(row.count, paidCount);
+                  const bar = Math.max((row.count / maxCityCount) * 100, 4);
+                  return (
+                    <li
+                      key={`${row.city}-${row.state}`}
+                      className="flex items-center gap-3 py-2.5"
+                    >
+                      <span className="w-5 shrink-0 text-xs tabular-nums text-stone-400">
+                        {index + 1}
+                      </span>
+                      <div className="w-36 min-w-0 shrink-0 sm:w-48">
+                        <p className="truncate text-sm font-medium text-stone-900">
+                          {row.city}
+                        </p>
+                        <p className="truncate text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                          {stateLabel.uf}
+                          <span className="ml-1 font-medium normal-case tracking-normal text-stone-400">
+                            {stateLabel.name}
+                          </span>
+                        </p>
+                      </div>
+                      <div className="hidden h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-sky-50 sm:block">
+                        <div
+                          className="h-full rounded-full bg-sky-500"
+                          style={{ width: `${bar}%` }}
+                        />
+                      </div>
+                      <span className="w-10 shrink-0 text-right text-sm font-semibold tabular-nums text-stone-900">
+                        {row.count.toLocaleString("pt-BR")}
+                      </span>
+                      <span className="w-10 shrink-0 text-right text-xs tabular-nums text-sky-700">
+                        {share}%
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+          </section>
         </div>
       ) : null}
     </div>

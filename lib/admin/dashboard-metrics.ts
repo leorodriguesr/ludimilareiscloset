@@ -27,6 +27,12 @@ export type DashboardStateRow = {
   count: number;
 };
 
+export type DashboardCityRow = {
+  city: string;
+  state: string;
+  count: number;
+};
+
 export type DashboardMetrics = {
   from: string;
   to: string;
@@ -40,6 +46,7 @@ export type DashboardMetrics = {
   inboundSalesCount: number;
   motoboyDeliveriesCount: number;
   salesByState: DashboardStateRow[];
+  salesByCity: DashboardCityRow[];
   exchangeAdditionalSaleCount: number;
   exchangeAdditionalItemsCount: number;
   exchangeAdditionalRevenue: number;
@@ -116,6 +123,46 @@ function normalizeState(value: string | null): string | null {
   return trimmed;
 }
 
+function foldPlace(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLocaleLowerCase("pt-BR")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeCity(value: string | null): string | null {
+  const trimmed = value?.trim().replace(/\s+/g, " ") ?? "";
+  if (!trimmed) return null;
+  const folded = foldPlace(trimmed);
+  if (
+    folded === "nao informado" ||
+    folded === "nao informada" ||
+    folded === "não informado" ||
+    folded === "não informada"
+  ) {
+    return null;
+  }
+  return trimmed;
+}
+
+function formatCityName(value: string): string {
+  const letters = value.replace(/[^\p{L}]/gu, "");
+  const shouting =
+    letters.length > 0 &&
+    letters === letters.toLocaleUpperCase("pt-BR") &&
+    letters !== letters.toLocaleLowerCase("pt-BR");
+  if (!shouting) return value;
+  return value
+    .toLocaleLowerCase("pt-BR")
+    .replace(
+      /(^|[\s'-])(\p{L})/gu,
+      (_, sep: string, char: string) =>
+        sep + char.toLocaleUpperCase("pt-BR")
+    );
+}
+
 export function parseDashboardDateRange(
   from: string | null,
   to: string | null
@@ -174,6 +221,7 @@ export async function getDashboardMetrics(
       fulfillmentType: true,
       shippingServiceName: true,
       deliveryNotes: true,
+      addressCity: true,
       addressState: true,
       total: true,
       items: { select: { quantity: true } },
@@ -189,6 +237,10 @@ export async function getDashboardMetrics(
   let inboundSalesCount = 0;
   let motoboyDeliveriesCount = 0;
   const stateCounts = new Map<string, number>();
+  const cityCounts = new Map<
+    string,
+    { city: string; state: string; count: number }
+  >();
 
   for (const order of orders) {
     const isCancelled =
@@ -236,6 +288,20 @@ export async function getDashboardMetrics(
     const state = normalizeState(order.addressState);
     if (state) {
       stateCounts.set(state, (stateCounts.get(state) ?? 0) + 1);
+    }
+
+    const city = normalizeCity(order.addressCity);
+    if (city) {
+      const stateKey = state ?? "";
+      const key = `${foldPlace(city)}|${stateKey}`;
+      const label = formatCityName(city);
+      const current = cityCounts.get(key);
+      if (!current) {
+        cityCounts.set(key, { city: label, state: stateKey, count: 1 });
+      } else {
+        current.count += 1;
+        if (label.length > current.city.length) current.city = label;
+      }
     }
   }
 
@@ -364,6 +430,13 @@ export async function getDashboardMetrics(
       (a, b) => b.count - a.count || a.state.localeCompare(b.state, "pt-BR")
     );
 
+  const salesByCity = [...cityCounts.values()].sort(
+    (a, b) =>
+      b.count - a.count ||
+      a.city.localeCompare(b.city, "pt-BR") ||
+      a.state.localeCompare(b.state, "pt-BR")
+  );
+
   return {
     from: range.from,
     to: range.to,
@@ -377,6 +450,7 @@ export async function getDashboardMetrics(
     inboundSalesCount,
     motoboyDeliveriesCount,
     salesByState,
+    salesByCity,
     exchangeAdditionalSaleCount,
     exchangeAdditionalItemsCount,
     exchangeAdditionalRevenue,
