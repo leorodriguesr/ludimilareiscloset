@@ -2594,9 +2594,8 @@ export function ShippingManager() {
       setMeStatus(null);
       return;
     }
-    void fetchWallet();
     void fetchMelhorEnvioStatus();
-  }, [fetchWallet, fetchMelhorEnvioStatus, isAdmin]);
+  }, [fetchMelhorEnvioStatus, isAdmin]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -2658,9 +2657,27 @@ export function ShippingManager() {
     allRef.current.checked = n === selectable.length && selectable.length > 0;
   }, [selectedIds, visibleOrders]);
 
+  const superfreteWalletActive =
+    isAdmin &&
+    meStatus != null &&
+    !(meStatus.enabled && meStatus.activeProvider === "MELHOR_ENVIO");
+
+  useEffect(() => {
+    if (!isAdmin || !meStatus) return;
+    if (meStatus.enabled && meStatus.activeProvider === "MELHOR_ENVIO") {
+      setWallet(null);
+      setWalletError(null);
+      setWalletLoading(false);
+      return;
+    }
+    void fetchWallet();
+  }, [fetchWallet, isAdmin, meStatus]);
+
   const refreshAll = (opts?: { silent?: boolean }) => {
     void fetchShipments(opts);
-    if (isAdmin) void fetchWallet();
+    if (!isAdmin) return;
+    void fetchMelhorEnvioStatus();
+    if (superfreteWalletActive) void fetchWallet();
   };
 
   function toggleFilter(key: FilterKey) {
@@ -2839,6 +2856,7 @@ export function ShippingManager() {
         </div>
       </div>
 
+      {superfreteWalletActive ? (
       <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm sm:p-5">
         {wallet?.environment === "sandbox" ? (
           <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -2922,6 +2940,7 @@ export function ShippingManager() {
           </div>
         </div>
       </div>
+      ) : null}
       </div>
       ) : null}
 

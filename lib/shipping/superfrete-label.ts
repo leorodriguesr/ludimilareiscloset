@@ -3,7 +3,12 @@
  * Fluxo: POST /cart → POST /checkout → POST /tag/print
  */
 
-import { normalizeSuperfreteInsurance } from "@/lib/shipping/insurance";
+import {
+  declaredProductsTotal,
+  declaredUnitValue,
+  insuranceMatchingDeclaration,
+  normalizeSuperfreteInsurance,
+} from "@/lib/shipping/insurance";
 import { superfreteRequest } from "@/lib/shipping/superfrete-client";
 import {
   formatSuperfretePersonName,
@@ -144,8 +149,17 @@ export async function createSuperfreteLabelForOrder(input: LabelInput): Promise<
     : store;
   const toParty = toSuperfreteParty(input.to, "Destinatário");
 
+  const products = input.products.map((p) => ({
+    name: p.name.slice(0, 100),
+    quantity: p.quantity,
+    unitary_value: declaredUnitValue(p.unitary_value),
+  }));
   const insurance = normalizeSuperfreteInsurance(
-    input.insuranceValue ?? 0,
+    insuranceMatchingDeclaration(
+      input.serviceId,
+      declaredProductsTotal(products),
+      input.insuranceValue ?? 0
+    ),
     input.serviceId
   );
 
@@ -154,11 +168,7 @@ export async function createSuperfreteLabelForOrder(input: LabelInput): Promise<
     agency: 0,
     from: fromParty,
     to: toParty,
-    products: input.products.map((p) => ({
-      name: p.name.slice(0, 100),
-      quantity: p.quantity,
-      unitary_value: p.unitary_value,
-    })),
+    products,
     volumes: {
       height: input.volume.height,
       width: input.volume.width,

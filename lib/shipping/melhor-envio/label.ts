@@ -17,6 +17,11 @@ import {
   isCancelledProviderShipmentStatus,
   providerShipmentStatusFromPayload,
 } from "@/lib/shipping/service-id";
+import {
+  declaredProductsTotal,
+  declaredUnitValue,
+  insuranceMatchingDeclaration,
+} from "@/lib/shipping/insurance";
 import { ShippingQuoteError } from "@/lib/shipping/types";
 import type { MelhorEnvioQuotePackage } from "@/lib/shipping/melhor-envio/quote";
 
@@ -79,11 +84,6 @@ export async function createMelhorEnvioLabelForOrder(
     : { ...store, state_register: "ISENTO" };
   const toParty = toMeParty(input.to, "Destinatário");
 
-  const insurance =
-    input.insuranceValue != null && Number.isFinite(input.insuranceValue)
-      ? Math.max(0, Math.round(input.insuranceValue * 100) / 100)
-      : 0;
-
   const allVolumes = volumesFromInput(input, input.packages);
   const split =
     SINGLE_VOLUME_SERVICES.has(input.serviceId) && allVolumes.length > 1;
@@ -96,8 +96,13 @@ export async function createMelhorEnvioLabelForOrder(
     id: `item-${idx + 1}`,
     name: p.name.slice(0, 100),
     quantity: p.quantity,
-    unitary_value: p.unitary_value,
+    unitary_value: declaredUnitValue(p.unitary_value),
   }));
+  const insurance = insuranceMatchingDeclaration(
+    input.serviceId,
+    declaredProductsTotal(products),
+    input.insuranceValue ?? 0
+  );
 
   for (const volumes of volumeBatches) {
     const cartBody = {
@@ -218,17 +223,17 @@ export async function createMelhorEnvioReverseLabel(
     stateRegister: "ISENTO",
   });
 
-  const insurance =
-    input.insuranceValue != null && Number.isFinite(input.insuranceValue)
-      ? Math.max(0, Math.round(input.insuranceValue * 100) / 100)
-      : 0;
-
   const volume = volumesFromInput(input, null)[0]!;
   const products = input.products.map((p) => ({
     name: p.name.slice(0, 100),
     quantity: p.quantity,
-    unitary_value: p.unitary_value,
+    unitary_value: declaredUnitValue(p.unitary_value),
   }));
+  const insurance = insuranceMatchingDeclaration(
+    input.serviceId,
+    declaredProductsTotal(products),
+    input.insuranceValue ?? 0
+  );
 
   const cartBody: Record<string, unknown> = {
     service: input.serviceId,
